@@ -1,0 +1,6 @@
+{
+  "name": "StudyMate AI",
+  "description": "AI-powered student learning, productivity, revision, exam preparation, and focus-management application.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

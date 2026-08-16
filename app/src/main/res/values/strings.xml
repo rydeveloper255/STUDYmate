@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">StudyMate AI</string>
+    <string name="default_web_client_id">902783555948-webclient.apps.googleusercontent.com</string>
+    <string name="focus_shield_service_description">StudyMate uses this service strictly during active focus sessions to detect when you open an app you have chosen to restrict, helping you stay on task without distractions.</string>
+</resources>
