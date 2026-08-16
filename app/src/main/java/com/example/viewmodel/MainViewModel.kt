@@ -24,7 +24,14 @@ data class ChatMessage(
     val text: String,
     val timestamp: Long = System.currentTimeMillis(),
     val isThinking: Boolean = false,
-    val hasImage: Boolean = false
+    val hasImage: Boolean = false,
+    val actionType: TutorActionType = TutorActionType.GENERAL_CHAT,
+    val generatedFlashcards: List<FlashcardItem>? = null,
+    val generatedPlanItems: List<StudyPlanItem>? = null,
+    val generatedQuestions: List<Question>? = null,
+    val isOfflineFallback: Boolean = false,
+    val subjectContext: String? = null,
+    val topicContext: String? = null
 )
 
 data class FocusTimerState(
@@ -193,9 +200,38 @@ class MainViewModel(
 
     init {
         initTts()
+        loadInitialNotificationSettings()
         viewModelScope.launch {
             authRepository.getInitialUser()
         }
+    }
+
+    private fun loadInitialNotificationSettings() {
+        val s = com.example.notification.StudyNotificationManager.getSettings(getApplication())
+        _notificationPrefs.value = NotificationPreference(
+            masterEnabled = s.masterEnabled,
+            studyReminders = s.studySessionReminders,
+            examCountdownAlerts = s.examCountdownAlerts,
+            dailyGoalReminders = s.dailyGoalReminders,
+            missedStudyReminders = s.missedStudyReminders,
+            breakReminders = s.breakReminders,
+            focusStartedAlerts = s.focusStartedAlerts,
+            focusCompletedAlerts = s.focusCompletedAlerts,
+            motivationalQuotes = s.dailyMotivationAlerts,
+            reminderHour = s.studyReminderHour,
+            reminderMinute = s.studyReminderMinute,
+            dailyGoalHour = s.dailyGoalReminderHour,
+            dailyGoalMinute = s.dailyGoalReminderMinute,
+            motivationHour = s.motivationReminderHour,
+            motivationMinute = s.motivationReminderMinute,
+            activeDays = s.activeReminderDays,
+            motivationFrequency = s.motivationFrequency,
+            quietHoursEnabled = s.quietHoursEnabled,
+            quietStartHour = s.quietHoursStartHour,
+            quietStartMinute = s.quietHoursStartMinute,
+            quietEndHour = s.quietHoursEndHour,
+            quietEndMinute = s.quietHoursEndMinute
+        )
     }
 
     private fun initTts() {
@@ -276,33 +312,32 @@ class MainViewModel(
         }
     }
 
-    fun saveOnboarding(
-        name: String,
-        grade: String,
-        subjects: List<String>,
-        goal: String,
-        examName: String,
-        dailyMinutes: Int,
-        preferredTime: String,
-        notifs: Boolean
-    ) {
+    fun saveOnboarding(profile: UserProfile) {
         viewModelScope.launch {
             _isAuthLoading.value = true
-            val currentUser = userProfile.value ?: UserProfile()
-            val updated = currentUser.copy(
-                name = name.ifBlank { "Student" },
-                grade = grade,
-                subjects = if (subjects.isNotEmpty()) subjects else listOf("Mathematics", "Physics", "Chemistry"),
-                goal = goal,
-                examName = examName.ifBlank { "Board & Entrance" },
-                dailyTargetMinutes = dailyMinutes,
-                preferredStudyTime = preferredTime,
-                notificationsEnabled = notifs,
+            val currentUser = userProfile.value
+            val finalProfile = profile.copy(
+                id = "current_user",
+                uid = currentUser?.uid ?: profile.uid,
+                email = currentUser?.email ?: profile.email,
+                photoUrl = currentUser?.photoUrl ?: profile.photoUrl,
+                isGuest = currentUser?.isGuest ?: false,
                 isOnboardingCompleted = true
             )
-            authRepository.completeOnboarding(updated)
-            // Generate initial personalized study plan
+            authRepository.completeOnboarding(finalProfile)
+            // Generate initial personalized study plan and flashcards
             generateAiStudyPlan()
+            _isAuthLoading.value = false
+        }
+    }
+
+    fun updateUserProfile(profile: UserProfile, refreshStudyPlan: Boolean = false) {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            authRepository.updateUserProfile(profile)
+            if (refreshStudyPlan) {
+                generateAiStudyPlan()
+            }
             _isAuthLoading.value = false
         }
     }
@@ -375,53 +410,207 @@ class MainViewModel(
         _tutorPersona.value = persona
     }
 
-    fun sendTutorMessage(text: String) {
+    fun clearChatMessages() {
+        val user = userProfile.value
+        val name = user?.name ?: "Student"
+        val subject = user?.subjects?.firstOrNull() ?: "Physics"
+        _chatMessages.value = listOf(
+            ChatMessage(
+                sender = "model",
+                text = "👋 Hello **$name**! I'm your personalized **StudyMate AI Tutor**.\n\nI'm ready with your active profile (*Target: ${user?.examName ?: "JEE / NEET / Board"}*, *Subject: $subject*).\n\nAsk me any question, tap **'Explain Concept'**, **'Simplify'**, or generate practice questions and flashcards!"
+            )
+        )
+    }
+
+    fun buildTutorContext(subject: String, topic: String): TutorStudentContext {
+        val user = userProfile.value
+        val mistakeList = mistakes.value.filter { it.subject.equals(subject, ignoreCase = true) || subject.isBlank() }
+            .map { "${it.topic}: ${it.questionText.take(50)}" }
+        val weakList = user?.weakTopics ?: emptyList()
+        val daysRemaining = user?.examDateMillis?.let {
+            val diff = it - System.currentTimeMillis()
+            (diff / (1000 * 60 * 60 * 24)).toInt().coerceAtLeast(1)
+        } ?: 30
+
+        return TutorStudentContext(
+            studentName = user?.name?.ifBlank { "Rahul" } ?: "Rahul",
+            grade = user?.grade ?: "Class 12",
+            targetExam = user?.examName ?: "JEE / NEET / Board Exam",
+            examDaysRemaining = daysRemaining,
+            selectedSubject = subject.ifBlank { user?.subjects?.firstOrNull() ?: "Physics" },
+            selectedTopic = topic.ifBlank { "Current Electricity & Circuits" },
+            weakTopics = weakList,
+            recentMistakes = mistakeList,
+            dailyTargetMinutes = user?.dailyTargetMinutes ?: 180,
+            totalFocusMinutes = user?.totalFocusMinutes ?: 135,
+            streakDays = user?.streakDays ?: 4,
+            learningStyle = user?.revisionFrequency ?: "Spaced Repetition"
+        )
+    }
+
+    fun sendTutorMessage(text: String, subject: String = "", topic: String = "") {
         if (text.isBlank()) return
-        val userMsg = ChatMessage(sender = "user", text = text)
+        val userMsg = ChatMessage(
+            sender = "user",
+            text = text,
+            subjectContext = subject,
+            topicContext = topic,
+            actionType = TutorActionType.GENERAL_CHAT
+        )
         _chatMessages.value = _chatMessages.value + userMsg
 
         viewModelScope.launch {
             _isAiThinking.value = true
+            val context = buildTutorContext(subject, topic)
             val history = _chatMessages.value.map { it.sender to it.text }
-            val result = geminiRepository.askTutor(
+            val result = geminiRepository.askTutorWithContext(
                 prompt = text,
                 conversationHistory = history.takeLast(6),
                 useThinkingMode = _useThinkingMode.value,
-                persona = _tutorPersona.value
+                persona = _tutorPersona.value,
+                context = context,
+                actionType = TutorActionType.GENERAL_CHAT
             )
-            result.onSuccess { responseText ->
+            result.onSuccess { response ->
                 _chatMessages.value = _chatMessages.value + ChatMessage(
                     sender = "model",
-                    text = responseText,
-                    isThinking = _useThinkingMode.value
+                    text = response.replyMarkdown,
+                    isThinking = _useThinkingMode.value,
+                    actionType = response.actionType,
+                    generatedFlashcards = response.generatedFlashcards,
+                    generatedPlanItems = response.generatedPlanItems,
+                    generatedQuestions = response.generatedQuestions,
+                    isOfflineFallback = response.isOfflineFallback,
+                    subjectContext = subject,
+                    topicContext = topic
                 )
             }.onFailure { error ->
                 _chatMessages.value = _chatMessages.value + ChatMessage(
                     sender = "model",
-                    text = "⚠️ Gemini couldn't respond right now. Check your connection and try again."
+                    text = "⚠️ Gemini couldn't connect right now. Using local study resources.",
+                    isOfflineFallback = true
                 )
             }
             _isAiThinking.value = false
         }
     }
 
-    fun sendQuickActionChip(chipText: String) {
-        val lastModelMessage = _chatMessages.value.lastOrNull { it.sender == "model" }?.text ?: "the previous concept"
-        val prompt = when (chipText) {
-            "Explain Simply" -> "Can you explain this in ultra-simple, beginner-friendly terms with an intuitive real-world analogy: $lastModelMessage"
-            "Give Example" -> "Can you give a practical, concrete, worked-out example of this: $lastModelMessage"
-            "Quiz Me" -> "Create 2 quick conceptual check questions with answers to test if I understood: $lastModelMessage"
-            "Explain Another Way" -> "Please re-explain this from a completely different perspective with a diagrammatic description: $lastModelMessage"
-            else -> chipText
+    fun executeTutorAction(
+        actionType: TutorActionType,
+        subject: String,
+        topic: String,
+        extraPrompt: String = ""
+    ) {
+        val prompt = when (actionType) {
+            TutorActionType.EXPLAIN_CONCEPT -> "Please provide a comprehensive conceptual breakdown of $topic in $subject with key definitions, governing formulas, derivations, and common exam traps."
+            TutorActionType.SIMPLIFY_EXPLANATION -> "Please simplify the concept of $topic in $subject using an intuitive real-world analogy and beginner-friendly language without jargon."
+            TutorActionType.GIVE_EXAMPLES -> "Please provide 2 practical worked-out numerical calculation examples of $topic in $subject with given variables, formula, step-by-step substitution, and real-world application."
+            TutorActionType.PRACTICE_QUESTIONS -> "Generate 3 high-yield practice MCQs with 4 options and detailed step-by-step solutions for $topic in $subject."
+            TutorActionType.GENERATE_FLASHCARDS -> "Generate 4 spaced-repetition active recall flashcards (Front, Back, Hint, Difficulty) for $topic in $subject."
+            TutorActionType.SUMMARIZE_MATERIAL -> if (extraPrompt.isNotBlank()) "Please summarize this study material for $topic in $subject:\n$extraPrompt" else "Please generate a high-yield study summary with formulas and 3 self-check questions for $topic in $subject."
+            TutorActionType.REVISION_PLAN -> "Create a 7-day spaced repetition revision plan for $subject focusing on weak areas and $topic."
+            TutorActionType.IDENTIFY_WEAK_AREAS -> "Analyze my recent progress and diagnose weak areas and mistake patterns in $subject."
+            TutorActionType.DAILY_STUDY_PLAN -> "Generate an optimal daily study plan for today allocating time blocks for $subject ($topic) and high-priority study sessions."
+            TutorActionType.GENERAL_CHAT -> extraPrompt.ifBlank { "How can I master $topic in $subject effectively?" }
         }
-        sendTutorMessage(prompt)
-    }
 
-    fun solveImageQuestion(bitmap: Bitmap) {
+        val userLabel = when (actionType) {
+            TutorActionType.EXPLAIN_CONCEPT -> "📖 Explain Concept: $topic"
+            TutorActionType.SIMPLIFY_EXPLANATION -> "🐣 Simplify: $topic"
+            TutorActionType.GIVE_EXAMPLES -> "💡 Give Worked Examples: $topic"
+            TutorActionType.PRACTICE_QUESTIONS -> "✍️ Generate Practice Questions: $topic"
+            TutorActionType.GENERATE_FLASHCARDS -> "🗂️ Generate Flashcards: $topic"
+            TutorActionType.SUMMARIZE_MATERIAL -> "📄 Summarize Study Material: $topic"
+            TutorActionType.REVISION_PLAN -> "🔄 Create Revision Plan: $subject"
+            TutorActionType.IDENTIFY_WEAK_AREAS -> "🎯 Identify Weak Areas: $subject"
+            TutorActionType.DAILY_STUDY_PLAN -> "📅 Generate Daily Study Plan"
+            TutorActionType.GENERAL_CHAT -> extraPrompt
+        }
+
         val userMsg = ChatMessage(
             sender = "user",
-            text = "📸 [Scanned Question Image Attached]\nPlease solve and explain step by step.",
-            hasImage = true
+            text = userLabel,
+            subjectContext = subject,
+            topicContext = topic,
+            actionType = actionType
+        )
+        _chatMessages.value = _chatMessages.value + userMsg
+
+        viewModelScope.launch {
+            _isAiThinking.value = true
+            val context = buildTutorContext(subject, topic)
+            val history = _chatMessages.value.map { it.sender to it.text }
+            val result = geminiRepository.askTutorWithContext(
+                prompt = prompt,
+                conversationHistory = history.takeLast(6),
+                useThinkingMode = _useThinkingMode.value,
+                persona = _tutorPersona.value,
+                context = context,
+                actionType = actionType
+            )
+            result.onSuccess { response ->
+                _chatMessages.value = _chatMessages.value + ChatMessage(
+                    sender = "model",
+                    text = response.replyMarkdown,
+                    isThinking = _useThinkingMode.value,
+                    actionType = response.actionType,
+                    generatedFlashcards = response.generatedFlashcards,
+                    generatedPlanItems = response.generatedPlanItems,
+                    generatedQuestions = response.generatedQuestions,
+                    isOfflineFallback = response.isOfflineFallback,
+                    subjectContext = subject,
+                    topicContext = topic
+                )
+            }.onFailure { error ->
+                _chatMessages.value = _chatMessages.value + ChatMessage(
+                    sender = "model",
+                    text = "⚠️ Gemini couldn't connect right now. Using local study resources.",
+                    isOfflineFallback = true
+                )
+            }
+            _isAiThinking.value = false
+        }
+    }
+
+    fun saveFlashcardsToDeck(cards: List<FlashcardItem>) {
+        viewModelScope.launch {
+            for (card in cards) {
+                studyRepository.insertFlashcard(card)
+            }
+            _flashcardMessage.value = "🎉 Added ${cards.size} flashcards to your deck!"
+        }
+    }
+
+    fun importPlanItems(items: List<StudyPlanItem>) {
+        viewModelScope.launch {
+            val current = studyPlanItems.value
+            studyRepository.replaceStudyPlan(current + items)
+            _flashcardMessage.value = "📅 Imported ${items.size} tasks into your Study Plan!"
+        }
+    }
+
+    fun sendQuickActionChip(chipText: String) {
+        val lastModel = _chatMessages.value.lastOrNull { it.sender == "model" }
+        val subject = lastModel?.subjectContext ?: userProfile.value?.subjects?.firstOrNull() ?: "Physics"
+        val topic = lastModel?.topicContext ?: "Current Electricity"
+
+        when (chipText) {
+            "Explain Simply" -> executeTutorAction(TutorActionType.SIMPLIFY_EXPLANATION, subject, topic)
+            "Give Example" -> executeTutorAction(TutorActionType.GIVE_EXAMPLES, subject, topic)
+            "Quiz Me" -> executeTutorAction(TutorActionType.PRACTICE_QUESTIONS, subject, topic)
+            "Generate Flashcards" -> executeTutorAction(TutorActionType.GENERATE_FLASHCARDS, subject, topic)
+            "Explain Another Way" -> sendTutorMessage("Can you re-explain $topic from a completely different perspective with a visual description?", subject, topic)
+            else -> sendTutorMessage(chipText, subject, topic)
+        }
+    }
+
+    fun solveImageQuestion(bitmap: Bitmap, subject: String = "Physics", topic: String = "General") {
+        val userMsg = ChatMessage(
+            sender = "user",
+            text = "📸 [Scanned Question Image Attached]\nPlease solve and explain step by step in $subject.",
+            hasImage = true,
+            subjectContext = subject,
+            topicContext = topic
         )
         _chatMessages.value = _chatMessages.value + userMsg
 
@@ -429,13 +618,16 @@ class MainViewModel(
             _isAiThinking.value = true
             val result = geminiRepository.solveImageQuestion(
                 bitmap = bitmap,
+                userPrompt = "Please solve and explain this $subject ($topic) question step by step with clear concepts, formulas, and working.",
                 useThinkingMode = true
             )
             result.onSuccess { explanation ->
                 _chatMessages.value = _chatMessages.value + ChatMessage(
                     sender = "model",
                     text = explanation,
-                    isThinking = true
+                    isThinking = true,
+                    subjectContext = subject,
+                    topicContext = topic
                 )
             }.onFailure {
                 _chatMessages.value = _chatMessages.value + ChatMessage(
@@ -462,6 +654,8 @@ class MainViewModel(
 
     fun startFocusSession(subject: String, topic: String, durationMinutes: Int = 25) {
         timerJob?.cancel()
+        val appContext = getApplication<Application>()
+        val restrictedCount = com.example.service.FocusShieldManager.getRestrictedPackages().size
         _focusState.value = _focusState.value.copy(
             isRunning = true,
             isPaused = false,
@@ -469,16 +663,29 @@ class MainViewModel(
             remainingSeconds = durationMinutes * 60,
             subject = subject,
             topic = topic,
+            restrictedAppsCount = restrictedCount,
             showCelebration = false
+        )
+
+        com.example.service.FocusShieldManager.startFocusSession(appContext, subject, topic, durationMinutes)
+        val userName = userProfile.value?.name ?: "Rahul"
+        com.example.notification.StudyNotificationManager.sendFocusSessionStarted(
+            context = appContext,
+            userName = userName,
+            subject = subject,
+            topic = topic,
+            durationMinutes = durationMinutes
         )
 
         timerJob = viewModelScope.launch {
             while (_focusState.value.remainingSeconds > 0) {
                 delay(1000)
                 if (!_focusState.value.isPaused) {
+                    val nextSecs = _focusState.value.remainingSeconds - 1
                     _focusState.value = _focusState.value.copy(
-                        remainingSeconds = _focusState.value.remainingSeconds - 1
+                        remainingSeconds = nextSecs
                     )
+                    com.example.service.FocusShieldManager.updateRemainingTime(nextSecs)
                 }
             }
             // Completed
@@ -494,6 +701,8 @@ class MainViewModel(
 
     fun endFocusSession(isAutoFinished: Boolean = false) {
         timerJob?.cancel()
+        val appContext = getApplication<Application>()
+        com.example.service.FocusShieldManager.endFocusSession()
         val initialMins = _focusState.value.initialMinutes
         val elapsedSeconds = (initialMins * 60) - _focusState.value.remainingSeconds
         val actualMinutes = (elapsedSeconds / 60).coerceAtLeast(1)
@@ -511,6 +720,24 @@ class MainViewModel(
                 showCelebration = true,
                 lastSessionXp = session.xpEarned
             )
+
+            val userName = userProfile.value?.name ?: "Rahul"
+            com.example.notification.StudyNotificationManager.sendFocusSessionCompleted(
+                context = appContext,
+                userName = userName,
+                subject = _focusState.value.subject,
+                minutes = actualMinutes,
+                xpEarned = session.xpEarned
+            )
+
+            if (isAutoFinished) {
+                val breakMins = userProfile.value?.breakDurationMinutes ?: 15
+                com.example.notification.StudyNotificationManager.sendBreakReminder(
+                    context = appContext,
+                    userName = userName,
+                    breakMinutes = breakMins
+                )
+            }
         }
     }
 
@@ -828,6 +1055,168 @@ class MainViewModel(
 
     fun updateNotificationPrefs(prefs: NotificationPreference) {
         _notificationPrefs.value = prefs
+        val appContext = getApplication<Application>()
+        val s = com.example.notification.AppNotificationSettings(
+            masterEnabled = prefs.masterEnabled,
+            studySessionReminders = prefs.studyReminders,
+            examCountdownAlerts = prefs.examCountdownAlerts,
+            dailyGoalReminders = prefs.dailyGoalReminders,
+            missedStudyReminders = prefs.missedStudyReminders,
+            breakReminders = prefs.breakReminders,
+            focusStartedAlerts = prefs.focusStartedAlerts,
+            focusCompletedAlerts = prefs.focusCompletedAlerts,
+            dailyMotivationAlerts = prefs.motivationalQuotes,
+            studyReminderHour = prefs.reminderHour,
+            studyReminderMinute = prefs.reminderMinute,
+            dailyGoalReminderHour = prefs.dailyGoalHour,
+            dailyGoalReminderMinute = prefs.dailyGoalMinute,
+            motivationReminderHour = prefs.motivationHour,
+            motivationReminderMinute = prefs.motivationMinute,
+            activeReminderDays = prefs.activeDays,
+            motivationFrequency = prefs.motivationFrequency,
+            quietHoursEnabled = prefs.quietHoursEnabled,
+            quietHoursStartHour = prefs.quietStartHour,
+            quietHoursStartMinute = prefs.quietStartMinute,
+            quietHoursEndHour = prefs.quietEndHour,
+            quietHoursEndMinute = prefs.quietEndMinute
+        )
+        com.example.notification.StudyNotificationManager.saveSettings(appContext, s)
+    }
+
+    // --- Instant Notification Testers ---
+    fun testStudySessionReminder() {
+        val appContext = getApplication<Application>()
+        val profile = userProfile.value
+        val name = profile?.name ?: "Rahul"
+        val subject = profile?.subjects?.firstOrNull() ?: "Physics"
+        val topic = studyPlanItems.value.firstOrNull { !it.isCompleted }?.topic ?: "Faraday's Law & Lenz's Rule"
+        val timeStr = String.format(Locale.US, "%02d:%02d %s", 
+            if (_notificationPrefs.value.reminderHour % 12 == 0) 12 else _notificationPrefs.value.reminderHour % 12,
+            _notificationPrefs.value.reminderMinute,
+            if (_notificationPrefs.value.reminderHour >= 12) "PM" else "AM"
+        )
+        com.example.notification.StudyNotificationManager.sendStudySessionReminder(
+            context = appContext,
+            userName = name,
+            subject = subject,
+            topic = topic,
+            timeString = timeStr,
+            isTest = true
+        )
+    }
+
+    fun testExamCountdownReminder() {
+        val appContext = getApplication<Application>()
+        val profile = userProfile.value
+        val name = profile?.name ?: "Rahul"
+        val examName = profile?.examName ?: "JEE Main 2026"
+        val targetScore = profile?.targetScore ?: "Top 500 AIR"
+        val examMillis = profile?.examDateMillis ?: (System.currentTimeMillis() + 30L * 86400000L)
+        val daysLeft = ((examMillis - System.currentTimeMillis()) / 86400000L).coerceAtLeast(1L).toInt()
+
+        com.example.notification.StudyNotificationManager.sendExamCountdownReminder(
+            context = appContext,
+            userName = name,
+            examName = examName,
+            daysLeft = daysLeft,
+            targetScore = targetScore,
+            isTest = true
+        )
+    }
+
+    fun testDailyGoalReminder() {
+        val appContext = getApplication<Application>()
+        val profile = userProfile.value
+        val name = profile?.name ?: "Rahul"
+        val goal = profile?.dailyStudyGoal ?: "Complete daily scheduled topics & 20 flashcards"
+        val target = profile?.dailyTargetMinutes ?: 180
+        val completed = profile?.totalFocusMinutes ?: 90
+
+        com.example.notification.StudyNotificationManager.sendDailyGoalReminder(
+            context = appContext,
+            userName = name,
+            dailyGoal = goal,
+            targetMinutes = target,
+            completedMinutes = completed,
+            isTest = true
+        )
+    }
+
+    fun testMissedStudyReminder() {
+        val appContext = getApplication<Application>()
+        val profile = userProfile.value
+        val name = profile?.name ?: "Rahul"
+        val subject = profile?.subjects?.firstOrNull() ?: "Physics"
+        val topic = studyPlanItems.value.firstOrNull { !it.isCompleted }?.topic ?: "Electromagnetic Induction"
+
+        com.example.notification.StudyNotificationManager.sendMissedStudyReminder(
+            context = appContext,
+            userName = name,
+            subject = subject,
+            topic = topic,
+            isTest = true
+        )
+    }
+
+    fun testBreakReminder() {
+        val appContext = getApplication<Application>()
+        val profile = userProfile.value
+        val name = profile?.name ?: "Rahul"
+        val breakMins = profile?.breakDurationMinutes ?: 15
+
+        com.example.notification.StudyNotificationManager.sendBreakReminder(
+            context = appContext,
+            userName = name,
+            breakMinutes = breakMins,
+            isTest = true
+        )
+    }
+
+    fun testFocusStartedNotification() {
+        val appContext = getApplication<Application>()
+        val profile = userProfile.value
+        val name = profile?.name ?: "Rahul"
+        val subject = profile?.subjects?.firstOrNull() ?: "Physics"
+        val topic = "Faraday's Law"
+
+        com.example.notification.StudyNotificationManager.sendFocusSessionStarted(
+            context = appContext,
+            userName = name,
+            subject = subject,
+            topic = topic,
+            durationMinutes = 25,
+            isTest = true
+        )
+    }
+
+    fun testFocusCompletedNotification() {
+        val appContext = getApplication<Application>()
+        val profile = userProfile.value
+        val name = profile?.name ?: "Rahul"
+        val subject = profile?.subjects?.firstOrNull() ?: "Physics"
+
+        com.example.notification.StudyNotificationManager.sendFocusSessionCompleted(
+            context = appContext,
+            userName = name,
+            subject = subject,
+            minutes = 25,
+            xpEarned = 50,
+            isTest = true
+        )
+    }
+
+    fun testDailyMotivationalNotification() {
+        val appContext = getApplication<Application>()
+        val profile = userProfile.value
+        val name = profile?.name ?: "Rahul"
+        val exam = profile?.examName ?: "JEE Main"
+
+        com.example.notification.StudyNotificationManager.sendDailyMotivationalNotification(
+            context = appContext,
+            userName = name,
+            examName = exam,
+            isTest = true
+        )
     }
 
     // --- Document Summarizer & Study Questions Actions ---

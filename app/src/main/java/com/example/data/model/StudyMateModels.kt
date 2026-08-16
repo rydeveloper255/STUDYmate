@@ -11,12 +11,43 @@ data class UserProfile(
     val email: String = "",
     val photoUrl: String? = null,
     val grade: String = "Class 12",
-    val subjects: List<String> = listOf("Mathematics", "Physics", "Chemistry"),
+    val educationLevel: String = "Senior Secondary (11th-12th)",
+    val languagePreference: String = "English",
+    
+    // Step 2 - Exam Selection & Goals
+    val examCategory: String = "Competitive / Entrance",
+    val examName: String = "JEE / NEET / Board Exam",
+    val examDateMillis: Long = System.currentTimeMillis() + 60L * 24 * 60 * 60 * 1000, // 60 days default
+    val targetScore: String = "Top 500 AIR / 99%ile",
     val goal: String = "Competitive Exam",
-    val examName: String = "Final Board & Entrance",
-    val examDateMillis: Long = System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000, // 30 days default
+    
+    // Step 3 - Subjects & Preparation
+    val subjects: List<String> = listOf("Mathematics", "Physics", "Chemistry"),
+    val highPrioritySubjects: List<String> = listOf("Physics", "Mathematics"),
+    val mediumPrioritySubjects: List<String> = listOf("Chemistry"),
+    val lowPrioritySubjects: List<String> = emptyList(),
+    val strongSubjects: List<String> = listOf("Physics"),
+    val preparationLevel: String = "Intermediate (Practicing questions & concepts)",
+    
+    // Step 4 - Study Schedule, Times & Breaks
     val dailyTargetMinutes: Int = 180, // 3 hours
+    val availableStudyHours: Float = 4.0f,
+    val preferredStudyStartTime: String = "06:00 PM",
+    val preferredStudyEndTime: String = "10:00 PM",
+    val preferredStudyDays: List<String> = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat"),
+    val breakDurationMinutes: Int = 15,
     val preferredStudyTime: String = "Evening",
+    val morningNightPreference: String = "Balanced",
+    val revisionFrequency: String = "Spaced Repetition",
+    val mockTestFrequency: String = "Weekly",
+    
+    // Step 5 - Weak Areas & Daily Goals
+    val weakSubjects: List<String> = listOf("Chemistry"),
+    val weakTopics: List<String> = listOf("Organic Reaction Mechanisms", "Rotational Dynamics"),
+    val dailyStudyGoal: String = "Complete daily scheduled topics & 20 active recall flashcards",
+    val shortTermGoal: String = "Master high-yield concepts and achieve 85%+ mock accuracy",
+    val longTermGoal: String = "Achieve top rank in target exam and secure admission",
+    
     val notificationsEnabled: Boolean = true,
     val isGuest: Boolean = false,
     val isOnboardingCompleted: Boolean = false,
@@ -144,14 +175,31 @@ data class Achievement(
 )
 
 data class NotificationPreference(
+    val masterEnabled: Boolean = true,
     val studyReminders: Boolean = true,
-    val focusReminders: Boolean = true,
-    val motivationalQuotes: Boolean = true,
     val examCountdownAlerts: Boolean = true,
+    val dailyGoalReminders: Boolean = true,
+    val missedStudyReminders: Boolean = true,
+    val breakReminders: Boolean = true,
+    val focusStartedAlerts: Boolean = true,
+    val focusCompletedAlerts: Boolean = true,
+    val motivationalQuotes: Boolean = true,
     val weeklyReport: Boolean = true,
     val streakAlerts: Boolean = true,
-    val reminderHour: Int = 18,
-    val reminderMinute: Int = 30
+    val reminderHour: Int = 19,
+    val reminderMinute: Int = 0,
+    val dailyGoalHour: Int = 20,
+    val dailyGoalMinute: Int = 30,
+    val motivationHour: Int = 8,
+    val motivationMinute: Int = 0,
+    val activeDays: Set<String> = setOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"),
+    val motivationFrequency: String = "Once Daily (Morning)",
+    val quietHoursEnabled: Boolean = true,
+    val quietStartHour: Int = 22,
+    val quietStartMinute: Int = 0,
+    val quietEndHour: Int = 7,
+    val quietEndMinute: Int = 0,
+    val focusReminders: Boolean = true
 )
 
 data class DocumentAnalysisResult(
@@ -283,4 +331,43 @@ data class FocusAnalyticsSummary(
     val currentStreak: Int = 4,
     val completionRatePercent: Int = 83
 )
+
+// --- AI Tutor Upgraded Models ---
+enum class TutorActionType(val displayName: String, val icon: String, val description: String) {
+    GENERAL_CHAT("Ask a Question", "❓", "Ask anything about concepts, homework or doubts"),
+    EXPLAIN_CONCEPT("Explain Concept", "📖", "Deep step-by-step conceptual breakdown with formulas"),
+    SIMPLIFY_EXPLANATION("Simplify Explanation", "🐣", "Intuitive ELI5 explanation with real-world analogies"),
+    GIVE_EXAMPLES("Give Examples", "💡", "Worked-out numerical & practical application examples"),
+    PRACTICE_QUESTIONS("Practice Questions", "✍️", "Generate high-yield MCQs with explanations"),
+    GENERATE_FLASHCARDS("Generate Flashcards", "🗂️", "Create active recall spaced-repetition flashcards"),
+    SUMMARIZE_MATERIAL("Summarize Notes", "📄", "Extract key points, formulas & summary bullets"),
+    REVISION_PLAN("Revision Plan", "🔄", "Create a spaced revision schedule for weak areas"),
+    IDENTIFY_WEAK_AREAS("Identify Weak Areas", "🎯", "Diagnose test mistakes & recommend remediation"),
+    DAILY_STUDY_PLAN("Daily Study Plan", "📅", "Generate optimal daily time-blocked schedule")
+}
+
+data class TutorStudentContext(
+    val studentName: String = "Student",
+    val grade: String = "Class 12",
+    val targetExam: String = "JEE / NEET / Board Exam",
+    val examDaysRemaining: Int = 30,
+    val selectedSubject: String = "Physics",
+    val selectedTopic: String = "Current Electricity",
+    val weakTopics: List<String> = emptyList(),
+    val recentMistakes: List<String> = emptyList(),
+    val dailyTargetMinutes: Int = 180,
+    val totalFocusMinutes: Int = 135,
+    val streakDays: Int = 4,
+    val learningStyle: String = "Step-by-step with practical examples"
+)
+
+data class TutorResponseResult(
+    val replyMarkdown: String,
+    val actionType: TutorActionType = TutorActionType.GENERAL_CHAT,
+    val generatedFlashcards: List<FlashcardItem>? = null,
+    val generatedPlanItems: List<StudyPlanItem>? = null,
+    val generatedQuestions: List<Question>? = null,
+    val isOfflineFallback: Boolean = false
+)
+
 

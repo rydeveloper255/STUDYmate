@@ -3,6 +3,7 @@ package com.example.ui.screens.focus
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,11 +17,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.service.FocusShieldManager
 import com.example.ui.components.GlassButton
 import com.example.ui.components.GlassCard
 import com.example.ui.components.springClickable
@@ -36,10 +39,15 @@ fun FocusModeScreen(
     onDismissCelebration: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var selectedMinutes by remember { mutableIntStateOf(focusState.initialMinutes) }
     var selectedSubject by remember { mutableStateOf(focusState.subject) }
     var selectedTopic by remember { mutableStateOf(focusState.topic) }
     var showAppShieldModal by remember { mutableStateOf(false) }
+
+    val blockedAppsCount = remember(showAppShieldModal, focusState.isRunning) {
+        FocusShieldManager.getRestrictedPackages().size
+    }
 
     val presetDurations = listOf(15, 25, 45, 60)
     val subjects = listOf("Physics", "Mathematics", "Chemistry", "Biology", "Computer Science")
@@ -85,16 +93,26 @@ fun FocusModeScreen(
                     )
                 }
 
-                // App Shield Button
-                IconButton(
-                    onClick = { showAppShieldModal = true },
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(Color(0x3038BDF8))
-                        .testTag("app_shield_button")
+                // Blocked Apps Quick Button
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0x2038BDF8),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x4038BDF8)),
+                    modifier = Modifier.clip(RoundedCornerShape(14.dp)).clickable { showAppShieldModal = true }.testTag("app_shield_button")
                 ) {
-                    Icon(Icons.Filled.Shield, "App Shield", tint = NeonCyan)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Filled.Shield, "Blocked Apps", tint = NeonCyan, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Blocked Apps ($blockedAppsCount)",
+                            color = NeonCyan,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
 
@@ -154,20 +172,24 @@ fun FocusModeScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0x20FFFFFF))
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0x20FFFFFF),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x25FFFFFF)),
+                        modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { showAppShieldModal = true }
                     ) {
-                        Icon(Icons.Filled.Shield, null, tint = EmeraldSuccess, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "${focusState.restrictedAppsCount} distracting apps blocked 🛡️",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFFCBD5E1)
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Filled.Shield, null, tint = EmeraldSuccess, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "$blockedAppsCount distracting apps blocked • Tap to manage 🛡️",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFFCBD5E1)
+                            )
+                        }
                     }
                 } else {
                     // Idle Setup View
@@ -266,6 +288,28 @@ fun FocusModeScreen(
                                 ),
                                 shape = RoundedCornerShape(12.dp)
                             )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Focus shield status hint
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0x1538BDF8),
+                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { showAppShieldModal = true }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Filled.Shield, null, tint = NeonCyan, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Focus App Shield: $blockedAppsCount Apps Blocked", color = Color(0xFFCBD5E1), fontSize = 12.sp)
+                                    }
+                                    Text("Configure →", color = NeonCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
                     }
                 }

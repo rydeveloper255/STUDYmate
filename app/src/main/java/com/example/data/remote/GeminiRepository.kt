@@ -2,10 +2,7 @@ package com.example.data.remote
 
 import android.graphics.Bitmap
 import com.example.BuildConfig
-import com.example.data.model.DocumentAnalysisResult
-import com.example.data.model.Question
-import com.example.data.model.StudyPlanItem
-import com.example.data.model.StudyQuestion
+import com.example.data.model.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -43,12 +40,31 @@ class GeminiRepository(
         useThinkingMode: Boolean = false,
         persona: String = "Friendly AI Tutor"
     ): Result<String> = withContext(Dispatchers.IO) {
+        val res = askTutorWithContext(
+            prompt = prompt,
+            conversationHistory = conversationHistory,
+            useThinkingMode = useThinkingMode,
+            persona = persona,
+            context = TutorStudentContext(),
+            actionType = TutorActionType.GENERAL_CHAT
+        )
+        res.map { it.replyMarkdown }
+    }
+
+    suspend fun askTutorWithContext(
+        prompt: String,
+        conversationHistory: List<Pair<String, String>> = emptyList(),
+        useThinkingMode: Boolean = false,
+        persona: String = "Friendly AI Tutor",
+        context: TutorStudentContext = TutorStudentContext(),
+        actionType: TutorActionType = TutorActionType.GENERAL_CHAT
+    ): Result<TutorResponseResult> = withContext(Dispatchers.IO) {
         try {
             val model = if (useThinkingMode) "gemini-3.1-pro-preview" else "gemini-3.5-flash"
             val contents = mutableListOf<Content>()
 
             // Append history
-            for ((role, text) in conversationHistory) {
+            for ((role, text) in conversationHistory.takeLast(6)) {
                 contents.add(
                     Content(
                         role = if (role == "user") "user" else "model",
@@ -56,11 +72,51 @@ class GeminiRepository(
                     )
                 )
             }
-            // Append current prompt
+
+            // Build specialized contextual prompt instructions
+            val studentContextInstruction = buildString {
+                append("You are StudyMate AI, a personalized personal tutor and academic mentor.\n")
+                append("STUDENT PROFILE:\n")
+                append("- Name: ${context.studentName}\n")
+                append("- Academic Grade/Level: ${context.grade}\n")
+                append("- Target Exam / Milestone: ${context.targetExam} (${context.examDaysRemaining} days remaining)\n")
+                append("- Active Subject: ${context.selectedSubject}\n")
+                append("- Active Topic/Chapter: ${context.selectedTopic}\n")
+                if (context.weakTopics.isNotEmpty()) {
+                    append("- Student's Identified Weak Topics: ${context.weakTopics.joinToString(", ")}\n")
+                }
+                if (context.recentMistakes.isNotEmpty()) {
+                    append("- Recent Mistake Notes: ${context.recentMistakes.take(3).joinToString("; ")}\n")
+                }
+                append("- Daily Target: ${context.dailyTargetMinutes} mins | Current Streak: ${context.streakDays} days\n")
+                append("\nPEDAGOGICAL INSTRUCTIONS:\n")
+                append("1. Persona Mode: $persona.\n")
+                append("2. Ground explanations directly in ${context.selectedSubject} (Topic: ${context.selectedTopic}).\n")
+                append("3. If this topic relates to student's weak areas (${context.weakTopics.joinToString(", ")}), explicitly point out common exam traps.\n")
+                append("4. Use rich, structured Markdown with headers, bold key concepts, bullet lists, step-by-step numbers, and formulas.\n")
+                when (actionType) {
+                    TutorActionType.EXPLAIN_CONCEPT -> append("5. Provide a comprehensive, step-by-step conceptual breakdown with core axioms, mathematical relationships, and exam-oriented tips.\n")
+                    TutorActionType.SIMPLIFY_EXPLANATION -> append("5. Explain in ultra-simple ELI5 terms using an intuitive real-world analogy and zero unnecessary jargon.\n")
+                    TutorActionType.GIVE_EXAMPLES -> append("5. Provide 2 worked-out step-by-step numerical/practical examples with given variables, formula substitution, final answer, and physical intuition.\n")
+                    TutorActionType.PRACTICE_QUESTIONS -> append("5. Generate 3 high-yield multiple choice questions with 4 options each, clearly indicating the correct answer and a step-by-step solution.\n")
+                    TutorActionType.GENERATE_FLASHCARDS -> append("5. Generate 4 spaced-repetition active recall flashcard pairs (Front / Back / Memory Hint / Difficulty).\n")
+                    TutorActionType.SUMMARIZE_MATERIAL -> append("5. Provide an executive summary with Key Takeaways, Core Formulas, and 3 Active-Recall Questions.\n")
+                    TutorActionType.REVISION_PLAN -> append("5. Formulate a 7-day spaced repetition revision schedule prioritizing weak topics with daily minute allocations.\n")
+                    TutorActionType.IDENTIFY_WEAK_AREAS -> append("5. Perform a diagnostic audit of student's struggle points and provide a 3-step targeted remediation roadmap.\n")
+                    TutorActionType.DAILY_STUDY_PLAN -> append("5. Construct an optimal daily study schedule allocating time blocks for high-priority topics and active recall.\n")
+                    TutorActionType.GENERAL_CHAT -> append("5. Answer thoroughly, encouraging deep understanding and problem-solving intuition.\n")
+                }
+            }
+
+            // Append current user prompt with context header
+            val contextPrompt = buildString {
+                append("[Context: ${context.selectedSubject} → ${context.selectedTopic}]\n")
+                append(prompt)
+            }
             contents.add(
                 Content(
                     role = "user",
-                    parts = listOf(Part(text = prompt))
+                    parts = listOf(Part(text = contextPrompt))
                 )
             )
 
@@ -70,7 +126,7 @@ class GeminiRepository(
                 )
             } else {
                 GenerationConfig(
-                    temperature = 0.7f,
+                    temperature = 0.6f,
                     topP = 0.95f
                 )
             }
@@ -79,25 +135,38 @@ class GeminiRepository(
                 contents = contents,
                 generationConfig = config,
                 systemInstruction = Content(
-                    parts = listOf(
-                        Part(
-                            text = "${systemTutorInstruction.parts.first().text}\nYour current persona: $persona."
-                        )
-                    )
+                    parts = listOf(Part(text = studentContextInstruction))
                 )
             )
 
+            if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
+                // Graceful local fallback if key not configured
+                val fallback = generateOfflineTutorResponse(prompt, actionType, context, persona)
+                return@withContext Result.success(fallback)
+            }
+
             val response = apiService.generateContent(model, apiKey, request)
             val reply = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull { !it.text.isNullOrBlank() }?.text
-                ?: "I analyzed your question, but could not generate a response. Please rephrase or try again."
-            Result.success(reply)
-        } catch (e: Exception) {
-            val fallback = getOfflineTutorFallback(prompt)
-            if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
-                Result.success(fallback)
+            if (!reply.isNullOrBlank()) {
+                val parsedFlashcards = if (actionType == TutorActionType.GENERATE_FLASHCARDS) extractFlashcardsFromMarkdown(reply, context.selectedSubject, context.selectedTopic) else null
+                val parsedPlan = if (actionType == TutorActionType.DAILY_STUDY_PLAN) extractPlanItemsFromMarkdown(reply, context.selectedSubject) else null
+                Result.success(
+                    TutorResponseResult(
+                        replyMarkdown = reply,
+                        actionType = actionType,
+                        generatedFlashcards = parsedFlashcards,
+                        generatedPlanItems = parsedPlan,
+                        isOfflineFallback = false
+                    )
+                )
             } else {
-                Result.failure(e)
+                val fallback = generateOfflineTutorResponse(prompt, actionType, context, persona)
+                Result.success(fallback)
             }
+        } catch (e: Exception) {
+            // Graceful fallback on network error, rate limit (429), or 503
+            val fallback = generateOfflineTutorResponse(prompt, actionType, context, persona)
+            Result.success(fallback)
         }
     }
 
@@ -724,16 +793,517 @@ class GeminiRepository(
     }
 
     private fun getOfflineTutorFallback(prompt: String): String {
-        return "✨ **StudyMate AI Tutor**\n\n" +
-                "I've broken down your question: *\"$prompt\"*\n\n" +
-                "### 🧠 Core Conceptual Framework:\n" +
-                "- **Definition:** Break the problem down into fundamental axioms and known variables.\n" +
-                "- **Key Principle:** Always establish boundary conditions and verify the units/dimensions first.\n" +
-                "- **Systematic Approach:**\n" +
-                "  1. Define the target parameter.\n" +
-                "  2. Apply the relevant formula or theorem.\n" +
-                "  3. Check for edge cases or common misconceptions.\n\n" +
-                "💡 *Would you like me to generate a practice quiz or give a simple real-world example on this topic?*"
+        return generateOfflineTutorResponse(prompt, TutorActionType.GENERAL_CHAT, TutorStudentContext(), "Friendly AI Tutor").replyMarkdown
+    }
+
+    private fun generateOfflineTutorResponse(
+        prompt: String,
+        actionType: TutorActionType,
+        context: TutorStudentContext,
+        persona: String
+    ): TutorResponseResult {
+        val subject = context.selectedSubject.ifBlank { "Physics" }
+        val topic = context.selectedTopic.ifBlank { "Current Electricity & Circuits" }
+        val student = context.studentName.ifBlank { "Rahul" }
+        val weakTopicsStr = if (context.weakTopics.isNotEmpty()) context.weakTopics.joinToString(", ") else "Fundamental Derivations & Sign Rules"
+
+        return when (actionType) {
+            TutorActionType.EXPLAIN_CONCEPT -> {
+                val markdown = """
+                # 📖 Comprehensive Concept Breakdown: $topic
+                *Subject: $subject • Level: ${context.grade} • Target: ${context.targetExam}*
+
+                ---
+
+                ### 1. 🎯 Core Definition & First Principles
+                **$topic** establishes the fundamental laws governing how energy, state variables, or rates transform in $subject.
+                - **Primary Mechanism:** The system responds deterministically according to underlying conservation laws (energy, charge, or momentum).
+                - **Physical / Mathematical Meaning:** Quantifies how rate of change (dy/dx or dPhi/dt) relates directly to driving potential and boundary constraints.
+
+                ---
+
+                ### 2. 📐 Governing Equations & Formulas
+                - **Primary Relationship:** 
+                  Response = (Driving Force / Gradient) / (System Resistance / Inertia)
+                - **Standard Form:** Verify dimensional homogeneity in SI units before calculation.
+                - **Boundary Conditions:** Evaluate limiting cases at initial state (t = 0) and steady state (t -> inf).
+
+                ---
+
+                ### 3. 🪜 Step-by-Step Problem Solving Protocol
+                1. **Draw the System Diagram:** Label all knowns (V, I, R, m, k, theta) and unknown target parameters.
+                2. **Choose Consistent Sign Conventions:** Assign positive reference directions before writing loop or equilibrium equations.
+                3. **Apply Fundamental Law:** Substitute known parameters into the governing equation.
+                4. **Sanity Check:** Check unit dimensions and extreme values to catch inadvertent calculation errors.
+
+                ---
+
+                ### ⚡ Exam Pitfall Warning (High-Yield):
+                > ⚠️ **Common Trap in $weakTopicsStr:** Students frequently confuse reference direction signs or forget that equilibrium constants / boundary conditions shift with external parameters. Always verify sign conventions!
+
+                ---
+                💡 *What would you like next? Tap **"💡 Give Examples"**, **"🐣 Simplify"**, or **"✍️ Practice Questions"** below!*
+                """.trimIndent()
+                TutorResponseResult(replyMarkdown = markdown, actionType = actionType, isOfflineFallback = true)
+            }
+
+            TutorActionType.SIMPLIFY_EXPLANATION -> {
+                val markdown = """
+                # 🐣 $topic — Explained in Simple Intuitive Terms!
+                *Hey $student, let's break this down with a simple real-world analogy:*
+
+                ---
+
+                ### 💧 The Intuitive Analogy:
+                Imagine a **water park pipe system**:
+                - **Driving Force (Voltage / Potential):** The water pump pushing water up to the top slide. The higher the pump pressure, the stronger the push.
+                - **Flow Rate (Current / Flux):** The actual volume of water rushing down the pipe each second.
+                - **Resistance (Impedance / Friction):** How narrow or bumpy the pipe is. A wider pipe lets water flow freely; a narrow pipe slows it down!
+
+                ---
+
+                ### 🧠 The Big Idea in One Sentence:
+                > *"You can only get as much flow as the pressure allows through whatever obstacles stand in the way."*
+
+                ---
+
+                ### 🔑 3 Golden Rules to Remember:
+                1. **No Pressure = No Flow:** Without an active gradient, everything stays at equilibrium.
+                2. **Opposition Generates Heat / Loss:** Work done against resistance dissipates energy into the environment.
+                3. **Conservation Always Holds:** Whatever enters a junction must come out the other side.
+
+                ---
+                💡 *Does this make sense? Tap **"💡 Give Examples"** to see a practical calculation or **"✍️ Quiz Me"**!*
+                """.trimIndent()
+                TutorResponseResult(replyMarkdown = markdown, actionType = actionType, isOfflineFallback = true)
+            }
+
+            TutorActionType.GIVE_EXAMPLES -> {
+                val markdown = """
+                # 💡 Practical Worked Examples: $topic
+                *Subject: $subject • Step-by-Step Numerical Practice for $student*
+
+                ---
+
+                ### 📝 Worked Example 1: Standard Numerical Drill
+                **Problem Statement:**
+                In a standard $subject test setup for **$topic**, a circuit/system has a driving input of 12 V and two elements in series with values R1 = 4 Ohm and R2 = 8 Ohm. Find the total equivalent value and the potential drop across R2.
+
+                **Step-by-Step Solution:**
+                1. **Equivalent Calculation:**
+                   Req = R1 + R2 = 4 + 8 = 12 Ohm
+                2. **Total Current / Flow:**
+                   I = V / Req = 12 V / 12 Ohm = 1.0 A
+                3. **Potential Drop across R2:**
+                   V2 = I * R2 = 1.0 A * 8 Ohm = 8.0 V
+
+                **Physical Check:** V1 + V2 = 4V + 8V = 12V, satisfying Kirchhoff's conservation! ✅
+
+                ---
+
+                ### 🚀 Practical Real-World Application:
+                In smartphone fast chargers and EV power inverters, **$topic** principles dynamically regulate power delivery to keep battery temperatures optimal and prevent thermal runaway!
+
+                ---
+                💡 *Would you like 3 practice questions on this topic? Tap **"✍️ Practice Questions"**!*
+                """.trimIndent()
+                TutorResponseResult(replyMarkdown = markdown, actionType = actionType, isOfflineFallback = true)
+            }
+
+            TutorActionType.PRACTICE_QUESTIONS -> {
+                val questions = listOf(
+                    Question(
+                        id = "tutor_q1",
+                        questionText = "In $topic ($subject), what fundamental physical quantity is conserved at any junction or node?",
+                        options = listOf("Electric Charge", "Electrostatic Potential", "Magnetic Flux", "Kinetic Energy"),
+                        correctOptionIndex = 0,
+                        explanation = "Charge conservation dictates that total incoming current must equal total outgoing current (Sum I = 0).",
+                        subject = subject,
+                        topic = topic,
+                        difficulty = "Medium"
+                    ),
+                    Question(
+                        id = "tutor_q2",
+                        questionText = "When applying loop equations in $topic, what is the consequence of reversing the chosen loop traversal direction?",
+                        options = listOf("All potential term signs invert, but the final physical solution remains identical", "The calculated current magnitude changes", "The power dissipation becomes negative", "Kirchhoff's law becomes invalid"),
+                        correctOptionIndex = 0,
+                        explanation = "Traversing in opposite direction multiplies the entire loop equation by -1, leaving the physical roots unchanged.",
+                        subject = subject,
+                        topic = topic,
+                        difficulty = "Hard"
+                    ),
+                    Question(
+                        id = "tutor_q3",
+                        questionText = "For $topic, inserting a high-permittivity medium into the active field region causes which effect?",
+                        options = listOf("Storage capacity increases while electric field reduces", "System impedance drops to zero", "Total stored energy doubles unconditionally", "Field diverges to infinity"),
+                        correctOptionIndex = 0,
+                        explanation = "Dielectric polarization counteracts the external field, effectively increasing capacitance C' = K * C0.",
+                        subject = subject,
+                        topic = topic,
+                        difficulty = "Easy"
+                    )
+                )
+
+                val markdown = """
+                # ✍️ High-Yield Practice Questions: $topic
+                *Subject: $subject • 3 Questions Tailored for ${context.targetExam}*
+
+                ---
+
+                ### 📌 Question 1: [Medium]
+                **In $topic ($subject), what fundamental physical quantity is conserved at any junction or node?**
+                - **A)** Electric Charge
+                - **B)** Electrostatic Potential
+                - **C)** Magnetic Flux
+                - **D)** Kinetic Energy
+                *💡 Answer: **(A) Electric Charge** — Total charge flowing in equals total charge flowing out (Sum of currents = 0).*
+
+                ---
+
+                ### 📌 Question 2: [Hard - Exam Favorite]
+                **When applying loop equations in $topic, what happens if you reverse the loop traversal direction?**
+                - **A)** All potential term signs invert, but the final physical solution remains identical
+                - **B)** The calculated current magnitude changes
+                - **C)** The power dissipation becomes negative
+                - **D)** The equation becomes invalid
+                *💡 Answer: **(A)** — Multiplying both sides by -1 preserves exact physical consistency.*
+
+                ---
+
+                ### 📌 Question 3: [Conceptual]
+                **For $topic, inserting a dielectric medium into the field region causes:**
+                - **A)** Storage capacity increases while net internal field reduces
+                - **B)** System impedance drops to zero
+                - **C)** Total stored energy doubles unconditionally
+                - **D)** Field diverges to infinity
+                *💡 Answer: **(A)** — Polarization reduces net field, yielding C' = K * C0.*
+
+                ---
+                ✨ *Practice complete! You can review these anytime or generate flashcards below.*
+                """.trimIndent()
+
+                TutorResponseResult(
+                    replyMarkdown = markdown,
+                    actionType = actionType,
+                    generatedQuestions = questions,
+                    isOfflineFallback = true
+                )
+            }
+
+            TutorActionType.GENERATE_FLASHCARDS -> {
+                val cards = listOf(
+                    FlashcardItem(
+                        subject = subject,
+                        topic = topic,
+                        front = "What is the primary governing principle of $topic?",
+                        back = "Conserves fundamental quantities (charge/energy) while relating driving gradients to system opposition under boundary limits.",
+                        hint = "Think about conservation laws and flow rates.",
+                        difficulty = "Medium",
+                        status = RevisionCategory.REVISE_NOW,
+                        confidence = 2
+                    ),
+                    FlashcardItem(
+                        subject = subject,
+                        topic = topic,
+                        front = "State the core quantitative equation used in $topic.",
+                        back = "Standard form: V = I * R or dPhi/dt = -emf. Ensure consistent SI units and sign convention across all loop nodes.",
+                        hint = "Review driving force vs resistance.",
+                        difficulty = "Hard",
+                        status = RevisionCategory.REVISE_NOW,
+                        confidence = 2
+                    ),
+                    FlashcardItem(
+                        subject = subject,
+                        topic = topic,
+                        front = "What is the biggest exam trap in $topic ($subject)?",
+                        back = "Sign errors during loop traversal and ignoring internal resistance or boundary condition changes at t = 0 vs t = infinity.",
+                        hint = "Watch negative signs and loop direction.",
+                        difficulty = "Medium",
+                        status = RevisionCategory.PRACTICE_SOON,
+                        confidence = 3
+                    ),
+                    FlashcardItem(
+                        subject = subject,
+                        topic = topic,
+                        front = "How do series vs parallel combinations behave in $topic?",
+                        back = "In series: elements share identical flow/current; potential divides. In parallel: elements share identical potential; flow/current divides.",
+                        hint = "Current is same in series, voltage is same in parallel.",
+                        difficulty = "Easy",
+                        status = RevisionCategory.REVISE_NOW,
+                        confidence = 2
+                    )
+                )
+
+                val markdown = """
+                # 🗂️ 4 High-Yield Flashcards Generated for $topic
+                *Subject: $subject • Ready for Spaced Repetition Practice*
+
+                ---
+
+                1. **Q:** What is the primary governing principle of $topic?  
+                   **A:** Conserves fundamental quantities (charge/energy) while relating driving gradients to system opposition.  
+                   *(Hint: Think about conservation laws)*
+
+                2. **Q:** State the core quantitative equation used in $topic.  
+                   **A:** V = I * R or dPhi/dt = -emf with consistent SI units and sign conventions.  
+                   *(Hint: Review driving force vs opposition)*
+
+                3. **Q:** What is the biggest exam trap in $topic?  
+                   **A:** Sign errors during loop traversal and ignoring internal resistance or boundary conditions at t=0 vs t -> inf.  
+                   *(Hint: Watch negative signs and loop directions)*
+
+                4. **Q:** How do series vs parallel combinations behave in $topic?  
+                   **A:** Series: identical flow/current; potential divides. Parallel: identical potential; flow/current divides.  
+                   *(Hint: Current same in series, Voltage same in parallel)*
+
+                ---
+                👉 *Tap the **"🗂️ Save Flashcards to My Deck"** button below to add these directly to your StudyMate Spaced Repetition deck!*
+                """.trimIndent()
+
+                TutorResponseResult(
+                    replyMarkdown = markdown,
+                    actionType = actionType,
+                    generatedFlashcards = cards,
+                    isOfflineFallback = true
+                )
+            }
+
+            TutorActionType.SUMMARIZE_MATERIAL -> {
+                val markdown = """
+                # 📄 High-Yield Study Summary: $topic
+                *Subject: $subject • Prepared for $student (${context.targetExam})*
+
+                ---
+
+                ### 📌 Executive Takeaways:
+                - **Key Axiom:** The physical behavior in $topic is governed by strict conservation of state variables under equilibrium constraints.
+                - **High-Frequency Exam Theme:** Examiners frequently test transition states, circuit loop equations, and sign conventions.
+                - **Key Formula Sheet:**
+                  1. Primary Relation: Gradient = Flux * Resistance
+                  2. Boundary State (t = 0): Inductors open-circuit; Capacitors short-circuit.
+                  3. Steady State (t -> inf): Inductors short-circuit; Capacitors open-circuit.
+
+                ---
+
+                ### 🎯 3 Active-Recall Self-Check Questions:
+                1. *Can you state the governing law without looking at notes?*
+                2. *Why does reversing the loop direction not alter the physical solution?*
+                3. *What happens to energy stored when system dimensions change?*
+
+                ---
+                💡 *Tip: Turn these into flashcards or practice questions with the quick action buttons below!*
+                """.trimIndent()
+                TutorResponseResult(replyMarkdown = markdown, actionType = actionType, isOfflineFallback = true)
+            }
+
+            TutorActionType.REVISION_PLAN -> {
+                val markdown = """
+                # 🔄 7-Day High-Impact Revision Plan for $subject
+                *Student: $student • Target: ${context.targetExam} (⏳ ${context.examDaysRemaining} Days Left)*
+
+                ---
+
+                | Day | Focus Topic / Weak Spot | Target Time | High-Yield Activity |
+                | :--- | :--- | :--- | :--- |
+                | **Day 1** | **$topic** (Core Concepts) | 45 mins | Formula derivations & 10 textbook numericals |
+                | **Day 2** | **$weakTopicsStr** | 50 mins | Active recall flashcards & mistake pattern review |
+                | **Day 3** | **$subject High-Weightage Chapter** | 40 mins | 5 PYQs (Previous Year Questions) under timed conditions |
+                | **Day 4** | **Rest & Spaced Retrieval** | 25 mins | 20 flashcard reviews on challenging concepts |
+                | **Day 5** | **Mixed Problem Solving** | 45 mins | 10 multi-concept synthesis questions |
+                | **Day 6** | **Mock Sectional Test** | 60 mins | Full 25-question timed mock test |
+                | **Day 7** | **Diagnostic & Error Correction** | 35 mins | AI Mistake log analysis & weak area patching |
+
+                ---
+                🚀 **Pro-Tip:** Follow a 25-minute Pomodoro cycle with 5-minute active recall breaks to maximize retention!
+                """.trimIndent()
+                TutorResponseResult(replyMarkdown = markdown, actionType = actionType, isOfflineFallback = true)
+            }
+
+            TutorActionType.IDENTIFY_WEAK_AREAS -> {
+                val markdown = """
+                # 🎯 AI Diagnostic & Weak Area Audit for $subject
+                *Diagnostic for: $student • Academic Level: ${context.grade}*
+
+                ---
+
+                ### 📊 Diagnostic Findings:
+                1. **Primary Vulnerability:** **$weakTopicsStr**
+                   - *Root Cause:* Inconsistent application of sign conventions and rushing through boundary condition setups (t=0 vs t -> inf).
+                   - *Impact:* Leads to 1-2 negative marking errors on multi-choice questions.
+
+                2. **Secondary Risk Factor:** **Formula Memorization vs Intuition**
+                   - *Root Cause:* Relying on memorized shortcut formulas rather than writing down the foundational conservation equation.
+
+                ---
+
+                ### 🛠️ 3-Step Remediation Roadmap:
+                1. **Step 1 (Today - 25m):** Review foundational derivations for $topic with clear hand-drawn diagrams.
+                2. **Step 2 (Tomorrow - 30m):** Solve 5 classic textbook problems without using shortcuts, writing every loop equation explicitly.
+                3. **Step 3 (Day 3 - 20m):** Review the 4 high-yield flashcards generated in the Flashcards tab.
+
+                ---
+                💪 *You're close to mastering this! Tap **"📖 Explain Concept"** or **"💡 Give Examples"** to start remediation now.*
+                """.trimIndent()
+                TutorResponseResult(replyMarkdown = markdown, actionType = actionType, isOfflineFallback = true)
+            }
+
+            TutorActionType.DAILY_STUDY_PLAN -> {
+                val planItems = listOf(
+                    StudyPlanItem(
+                        subject = subject,
+                        chapter = topic,
+                        topic = "Core Concept Mastery & Derivations",
+                        targetMinutes = 45,
+                        priority = PlanPriority.HIGH,
+                        notes = "Review foundational principles and solve 5 standard textbook problems."
+                    ),
+                    StudyPlanItem(
+                        subject = subject,
+                        chapter = topic,
+                        topic = "High-Yield Numerical Practice & Trap Analysis",
+                        targetMinutes = 40,
+                        priority = PlanPriority.HIGH,
+                        notes = "Focus on sign conventions and boundary condition numericals."
+                    ),
+                    StudyPlanItem(
+                        subject = if (context.weakTopics.isNotEmpty()) subject else "General Revision",
+                        chapter = weakTopicsStr,
+                        topic = "Targeted Weak Area Remediation",
+                        targetMinutes = 35,
+                        priority = PlanPriority.MEDIUM,
+                        notes = "Revise mistake logs and test recall on active flashcards."
+                    ),
+                    StudyPlanItem(
+                        subject = "Active Recall",
+                        chapter = "Daily Flashcard Session",
+                        topic = "Spaced Repetition Review (20 Cards)",
+                        targetMinutes = 20,
+                        priority = PlanPriority.LOW,
+                        notes = "Reinforce memory retention before wrapping up today."
+                    )
+                )
+
+                val markdown = """
+                # 📅 Personalized Daily Study Plan for Today
+                *Prepared for: $student • Total Target: ${context.dailyTargetMinutes} Minutes*
+
+                ---
+
+                ### ⏰ Today's Optimized Schedule:
+                - **Slot 1 (45 mins) - 🔥 High Priority:**  
+                  **$subject -> $topic**  
+                  *Focus:* Core derivations, governing equations, and fundamental understanding.
+
+                - **Slot 2 (40 mins) - ⚡ Practice:**  
+                  **$subject -> Numerical Practice & Trap Analysis**  
+                  *Focus:* 5-8 exam-style questions with rigorous step-by-step working.
+
+                - **Slot 3 (35 mins) - 🎯 Weak Spot Patch:**  
+                  **$subject -> $weakTopicsStr**  
+                  *Focus:* Targeted error correction and reviewing recent test mistakes.
+
+                - **Slot 4 (20 mins) - 🧠 Memory Consolidation:**  
+                  **Active Recall Deck**  
+                  *Focus:* 20 spaced repetition flashcards on challenging definitions.
+
+                ---
+                👉 *Tap the **"📅 Import into Study Planner"** button below to add these tasks directly to your active Study Plan!*
+                """.trimIndent()
+
+                TutorResponseResult(
+                    replyMarkdown = markdown,
+                    actionType = actionType,
+                    generatedPlanItems = planItems,
+                    isOfflineFallback = true
+                )
+            }
+
+            TutorActionType.GENERAL_CHAT -> {
+                val markdown = """
+                ✨ **StudyMate AI Tutor**
+                *Answering in context of $subject ($topic) for $student*
+
+                ---
+
+                ### 🧠 Conceptual Solution & Analysis:
+                Regarding your question: *"$prompt"*
+
+                1. **Fundamental Principle:**
+                   In **$subject**, this question ties directly into **$topic**. The core physical principle requires that all governing conservation equations balance across the boundary.
+
+                2. **Step-by-Step Breakdown:**
+                   - **Identify Given Parameters:** Determine what variables are explicitly defined and what must be calculated.
+                   - **Select Governing Formula:** Apply the fundamental equation relating the driving gradient to the system's resistance/inertia.
+                   - **Verify Units & Signs:** Always ensure SI unit consistency and watch for sign convention traps!
+
+                3. **Pro-Tip for ${context.targetExam}:**
+                   > In competitive exams, questions on this topic test whether you understand the transition state (t=0 vs t -> inf) rather than just raw computation.
+
+                ---
+                💡 *Would you like me to **"🐣 Simplify"**, **"💡 Give Examples"**, or **"✍️ Generate Practice Questions"** on this?*
+                """.trimIndent()
+                TutorResponseResult(replyMarkdown = markdown, actionType = actionType, isOfflineFallback = true)
+            }
+        }
+    }
+
+    private fun extractFlashcardsFromMarkdown(text: String, subject: String, defaultTopic: String): List<FlashcardItem>? {
+        return try {
+            val lines = text.lines()
+            val cards = mutableListOf<FlashcardItem>()
+            var currentFront = ""
+            var currentBack = ""
+            var currentHint = ""
+            val now = System.currentTimeMillis()
+
+            for (line in lines) {
+                val trim = line.trim()
+                if (trim.contains("**Q:**") || trim.contains("**Front:**") || trim.startsWith("1.") || trim.startsWith("2.") || trim.startsWith("3.") || trim.startsWith("4.")) {
+                    if (currentFront.isNotBlank() && currentBack.isNotBlank()) {
+                        cards.add(FlashcardItem(subject = subject, topic = defaultTopic, front = currentFront, back = currentBack, hint = currentHint, createdAt = now))
+                        currentFront = ""
+                        currentBack = ""
+                        currentHint = ""
+                    }
+                    val cleanFront = trim.substringAfter("**Q:**").substringAfter("**Front:**").substringAfter(".").trim()
+                    if (cleanFront.isNotBlank()) currentFront = cleanFront
+                } else if (trim.contains("**A:**") || trim.contains("**Back:**")) {
+                    currentBack = trim.substringAfter("**A:**").substringAfter("**Back:**").trim()
+                } else if (trim.contains("*(Hint:") || trim.contains("*(Memory:")) {
+                    currentHint = trim.substringAfter(":").removeSuffix(")*").removeSuffix(")").trim()
+                }
+            }
+            if (currentFront.isNotBlank() && currentBack.isNotBlank()) {
+                cards.add(FlashcardItem(subject = subject, topic = defaultTopic, front = currentFront, back = currentBack, hint = currentHint, createdAt = now))
+            }
+            if (cards.isNotEmpty()) cards else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun extractPlanItemsFromMarkdown(text: String, subject: String): List<StudyPlanItem>? {
+        return try {
+            val items = mutableListOf<StudyPlanItem>()
+            val lines = text.lines()
+            for (line in lines) {
+                if (line.contains("Slot") || line.contains("Day") || line.contains("mins")) {
+                    val targetMins = if (line.contains("45")) 45 else if (line.contains("60")) 60 else if (line.contains("30")) 30 else 25
+                    items.add(
+                        StudyPlanItem(
+                            subject = subject,
+                            chapter = "Scheduled Study",
+                            topic = line.replace("#", "").replace("*", "").trim().take(50),
+                            targetMinutes = targetMins,
+                            priority = PlanPriority.HIGH
+                        )
+                    )
+                }
+            }
+            if (items.isNotEmpty()) items else null
+        } catch (e: Exception) {
+            null
+        }
     }
 
     suspend fun analyzeDocument(

@@ -184,6 +184,15 @@ class StudyRepository(
         id
     }
 
+    suspend fun insertFlashcard(card: FlashcardItem): Long = withContext(Dispatchers.IO) {
+        val id = database.flashcardDao().insertFlashcard(card)
+        val user = database.userDao().getUserProfileOnce()
+        if (user != null) {
+            database.userDao().insertOrUpdateUserProfile(user.copy(xp = user.xp + 20))
+        }
+        id
+    }
+
     suspend fun updateFlashcard(card: FlashcardItem) = withContext(Dispatchers.IO) {
         database.flashcardDao().updateFlashcard(card)
     }

@@ -87,7 +87,7 @@ class AuthRepository(
             val googleIdOption = GetGoogleIdOption.Builder()
                 .setFilterByAuthorizedAccounts(false)
                 .setServerClientId(serverClientId)
-                .setAutoSelectEnabled(true)
+                .setAutoSelectEnabled(false)
                 .build()
 
             val request = GetCredentialRequest.Builder()
@@ -110,20 +110,35 @@ class AuthRepository(
                 googlePhotoUri = googleIdTokenCredential.profilePictureUri?.toString()
             }
 
-            if (googleIdToken.isNullOrBlank()) {
+            if (googleIdToken.isNullOrBlank() && googleEmail.isBlank()) {
                 return@withContext Result.failure(Exception("Unable to retrieve Google credential. Please try again."))
             }
 
-            // Authenticate with Firebase Authentication
-            val auth = firebaseAuth ?: return@withContext Result.failure(Exception("Firebase is not initialized."))
-            val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
-            val authResult = auth.signInWithCredential(authCredential).await()
-            val fbUser = authResult.user
+            // Authenticate with Firebase Authentication if available
+            var finalUid = ""
+            var finalEmail = googleEmail
+            var finalDisplayName = googleDisplayName ?: "Student"
+            var finalPhotoUrl = googlePhotoUri
 
-            val finalUid = fbUser?.uid ?: ""
-            val finalEmail = fbUser?.email ?: googleEmail
-            val finalDisplayName = fbUser?.displayName ?: googleDisplayName ?: "Student"
-            val finalPhotoUrl = fbUser?.photoUrl?.toString() ?: googlePhotoUri
+            val auth = firebaseAuth
+            if (auth != null && !googleIdToken.isNullOrBlank()) {
+                try {
+                    val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
+                    val authResult = auth.signInWithCredential(authCredential).await()
+                    val fbUser = authResult.user
+                    if (fbUser != null) {
+                        finalUid = fbUser.uid
+                        finalEmail = fbUser.email ?: finalEmail
+                        finalDisplayName = fbUser.displayName ?: finalDisplayName
+                        finalPhotoUrl = fbUser.photoUrl?.toString() ?: finalPhotoUrl
+                    }
+                } catch (fbEx: Exception) {
+                    Log.w(TAG, "Firebase sign-in failed, proceeding with Google Id token info: ${fbEx.message}")
+                    finalUid = "google_${googleEmail.hashCode()}"
+                }
+            } else {
+                finalUid = "google_${googleEmail.hashCode()}"
+            }
 
             // Check if user has previously completed onboarding
             val existingProfile = userDao.getUserProfileOnce()
@@ -167,7 +182,7 @@ class AuthRepository(
             Result.failure(Exception("Google Sign-In configuration error. Please check Google Play Services."))
         } catch (e: GetCredentialException) {
             Log.e(TAG, "Credential Manager error", e)
-            Result.failure(Exception("Could not complete Google Sign-In. Please try again."))
+            Result.failure(Exception("Could not complete Google Sign-In: ${e.message}"))
         } catch (e: FirebaseAuthException) {
             Log.e(TAG, "Firebase auth error", e)
             Result.failure(Exception("Authentication failed with Firebase: ${e.localizedMessage ?: "Please try again"}"))
@@ -256,6 +271,23 @@ class AuthRepository(
             )
             userDao.insertOrUpdateUserProfile(guestProfile)
             Result.success(guestProfile)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateUserProfile(updatedProfile: UserProfile): Result<UserProfile> = withContext(Dispatchers.IO) {
+        try {
+            val currentProfile = userDao.getUserProfileOnce()
+            val finalProfile = updatedProfile.copy(
+                id = "current_user",
+                uid = currentProfile?.uid ?: updatedProfile.uid,
+                email = currentProfile?.email ?: updatedProfile.email,
+                photoUrl = updatedProfile.photoUrl ?: currentProfile?.photoUrl,
+                isOnboardingCompleted = true
+            )
+            userDao.insertOrUpdateUserProfile(finalProfile)
+            Result.success(finalProfile)
         } catch (e: Exception) {
             Result.failure(e)
         }

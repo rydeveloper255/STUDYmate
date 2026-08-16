@@ -34,6 +34,8 @@ import com.example.ui.theme.*
 import java.util.Calendar
 
 import com.example.data.model.AiCoachRecommendation
+import com.example.data.model.FlashcardItem
+import com.example.data.model.RevisionCategory
 import com.example.data.model.StudyNowRecommendation
 
 @Composable
@@ -41,6 +43,7 @@ fun HomeScreen(
     user: UserProfile?,
     studyPlan: List<StudyPlanItem>,
     missions: List<DailyMission>,
+    flashcards: List<FlashcardItem> = emptyList(),
     aiCoachRecommendation: AiCoachRecommendation? = null,
     studyNowRecommendation: StudyNowRecommendation? = null,
     isAiCoachLoading: Boolean = false,
@@ -122,6 +125,22 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    IconButton(
+                        onClick = onOpenProfileSettings,
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(if (isDark) Color(0x18FFFFFF) else Color(0x10000000))
+                            .testTag("home_notification_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.NotificationsNone,
+                            contentDescription = "Notifications & Reminders",
+                            tint = if (isDark) NeonCyan else Color(0xFF0284C7),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
                     ThemeToggleButton(testTag = "home_theme_toggle")
                     StreakBadge(streakDays = user?.streakDays ?: 1)
 
@@ -549,25 +568,44 @@ fun HomeScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
+                    val now = remember { System.currentTimeMillis() }
+                    val reviseNowCount = if (flashcards.isNotEmpty()) {
+                        flashcards.count { it.status == RevisionCategory.REVISE_NOW || it.nextReviewDate <= now }
+                    } else {
+                        user?.weakSubjects?.size ?: 0
+                    }
+
+                    val practiceSoonCount = if (flashcards.isNotEmpty()) {
+                        flashcards.count { it.status == RevisionCategory.PRACTICE_SOON && it.nextReviewDate > now }
+                    } else {
+                        user?.subjects?.size?.minus(user?.weakSubjects?.size ?: 0)?.coerceAtLeast(0) ?: 0
+                    }
+
+                    val strongCount = if (flashcards.isNotEmpty()) {
+                        flashcards.count { it.status == RevisionCategory.STRONG }
+                    } else {
+                        user?.strongSubjects?.size ?: 0
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         RevisionRadarBadge(
                             label = "🔴 Revise Now",
-                            count = "3 Topics",
+                            count = "$reviseNowCount Cards",
                             color = CoralRose,
                             modifier = Modifier.weight(1f)
                         )
                         RevisionRadarBadge(
                             label = "🟡 Practice Soon",
-                            count = "5 Topics",
+                            count = "$practiceSoonCount Cards",
                             color = GoldenSpark,
                             modifier = Modifier.weight(1f)
                         )
                         RevisionRadarBadge(
                             label = "🟢 Strong",
-                            count = "12 Topics",
+                            count = "$strongCount Cards",
                             color = EmeraldSuccess,
                             modifier = Modifier.weight(1f)
                         )

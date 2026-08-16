@@ -1,6 +1,7 @@
 package com.example
 
 import android.app.Application
+import android.graphics.Bitmap
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
@@ -10,7 +11,6 @@ import com.example.data.remote.AuthRepository
 import com.example.data.remote.GeminiRepository
 import com.example.data.repository.StudyRepository
 import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -29,11 +29,13 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
     lateinit var studyRepository: StudyRepository
         private set
 
+    private var imageLoaderInstance: ImageLoader? = null
+
     override fun newImageLoader(): ImageLoader {
-        return ImageLoader.Builder(this)
+        val loader = ImageLoader.Builder(this)
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizePercent(0.25)
+                    .maxSizePercent(0.15)
                     .build()
             }
             .diskCache {
@@ -42,28 +44,43 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
                     .maxSizePercent(0.02)
                     .build()
             }
-            .allowHardware(true)
+            .bitmapConfig(Bitmap.Config.ARGB_8888)
+            .allowHardware(false)
             .crossfade(true)
+            .respectCacheHeaders(false)
             .build()
+        imageLoaderInstance = loader
+        return loader
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        try {
+            if (level >= TRIM_MEMORY_MODERATE) {
+                imageLoaderInstance?.memoryCache?.clear()
+            }
+        } catch (e: Exception) {
+            // Ignore if imageLoader not initialized
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        try {
+            imageLoaderInstance?.memoryCache?.clear()
+        } catch (e: Exception) {
+            // Ignore
+        }
     }
 
     override fun onCreate() {
         super.onCreate()
         try {
             if (FirebaseApp.getApps(this).isEmpty()) {
-                try {
-                    FirebaseApp.initializeApp(this)
-                } catch (e: Exception) {
-                    val fallbackOptions = FirebaseOptions.Builder()
-                        .setApplicationId(packageName)
-                        .setApiKey("AIzaSyDummyKeyForOfflineDevEnvironment000")
-                        .setProjectId("studymate-ai-dev")
-                        .build()
-                    FirebaseApp.initializeApp(this, fallbackOptions)
-                }
+                FirebaseApp.initializeApp(this)
             }
         } catch (e: Exception) {
-            // Handled gracefully in offline or container test runs
+            // Handled gracefully in offline or container test runs if google-services.json is absent
         }
 
         database = StudyMateDatabase.getDatabase(this)
@@ -74,11 +91,7 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
         // Initialize Focus Shield & Offline Notification System
         com.example.service.FocusShieldManager.init(this)
         com.example.notification.StudyNotificationManager.initNotificationChannels(this)
-        com.example.notification.StudyNotificationManager.scheduleDailyStudyReminder(
-            this,
-            com.example.notification.StudyNotificationManager.getSettings(this).reminderHour,
-            com.example.notification.StudyNotificationManager.getSettings(this).reminderMinute
-        )
+        com.example.notification.StudyNotificationManager.scheduleAllReminders(this)
 
         CoroutineScope(Dispatchers.IO).launch {
             studyRepository.populateInitialDataIfEmpty()

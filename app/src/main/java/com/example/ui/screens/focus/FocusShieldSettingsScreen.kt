@@ -1,8 +1,12 @@
 package com.example.ui.screens.focus
 
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.provider.Settings
+import android.widget.Toast
 import androidx.compose.animation.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -21,18 +26,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.service.FocusShieldApp
 import com.example.service.FocusShieldManager
+import com.example.service.InstalledAppInfo
 import com.example.ui.components.GlassButton
 import com.example.ui.components.GlassCard
+import com.example.ui.components.springClickable
 import com.example.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun FocusShieldSettingsScreen(
@@ -43,14 +51,38 @@ fun FocusShieldSettingsScreen(
 
     var isShieldEnabled by remember { mutableStateOf(FocusShieldManager.isShieldEnabled()) }
     var isAccessibilityGranted by remember { mutableStateOf(FocusShieldManager.isAccessibilityServiceEnabled(context)) }
+    var isUsageAccessGranted by remember { mutableStateOf(FocusShieldManager.isUsageAccessGranted(context)) }
+    var showPermissionExplanationDialog by remember { mutableStateOf(false) }
+
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("All Apps") }
-    var showAddCustomDialog by remember { mutableStateOf(false) }
+    var isLoadingApps by remember { mutableStateOf(true) }
+    var installedApps by remember { mutableStateOf<List<InstalledAppInfo>>(emptyList()) }
+    var restrictedSet by remember { mutableStateOf<Set<String>>(FocusShieldManager.getRestrictedPackages()) }
+    var hasUnsavedChanges by remember { mutableStateOf(false) }
 
-    // Re-check accessibility on refresh
-    val allApps = remember(searchQuery, selectedCategory, isShieldEnabled) {
-        val apps = FocusShieldManager.getAllApps()
-        apps.filter { app ->
+    // Load installed apps asynchronously from PackageManager
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            val apps = FocusShieldManager.loadInstalledApps(context)
+            withContext(Dispatchers.Main) {
+                installedApps = apps
+                restrictedSet = FocusShieldManager.getRestrictedPackages()
+                isLoadingApps = false
+            }
+        }
+    }
+
+    // Refresh permission statuses periodically when user returns
+    LaunchedEffect(Unit) {
+        isAccessibilityGranted = FocusShieldManager.isAccessibilityServiceEnabled(context)
+        isUsageAccessGranted = FocusShieldManager.isUsageAccessGranted(context)
+    }
+
+    val categories = listOf("All Apps", "Social Media", "Streaming", "Shorts & Videos", "Messaging", "Gaming", "Browsing")
+
+    val filteredApps = remember(installedApps, searchQuery, selectedCategory) {
+        installedApps.filter { app ->
             val matchesCategory = selectedCategory == "All Apps" || app.category.equals(selectedCategory, ignoreCase = true)
             val matchesSearch = searchQuery.isBlank() ||
                     app.appName.contains(searchQuery, ignoreCase = true) ||
@@ -58,8 +90,6 @@ fun FocusShieldSettingsScreen(
             matchesCategory && matchesSearch
         }
     }
-
-    val categories = listOf("All Apps", "Social Media", "Streaming", "Messaging", "Gaming", "Browsing")
 
     Box(
         modifier = modifier
@@ -71,7 +101,7 @@ fun FocusShieldSettingsScreen(
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(bottom = 80.dp)
+            contentPadding = PaddingValues(bottom = 100.dp)
         ) {
             // Header
             item {
@@ -91,18 +121,18 @@ fun FocusShieldSettingsScreen(
                                 .background(Color(0x20FFFFFF))
                                 .testTag("focus_shield_back_btn")
                         ) {
-                            Icon(Icons.Filled.ArrowBack, "Back", tint = Color.White)
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "🛡️ Focus Shield",
+                                text = "🛡️ Focus Mode → Blocked Apps",
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
                             Text(
-                                text = "Block distracting apps during study sessions",
+                                text = "Select apps to block during focus sessions",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color(0xFF94A3B8)
                             )
@@ -128,7 +158,7 @@ fun FocusShieldSettingsScreen(
                 }
             }
 
-            // Master Protection Toggle Card
+            // Master Shield Protection Toggle
             item {
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
@@ -168,13 +198,13 @@ fun FocusShieldSettingsScreen(
                             Spacer(modifier = Modifier.width(14.dp))
                             Column {
                                 Text(
-                                    text = "Focus Shield Protection",
+                                    text = "Focus App Blocking Shield",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
                                 Text(
-                                    text = if (isShieldEnabled) "Restricted apps will be blocked during focus timer" else "Shield is disabled",
+                                    text = if (isShieldEnabled) "Active during study countdowns" else "Disabled — apps will not be blocked",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color(0xFF94A3B8)
                                 )
@@ -199,18 +229,17 @@ fun FocusShieldSettingsScreen(
                 }
             }
 
-            // Accessibility Status Banner
+            // Permission Status & Clear Explanation Card
             item {
-                val isServiceActive = FocusShieldManager.isAccessibilityServiceEnabled(context)
-                isAccessibilityGranted = isServiceActive
+                val hasAnyMonitoringPermission = isAccessibilityGranted || isUsageAccessGranted
 
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
-                    color = if (isServiceActive) Color(0x2010B981) else Color(0x25F59E0B),
+                    color = if (hasAnyMonitoringPermission) Color(0x2010B981) else Color(0x25F59E0B),
                     border = androidx.compose.foundation.BorderStroke(
                         1.dp,
-                        if (isServiceActive) Color(0x5010B981) else Color(0x60F59E0B)
+                        if (hasAnyMonitoringPermission) Color(0x5010B981) else Color(0x60F59E0B)
                     )
                 ) {
                     Column(
@@ -218,62 +247,89 @@ fun FocusShieldSettingsScreen(
                             .fillMaxWidth()
                             .padding(16.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = if (isServiceActive) Icons.Filled.VerifiedUser else Icons.Filled.Warning,
-                                contentDescription = null,
-                                tint = if (isServiceActive) EmeraldSuccess else GoldenSpark,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = if (isServiceActive) "Accessibility Service Granted" else "Accessibility Permission Required",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = if (hasAnyMonitoringPermission) Icons.Filled.VerifiedUser else Icons.Filled.Warning,
+                                    contentDescription = null,
+                                    tint = if (hasAnyMonitoringPermission) EmeraldSuccess else GoldenSpark,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = if (hasAnyMonitoringPermission) "App Blocking Ready" else "Android Setup Required",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+
+                            TextButton(
+                                onClick = { showPermissionExplanationDialog = true }
+                            ) {
+                                Text("Why Needed?", color = NeonCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
 
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
 
                         Text(
-                            text = if (isServiceActive)
-                                "Focus Shield is actively monitoring window changes to automatically block restricted app launches during focus sessions."
+                            text = if (hasAnyMonitoringPermission)
+                                "StudyMate AI is ready to detect when blocked apps are launched during your scheduled focus sessions and show the study reminder screen."
                             else
-                                "To detect when restricted apps are launched, Android requires enabling the Focus Shield Accessibility Service.",
+                                "To detect foreground distracting apps during active study sessions, Android requires either Accessibility or Usage Access permission.",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFFCBD5E1),
                             lineHeight = 18.sp
                         )
 
-                        if (!isServiceActive) {
+                        if (!hasAnyMonitoringPermission) {
                             Spacer(modifier = Modifier.height(12.dp))
-                            Button(
-                                onClick = {
-                                    try {
-                                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                                        context.startActivity(intent)
-                                    } catch (e: Exception) {
-                                        // Fallback settings
-                                        context.startActivity(Intent(Settings.ACTION_SETTINGS))
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = GoldenSpark, contentColor = Color(0xFF070B19)),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("grant_accessibility_btn")
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(Icons.Filled.Settings, null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Grant Accessibility Permission in Settings", fontWeight = FontWeight.Bold)
+                                Button(
+                                    onClick = {
+                                        try {
+                                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                        } catch (e: Exception) {
+                                            context.startActivity(Intent(Settings.ACTION_SETTINGS))
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = GoldenSpark, contentColor = Color(0xFF070B19)),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.weight(1f).testTag("grant_accessibility_btn")
+                                ) {
+                                    Text("1. Accessibility", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        try {
+                                            context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                                        } catch (e: Exception) {
+                                            context.startActivity(Intent(Settings.ACTION_SETTINGS))
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0x30FFFFFF), contentColor = Color.White),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.weight(1f).testTag("grant_usage_btn")
+                                ) {
+                                    Text("2. Usage Access", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // Search & Category Filters Card
+            // Search Bar & Filter Section
             item {
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
@@ -285,11 +341,11 @@ fun FocusShieldSettingsScreen(
                             .fillMaxWidth()
                             .padding(16.dp)
                     ) {
-                        // Search bar
+                        // Search apps field
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
-                            placeholder = { Text("Search app name or package...", color = Color(0xFF64748B)) },
+                            placeholder = { Text("Search installed apps...", color = Color(0xFF64748B)) },
                             leadingIcon = { Icon(Icons.Filled.Search, null, tint = NeonCyan) },
                             trailingIcon = {
                                 if (searchQuery.isNotEmpty()) {
@@ -301,7 +357,7 @@ fun FocusShieldSettingsScreen(
                             singleLine = true,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("search_app_input"),
+                                .testTag("search_apps_input"),
                             shape = RoundedCornerShape(14.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
@@ -316,79 +372,92 @@ fun FocusShieldSettingsScreen(
                         Spacer(modifier = Modifier.height(12.dp))
 
                         // Category Chips
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ScrollableTabRow(
+                            selectedTabIndex = categories.indexOf(selectedCategory).coerceAtLeast(0),
+                            containerColor = Color.Transparent,
+                            contentColor = NeonCyan,
+                            edgePadding = 0.dp
                         ) {
-                            ScrollableTabRow(
-                                selectedTabIndex = categories.indexOf(selectedCategory).coerceAtLeast(0),
-                                containerColor = Color.Transparent,
-                                contentColor = NeonCyan,
-                                edgePadding = 0.dp
-                            ) {
-                                categories.forEach { category ->
-                                    val isSel = selectedCategory == category
-                                    Tab(
-                                        selected = isSel,
-                                        onClick = { selectedCategory = category },
-                                        text = {
-                                            Text(
-                                                text = category,
-                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
-                                                fontSize = 12.sp,
-                                                color = if (isSel) NeonCyan else Color(0xFF94A3B8)
-                                            )
-                                        }
-                                    )
-                                }
+                            categories.forEach { category ->
+                                val isSel = selectedCategory == category
+                                Tab(
+                                    selected = isSel,
+                                    onClick = { selectedCategory = category },
+                                    text = {
+                                        Text(
+                                            text = category,
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                            fontSize = 12.sp,
+                                            color = if (isSel) NeonCyan else Color(0xFF94A3B8)
+                                        )
+                                    }
+                                )
                             }
                         }
 
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Quick Bulk Actions & Custom Add
+                        // Action Bar: Select All, Deselect All, and Save Blocked Apps
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(
+                                Button(
                                     onClick = {
-                                        val pkgs = allApps.map { it.packageName }
-                                        FocusShieldManager.setAllAppsRestricted(context, pkgs, true)
-                                        searchQuery = searchQuery + " " // force compose trigger
-                                        searchQuery = searchQuery.trim()
+                                        val next = restrictedSet.toMutableSet()
+                                        next.addAll(filteredApps.map { it.packageName })
+                                        restrictedSet = next
+                                        hasUnsavedChanges = true
                                     },
                                     shape = RoundedCornerShape(10.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x4038BDF8)),
-                                    modifier = Modifier.height(34.dp).testTag("restrict_all_btn")
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0x2538BDF8), contentColor = NeonCyan),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier.testTag("select_all_apps_btn")
                                 ) {
-                                    Text("Restrict All", color = NeonCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Icon(Icons.Filled.SelectAll, null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Select All", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
 
                                 OutlinedButton(
                                     onClick = {
-                                        val pkgs = allApps.map { it.packageName }
-                                        FocusShieldManager.setAllAppsRestricted(context, pkgs, false)
-                                        searchQuery = searchQuery + " "
-                                        searchQuery = searchQuery.trim()
+                                        val next = restrictedSet.toMutableSet()
+                                        next.removeAll(filteredApps.map { it.packageName }.toSet())
+                                        restrictedSet = next
+                                        hasUnsavedChanges = true
                                     },
                                     shape = RoundedCornerShape(10.dp),
                                     border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x30FFFFFF)),
-                                    modifier = Modifier.height(34.dp).testTag("unrestrict_all_btn")
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier.testTag("deselect_all_apps_btn")
                                 ) {
-                                    Text("Clear All", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                                    Text("Deselect All", color = Color(0xFFCBD5E1), fontSize = 11.sp)
                                 }
                             }
 
-                            TextButton(
-                                onClick = { showAddCustomDialog = true },
-                                modifier = Modifier.height(34.dp).testTag("add_custom_app_btn")
+                            Button(
+                                onClick = {
+                                    FocusShieldManager.saveRestrictedPackages(context, restrictedSet)
+                                    hasUnsavedChanges = false
+                                    Toast.makeText(context, "✅ Blocked apps updated successfully!", Toast.LENGTH_SHORT).show()
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (hasUnsavedChanges) GoldenSpark else EmeraldSuccess,
+                                    contentColor = Color(0xFF070B19)
+                                ),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.testTag("save_blocked_apps_btn")
                             ) {
-                                Icon(Icons.Filled.Add, null, tint = GoldenSpark, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Filled.Save, null, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Custom App", color = GoldenSpark, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = if (hasUnsavedChanges) "Save Changes" else "Saved",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
                     }
@@ -403,35 +472,69 @@ fun FocusShieldSettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Apps (${allApps.size})",
+                        text = "Installed Apps (${filteredApps.size})",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
 
-                    val restrictedCount = allApps.count { FocusShieldManager.isAppRestricted(it.packageName) }
+                    val selectedCount = filteredApps.count { restrictedSet.contains(it.packageName) }
                     Text(
-                        text = "$restrictedCount Restricted",
+                        text = "$selectedCount Blocked",
                         style = MaterialTheme.typography.labelMedium,
-                        color = NeonCyan,
-                        fontWeight = FontWeight.SemiBold
+                        color = CoralRose,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
 
-            // App Rows
-            items(allApps, key = { it.packageName }) { app ->
-                val isRestricted = FocusShieldManager.isAppRestricted(app.packageName)
-                var localState by remember(app.packageName, isRestricted) { mutableStateOf(isRestricted) }
-
-                AppShieldItemRow(
-                    app = app,
-                    isRestricted = localState,
-                    onToggle = { newRestricted ->
-                        localState = newRestricted
-                        FocusShieldManager.setAppRestricted(context, app.packageName, newRestricted)
+            if (isLoadingApps) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(40.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = NeonCyan)
                     }
-                )
+                }
+            } else if (filteredApps.isEmpty()) {
+                item {
+                    GlassCard(modifier = Modifier.fillMaxWidth(), fillAlpha = 0.5f) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(30.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(Icons.Filled.SearchOff, null, tint = Color(0xFF94A3B8), modifier = Modifier.size(36.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("No apps match your search.", color = Color(0xFFCBD5E1), style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            } else {
+                // Apps List
+                items(filteredApps, key = { it.packageName }) { app ->
+                    val isChecked = restrictedSet.contains(app.packageName)
+                    InstalledAppRow(
+                        app = app,
+                        isChecked = isChecked,
+                        onCheckedChange = { checked ->
+                            val next = restrictedSet.toMutableSet()
+                            if (checked) {
+                                next.add(app.packageName)
+                            } else {
+                                next.remove(app.packageName)
+                            }
+                            restrictedSet = next
+                            hasUnsavedChanges = true
+                            // Auto-persist immediately as well
+                            FocusShieldManager.setAppRestricted(context, app.packageName, checked)
+                        }
+                    )
+                }
             }
 
             // Whitelist System Info
@@ -452,7 +555,7 @@ fun FocusShieldSettingsScreen(
                             Icon(Icons.Filled.Verified, null, tint = NeonCyan, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Protected Essential Whitelist",
+                                text = "Safe & Protected Whitelist",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
@@ -462,7 +565,7 @@ fun FocusShieldSettingsScreen(
                         Spacer(modifier = Modifier.height(6.dp))
 
                         Text(
-                            text = "Essential system tools (Phone Dialing, System Messages, Calculator, Alarm Clock, Device Settings, and StudyMate AI) are strictly whitelisted and can never be blocked.",
+                            text = "Essential system utilities (Phone Calls, Emergency Messages, Calculator, Clock, System Settings, and StudyMate AI) are permanently whitelisted for safety and will never be blocked.",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFFCBD5E1),
                             lineHeight = 17.sp
@@ -472,66 +575,125 @@ fun FocusShieldSettingsScreen(
             }
         }
 
-        // Add Custom App Dialog
-        if (showAddCustomDialog) {
-            var customName by remember { mutableStateOf("") }
-            var customPkg by remember { mutableStateOf("") }
-            var customCat by remember { mutableStateOf("Social Media") }
+        // Floating Save Button (if unsaved changes exist)
+        if (hasUnsavedChanges) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 16.dp),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Button(
+                    onClick = {
+                        FocusShieldManager.saveRestrictedPackages(context, restrictedSet)
+                        hasUnsavedChanges = false
+                        Toast.makeText(context, "✅ Blocked apps list saved!", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .height(52.dp)
+                        .testTag("floating_save_blocked_apps_btn"),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = GoldenSpark, contentColor = Color(0xFF070B19))
+                ) {
+                    Icon(Icons.Filled.Check, null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Save ${restrictedSet.size} Blocked Apps", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
+                }
+            }
+        }
 
+        // Permission Explanation Modal Dialog
+        if (showPermissionExplanationDialog) {
             AlertDialog(
-                onDismissRequest = { showAddCustomDialog = false },
-                containerColor = Color(0xFF131C2E),
-                shape = RoundedCornerShape(20.dp),
+                onDismissRequest = { showPermissionExplanationDialog = false },
+                containerColor = Color(0xFF111827),
+                shape = RoundedCornerShape(24.dp),
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Apps, null, tint = GoldenSpark, modifier = Modifier.size(22.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Add Custom App Restriction", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Icon(Icons.Filled.Security, null, tint = NeonCyan, modifier = Modifier.size(24.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Why Permissions Are Needed", color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 },
                 text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(
-                            text = "Enter the app name and package name (e.g. com.game.app) to add it to your Focus Shield restrictions.",
+                            text = "StudyMate AI uses official Android APIs to provide scheduled focus protection without violating user privacy:",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF94A3B8)
+                            color = Color(0xFFCBD5E1)
                         )
 
-                        OutlinedTextField(
-                            value = customName,
-                            onValueChange = { customName = it },
-                            label = { Text("App Name (e.g., Mobile Game)") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0x18FFFFFF),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text("🛡️ 1. Accessibility Service", color = NeonCyan, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    "Used only during active focus countdowns to detect when a blocked app is brought to the foreground, allowing StudyMate AI to display your motivational interruption screen.",
+                                    color = Color(0xFF94A3B8),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
 
-                        OutlinedTextField(
-                            value = customPkg,
-                            onValueChange = { customPkg = it },
-                            label = { Text("Package Name (e.g., com.example.game)") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White)
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0x18FFFFFF),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text("📊 2. Usage Access (Alternative)", color = GoldenSpark, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    "Used as a secondary Android method to detect foreground apps when Accessibility is unavailable on your device or version.",
+                                    color = Color(0xFF94A3B8),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0x2010B981),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Lock, null, tint = EmeraldSuccess, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    "🔒 Privacy Guarantee: No keystrokes, personal chats, or screen contents are ever accessed or stored. Only app package names are checked during focus.",
+                                    color = Color(0xFFE2E8F0),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
                     }
                 },
                 confirmButton = {
                     Button(
                         onClick = {
-                            if (customPkg.isNotBlank()) {
-                                FocusShieldManager.addCustomApp(context, customName, customPkg, customCat)
-                                showAddCustomDialog = false
+                            showPermissionExplanationDialog = false
+                            try {
+                                context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                            } catch (e: Exception) {
+                                context.startActivity(Intent(Settings.ACTION_SETTINGS))
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color(0xFF070B19))
                     ) {
-                        Text("Add Restriction", color = Color(0xFF070B19), fontWeight = FontWeight.Bold)
+                        Text("Open Settings", fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showAddCustomDialog = false }) {
-                        Text("Cancel", color = Color(0xFF94A3B8))
+                    TextButton(onClick = { showPermissionExplanationDialog = false }) {
+                        Text("Close", color = Color(0xFF94A3B8))
                     }
                 }
             )
@@ -540,11 +702,16 @@ fun FocusShieldSettingsScreen(
 }
 
 @Composable
-fun AppShieldItemRow(
-    app: FocusShieldApp,
-    isRestricted: Boolean,
-    onToggle: (Boolean) -> Unit
+fun InstalledAppRow(
+    app: InstalledAppInfo,
+    isChecked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
 ) {
+    val context = LocalContext.current
+    val appIconBitmap = remember(app.packageName) {
+        FocusShieldManager.getAppIconBitmap(context, app.packageName)
+    }
+
     val categoryIcon = when (app.category.lowercase()) {
         "streaming", "shorts & videos" -> Icons.Filled.VideoLibrary
         "social media" -> Icons.Filled.CameraAlt
@@ -557,15 +724,15 @@ fun AppShieldItemRow(
     GlassCard(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onToggle(!isRestricted) }
+            .clickable { onCheckedChange(!isChecked) }
             .testTag("app_row_${app.packageName}"),
         shape = RoundedCornerShape(16.dp),
-        fillAlpha = if (isRestricted) 0.85f else 0.5f
+        fillAlpha = if (isChecked) 0.85f else 0.5f
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -573,21 +740,30 @@ fun AppShieldItemRow(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f)
             ) {
+                // Real App Icon or category fallback
                 Box(
                     modifier = Modifier
-                        .size(42.dp)
+                        .size(44.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(
-                            if (isRestricted) Color(0x30F43F5E) else Color(0x20FFFFFF)
-                        ),
+                        .background(if (isChecked) Color(0x30F43F5E) else Color(0x18FFFFFF)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = categoryIcon,
-                        contentDescription = null,
-                        tint = if (isRestricted) CoralRose else Color(0xFF94A3B8),
-                        modifier = Modifier.size(22.dp)
-                    )
+                    if (appIconBitmap != null) {
+                        Image(
+                            bitmap = appIconBitmap.asImageBitmap(),
+                            contentDescription = app.appName,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                        )
+                    } else {
+                        Icon(
+                            imageVector = categoryIcon,
+                            contentDescription = null,
+                            tint = if (isChecked) CoralRose else Color(0xFF94A3B8),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
@@ -602,15 +778,15 @@ fun AppShieldItemRow(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = Color(0x20FFFFFF)
+                            color = if (isChecked) Color(0x30F43F5E) else Color(0x18FFFFFF)
                         ) {
                             Text(
                                 text = app.category,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF94A3B8),
+                                color = if (isChecked) CoralRose else Color(0xFF94A3B8),
                                 fontSize = 10.sp,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
@@ -631,15 +807,15 @@ fun AppShieldItemRow(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            Switch(
-                checked = isRestricted,
-                onCheckedChange = { onToggle(it) },
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color(0xFF070B19),
-                    checkedTrackColor = CoralRose,
-                    uncheckedThumbColor = Color(0xFF94A3B8),
-                    uncheckedTrackColor = Color(0x20FFFFFF)
-                )
+            Checkbox(
+                checked = isChecked,
+                onCheckedChange = { onCheckedChange(it) },
+                colors = CheckboxDefaults.colors(
+                    checkedColor = CoralRose,
+                    uncheckedColor = Color(0xFF64748B),
+                    checkmarkColor = Color.White
+                ),
+                modifier = Modifier.testTag("checkbox_${app.packageName}")
             )
         }
     }

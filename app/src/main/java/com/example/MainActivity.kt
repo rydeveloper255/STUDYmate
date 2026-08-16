@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -70,20 +71,15 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     var currentTab by remember { mutableStateOf(AppNavTab.HOME) }
     var showProfileDialog by remember { mutableStateOf(false) }
 
-    // Dynamic Permission Requests
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
+    // Dynamic Notification Permission Request (Android 13+)
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
     ) { _ -> }
 
     LaunchedEffect(Unit) {
-        val permissionsToRequest = mutableListOf(
-            Manifest.permission.CAMERA,
-            Manifest.permission.RECORD_AUDIO
-        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        permissionLauncher.launch(permissionsToRequest.toTypedArray())
     }
 
     // Splash Screen Phase
@@ -111,8 +107,8 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     if (!userProfile!!.isOnboardingCompleted) {
         OnboardingScreen(
             initialName = userProfile?.name ?: "",
-            onComplete = { name, grade, subjects, goal, examName, dailyMins, preferredTime, notifs ->
-                viewModel.saveOnboarding(name, grade, subjects, goal, examName, dailyMins, preferredTime, notifs)
+            onComplete = { profile ->
+                viewModel.saveOnboarding(profile)
             }
         )
         return
@@ -130,6 +126,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val focusState by viewModel.focusState.collectAsStateWithLifecycle()
     val mockAttempts by viewModel.mockTestAttempts.collectAsStateWithLifecycle()
     val mistakes by viewModel.mistakes.collectAsStateWithLifecycle()
+    val userQuestionMaterials by viewModel.userQuestionMaterials.collectAsStateWithLifecycle()
     val flashcards by viewModel.flashcards.collectAsStateWithLifecycle()
     val isFlashcardGenerating by viewModel.isFlashcardGenerating.collectAsStateWithLifecycle()
     val flashcardMessage by viewModel.flashcardMessage.collectAsStateWithLifecycle()
@@ -150,6 +147,15 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val isStudyNowLoading by viewModel.isStudyNowLoading.collectAsStateWithLifecycle()
     val completeStudyKit by viewModel.completeStudyKit.collectAsStateWithLifecycle()
     val isStudyKitGenerating by viewModel.isStudyKitGenerating.collectAsStateWithLifecycle()
+
+    // Graceful Back Navigation handling
+    BackHandler(enabled = showDocumentSummarizer || showProfileDialog || (currentTab != AppNavTab.HOME && !activeTestState.isTestInProgress && !activeTestState.isCompleted)) {
+        when {
+            showProfileDialog -> showProfileDialog = false
+            showDocumentSummarizer -> showDocumentSummarizer = false
+            currentTab != AppNavTab.HOME -> currentTab = AppNavTab.HOME
+        }
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -197,6 +203,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             user = userProfile,
                             studyPlan = studyPlan,
                             missions = missions,
+                            flashcards = flashcards,
                             aiCoachRecommendation = aiCoachRecommendation,
                             studyNowRecommendation = studyNowRecommendation,
                             isAiCoachLoading = isAiCoachLoading,
@@ -215,17 +222,26 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                         )
 
                         AppNavTab.AI_TUTOR -> GeminiTutorScreen(
+                            user = userProfile,
                             messages = chatMessages,
                             isAiThinking = isAiThinking,
                             useThinkingMode = useThinkingMode,
                             tutorPersona = tutorPersona,
                             isTtsSpeaking = isTtsSpeaking,
-                            onSendMessage = { viewModel.sendTutorMessage(it) },
+                            mistakes = mistakes,
+                            studyPlan = studyPlan,
+                            onSendMessage = { prompt, subject, topic -> viewModel.sendTutorMessage(prompt, subject, topic) },
+                            onExecuteTutorAction = { actionType, subject, topic, extra ->
+                                viewModel.executeTutorAction(actionType, subject, topic, extra)
+                            },
+                            onSaveFlashcardsToDeck = { viewModel.saveFlashcardsToDeck(it) },
+                            onImportPlanItems = { viewModel.importPlanItems(it) },
                             onSendQuickAction = { viewModel.sendQuickActionChip(it) },
-                            onSolveImage = { viewModel.solveImageQuestion(it) },
+                            onSolveImage = { bmp, sub, top -> viewModel.solveImageQuestion(bmp, sub, top) },
                             onToggleThinkingMode = { viewModel.setThinkingMode(it) },
                             onSelectPersona = { viewModel.setTutorPersona(it) },
                             onSpeakTts = { viewModel.speakTts(it) },
+                            onClearChat = { viewModel.clearChatMessages() },
                             onOpenDocumentSummarizer = { showDocumentSummarizer = true }
                         )
 
@@ -279,16 +295,28 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             user = userProfile,
                             attempts = mockAttempts,
                             mistakes = mistakes,
+                            userMaterials = userQuestionMaterials,
                             activeTestState = activeTestState,
                             isTestGenerating = isTestGenerating,
                             mistakeDiagnosis = mistakeDiagnosis,
-                            onStartTest = { sub, chap, mode -> viewModel.startMockTest(sub, chap, mode) },
+                            onStartTestWithConfig = { config -> viewModel.startMockTestWithConfig(config) },
                             onSelectAnswer = { qIdx, optIdx -> viewModel.selectTestAnswer(qIdx, optIdx) },
-                            onToggleMarkForReview = { viewModel.toggleMarkForReview(it) },
-                            onNavigateQuestion = { viewModel.navigateTestQuestion(it) },
+                            onClearAnswer = { qIdx -> viewModel.clearTestAnswer(qIdx) },
+                            onToggleMarkForReview = { qIdx -> viewModel.toggleMarkForReview(qIdx) },
+                            onSkipQuestion = { qIdx -> viewModel.skipQuestion(qIdx) },
+                            onNavigateQuestion = { idx -> viewModel.navigateTestQuestion(idx) },
+                            onSetPaletteOpen = { isOpen -> viewModel.setPaletteOpen(isOpen) },
+                            onSetSubmitConfirmOpen = { isOpen -> viewModel.setSubmitConfirmOpen(isOpen) },
                             onSubmitTest = { viewModel.submitMockTest() },
                             onExitTest = { viewModel.exitTest() },
-                            onDiagnoseMistakes = { viewModel.diagnoseMistakes(it) },
+                            onReviewPastTest = { attempt -> viewModel.reviewPastTest(attempt) },
+                            onRetakeTest = { attempt -> viewModel.retakeMockTest(attempt) },
+                            onDeletePastTest = { id -> viewModel.deletePastTest(id) },
+                            onSaveUserMaterial = { title, exam, subject, topic, rawText ->
+                                viewModel.saveUserQuestionMaterial(title, exam, subject, topic, rawText)
+                            },
+                            onDeleteUserMaterial = { id -> viewModel.deleteUserQuestionMaterial(id) },
+                            onDiagnoseMistakes = { subject -> viewModel.diagnoseMistakes(subject) },
                             onMarkMistakeMastered = { id, mastered -> viewModel.markMistakeMastered(id, mastered) }
                         )
                     }
@@ -303,9 +331,18 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     notificationPrefs = notifPrefs,
                     onToggleDarkTheme = { viewModel.updateTheme(it) },
                     onUpdateNotificationPrefs = { viewModel.updateNotificationPrefs(it) },
+                    onUpdateProfile = { viewModel.updateUserProfile(it) },
                     onSignOut = { viewModel.signOut(context) },
                     onDeleteAccount = { viewModel.deleteAccount() },
-                    onDismiss = { showProfileDialog = false }
+                    onDismiss = { showProfileDialog = false },
+                    onTestStudyReminder = { viewModel.testStudySessionReminder() },
+                    onTestExamCountdown = { viewModel.testExamCountdownReminder() },
+                    onTestDailyGoal = { viewModel.testDailyGoalReminder() },
+                    onTestMissedStudy = { viewModel.testMissedStudyReminder() },
+                    onTestBreakReminder = { viewModel.testBreakReminder() },
+                    onTestFocusStarted = { viewModel.testFocusStartedNotification() },
+                    onTestFocusCompleted = { viewModel.testFocusCompletedNotification() },
+                    onTestDailyMotivation = { viewModel.testDailyMotivationalNotification() }
                 )
             }
         }

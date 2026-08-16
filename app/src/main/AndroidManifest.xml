@@ -3,10 +3,17 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:name=".StudyMateApplication"
@@ -53,7 +60,32 @@
 
         <receiver
             android:name=".notification.StudyReminderReceiver"
-            android:exported="false" />
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.example.studymate.ACTION_DAILY_STUDY_REMINDER" />
+                <action android:name="com.example.studymate.ACTION_DAILY_GOAL_REMINDER" />
+                <action android:name="com.example.studymate.ACTION_EXAM_COUNTDOWN_REMINDER" />
+                <action android:name="com.example.studymate.ACTION_DAILY_MOTIVATION_REMINDER" />
+                <action android:name="com.example.studymate.ACTION_MISSED_STUDY_CHECK" />
+                <action android:name="com.example.studymate.ACTION_BREAK_REMINDER" />
+                <action android:name="com.example.studymate.ACTION_SNOOZE_STUDY" />
+                <action android:name="com.example.studymate.ACTION_SNOOZED_REMINDER" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Secure FileProvider for exporting PDF test reports and analytics -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>
