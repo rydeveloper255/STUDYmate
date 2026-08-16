@@ -5,7 +5,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -147,15 +146,6 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val isStudyNowLoading by viewModel.isStudyNowLoading.collectAsStateWithLifecycle()
     val completeStudyKit by viewModel.completeStudyKit.collectAsStateWithLifecycle()
     val isStudyKitGenerating by viewModel.isStudyKitGenerating.collectAsStateWithLifecycle()
-
-    // Graceful Back Navigation handling
-    BackHandler(enabled = showDocumentSummarizer || showProfileDialog || (currentTab != AppNavTab.HOME && !activeTestState.isTestInProgress && !activeTestState.isCompleted)) {
-        when {
-            showProfileDialog -> showProfileDialog = false
-            showDocumentSummarizer -> showDocumentSummarizer = false
-            currentTab != AppNavTab.HOME -> currentTab = AppNavTab.HOME
-        }
-    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),

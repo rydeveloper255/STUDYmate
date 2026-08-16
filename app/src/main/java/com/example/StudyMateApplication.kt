@@ -1,7 +1,6 @@
 package com.example
 
 import android.app.Application
-import android.graphics.Bitmap
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
@@ -35,7 +34,7 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
         val loader = ImageLoader.Builder(this)
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizePercent(0.15)
+                    .maxSizePercent(0.20)
                     .build()
             }
             .diskCache {
@@ -44,10 +43,8 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
                     .maxSizePercent(0.02)
                     .build()
             }
-            .bitmapConfig(Bitmap.Config.ARGB_8888)
-            .allowHardware(false)
+            .allowHardware(true)
             .crossfade(true)
-            .respectCacheHeaders(false)
             .build()
         imageLoaderInstance = loader
         return loader
@@ -56,7 +53,7 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         try {
-            if (level >= TRIM_MEMORY_MODERATE) {
+            if (level >= TRIM_MEMORY_BACKGROUND) {
                 imageLoaderInstance?.memoryCache?.clear()
             }
         } catch (e: Exception) {
