@@ -16,6 +16,7 @@ class StudyRepository(
     val allMockTestAttempts: Flow<List<MockTestAttempt>> = database.mockTestDao().getAllAttempts()
     val allMistakes: Flow<List<MistakeItem>> = database.mistakeDao().getAllMistakes()
     val allFlashcards: Flow<List<FlashcardItem>> = database.flashcardDao().getAllFlashcards()
+    val allUserQuestionMaterials: Flow<List<UserQuestionMaterial>> = database.userQuestionMaterialDao().getAllMaterials()
 
     suspend fun saveUserProfile(profile: UserProfile) = withContext(Dispatchers.IO) {
         database.userDao().insertOrUpdateUserProfile(profile)
@@ -84,11 +85,20 @@ class StudyRepository(
         score: Int,
         totalQuestions: Int,
         timeSpentSeconds: Int,
-        weakTopics: List<String>,
-        strongTopics: List<String>,
-        aiRecommendation: String
+        weakTopics: List<String> = emptyList(),
+        strongTopics: List<String> = emptyList(),
+        aiRecommendation: String = "",
+        examName: String = "JEE / NEET / Board Exam",
+        topic: String = "All Topics",
+        difficulty: String = "Medium",
+        correctCount: Int = 0,
+        incorrectCount: Int = 0,
+        skippedCount: Int = 0,
+        avgTimePerQuestionSeconds: Float = 0f,
+        markingScheme: String = "+4 / -1 (Standard)",
+        totalTimeAllowedSeconds: Int = 600
     ): MockTestAttempt = withContext(Dispatchers.IO) {
-        val accuracy = if (totalQuestions > 0) (score.toFloat() / totalQuestions) * 100f else 0f
+        val accuracy = if (totalQuestions > 0) (correctCount.toFloat() / totalQuestions) * 100f else 0f
         val attempt = MockTestAttempt(
             title = title,
             subject = subject,
@@ -98,14 +108,23 @@ class StudyRepository(
             timeSpentSeconds = timeSpentSeconds,
             weakTopics = weakTopics,
             strongTopics = strongTopics,
-            aiRecommendation = aiRecommendation
+            aiRecommendation = aiRecommendation,
+            examName = examName,
+            topic = topic,
+            difficulty = difficulty,
+            correctCount = correctCount,
+            incorrectCount = incorrectCount,
+            skippedCount = skippedCount,
+            avgTimePerQuestionSeconds = avgTimePerQuestionSeconds,
+            markingScheme = markingScheme,
+            totalTimeAllowedSeconds = totalTimeAllowedSeconds
         )
-        database.mockTestDao().insertAttempt(attempt)
+        val id = database.mockTestDao().insertAttempt(attempt)
 
         val user = database.userDao().getUserProfileOnce()
         if (user != null) {
             val newQuestions = user.totalQuestionsSolved + totalQuestions
-            val earnedXp = score * 15 + 20
+            val earnedXp = (correctCount * 15 + 20).coerceAtLeast(10)
             val newXp = user.xp + earnedXp
             val newLevel = (newXp / 250) + 1
             database.userDao().insertOrUpdateUserProfile(
@@ -116,7 +135,41 @@ class StudyRepository(
                 )
             )
         }
-        attempt
+        attempt.copy(id = id)
+    }
+
+    suspend fun deleteMockTestAttempt(id: Long) = withContext(Dispatchers.IO) {
+        database.mockTestDao().deleteAttempt(id)
+    }
+
+    suspend fun saveUserQuestionMaterial(
+        title: String,
+        exam: String,
+        subject: String,
+        topic: String,
+        rawText: String
+    ): Long = withContext(Dispatchers.IO) {
+        // Approximate count of questions based on markers like "Q", "1.", etc. or paragraphs
+        val estCount = rawText.split(Regex("(?i)(question|Q[0-9]|\\n[0-9]+\\.)")).size.coerceAtLeast(1)
+        val material = UserQuestionMaterial(
+            title = title,
+            exam = exam,
+            subject = subject,
+            topic = topic,
+            rawText = rawText,
+            questionCount = estCount,
+            timestamp = System.currentTimeMillis()
+        )
+        val id = database.userQuestionMaterialDao().insertMaterial(material)
+        val user = database.userDao().getUserProfileOnce()
+        if (user != null) {
+            database.userDao().insertOrUpdateUserProfile(user.copy(xp = user.xp + 25))
+        }
+        id
+    }
+
+    suspend fun deleteUserQuestionMaterial(id: Long) = withContext(Dispatchers.IO) {
+        database.userQuestionMaterialDao().deleteMaterial(id)
     }
 
     suspend fun recordMistake(

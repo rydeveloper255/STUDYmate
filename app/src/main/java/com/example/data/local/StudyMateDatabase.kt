@@ -14,7 +14,8 @@ import com.example.data.model.*
         FocusSession::class,
         MockTestAttempt::class,
         MistakeItem::class,
-        FlashcardItem::class
+        FlashcardItem::class,
+        UserQuestionMaterial::class
     ],
     version = 1,
     exportSchema = false
@@ -27,6 +28,7 @@ abstract class StudyMateDatabase : RoomDatabase() {
     abstract fun mockTestDao(): MockTestDao
     abstract fun mistakeDao(): MistakeDao
     abstract fun flashcardDao(): FlashcardDao
+    abstract fun userQuestionMaterialDao(): UserQuestionMaterialDao
 
     companion object {
         @Volatile

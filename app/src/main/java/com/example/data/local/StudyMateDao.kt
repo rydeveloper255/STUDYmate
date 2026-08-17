@@ -65,6 +65,21 @@ interface MockTestDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAttempt(attempt: MockTestAttempt): Long
+
+    @Query("DELETE FROM mock_test_attempts WHERE id = :id")
+    suspend fun deleteAttempt(id: Long)
+}
+
+@Dao
+interface UserQuestionMaterialDao {
+    @Query("SELECT * FROM user_question_materials ORDER BY timestamp DESC")
+    fun getAllMaterials(): Flow<List<UserQuestionMaterial>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMaterial(material: UserQuestionMaterial): Long
+
+    @Query("DELETE FROM user_question_materials WHERE id = :id")
+    suspend fun deleteMaterial(id: Long)
 }
 
 @Dao

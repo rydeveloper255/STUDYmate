@@ -88,6 +88,42 @@ data class FocusSession(
     val isCompleted: Boolean = true
 )
 
+enum class QuestionSource {
+    PREVIOUS_YEAR,
+    PRACTICE,
+    AI_GENERATED
+}
+
+enum class QuestionSourceFilter {
+    BALANCED_MIX,
+    PREVIOUS_YEAR_ONLY,
+    AI_GENERATED_ONLY,
+    PRACTICE_ONLY
+}
+
+data class MockTestConfig(
+    val exam: String = "JEE Main & Advanced",
+    val subject: String = "Physics",
+    val topic: String = "All Topics",
+    val difficulty: String = "Medium",
+    val questionCount: Int = 10,
+    val timeLimitMinutes: Int = 15,
+    val sourceFilter: QuestionSourceFilter = QuestionSourceFilter.BALANCED_MIX,
+    val customMaterialId: Long? = null
+)
+
+@Entity(tableName = "user_question_materials")
+data class UserQuestionMaterial(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val title: String,
+    val exam: String = "General",
+    val subject: String = "Physics",
+    val topic: String = "General",
+    val rawText: String = "",
+    val questionCount: Int = 0,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 @Entity(tableName = "mock_test_attempts")
 data class MockTestAttempt(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -100,7 +136,16 @@ data class MockTestAttempt(
     val timestamp: Long = System.currentTimeMillis(),
     val weakTopics: List<String> = emptyList(),
     val strongTopics: List<String> = emptyList(),
-    val aiRecommendation: String = ""
+    val aiRecommendation: String = "",
+    val examName: String = "JEE / NEET / Board Exam",
+    val topic: String = "All Topics",
+    val difficulty: String = "Medium",
+    val correctCount: Int = 0,
+    val incorrectCount: Int = 0,
+    val skippedCount: Int = 0,
+    val avgTimePerQuestionSeconds: Float = 0f,
+    val markingScheme: String = "+4 / -1 (Standard)",
+    val totalTimeAllowedSeconds: Int = 600
 )
 
 data class Question(
@@ -111,7 +156,18 @@ data class Question(
     val explanation: String,
     val subject: String,
     val topic: String,
-    val difficulty: String = "Medium"
+    val difficulty: String = "Medium",
+    val source: QuestionSource = QuestionSource.AI_GENERATED,
+    val sourceLabel: String = "AI Practice",
+    val yearOrTag: String = ""
+)
+
+data class QuestionAttemptDetail(
+    val question: Question,
+    val selectedIndex: Int? = null,
+    val isCorrect: Boolean = false,
+    val isMarkedForReview: Boolean = false,
+    val timeSpentSeconds: Int = 0
 )
 
 @Entity(tableName = "mistakes")

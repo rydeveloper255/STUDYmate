@@ -56,7 +56,11 @@ data class ActiveTestState(
     val markedForReview: Set<Int> = emptySet(),
     val remainingSeconds: Int = 600,
     val isCompleted: Boolean = false,
-    val completedAttempt: MockTestAttempt? = null
+    val completedAttempt: MockTestAttempt? = null,
+    val detailedQuestions: List<QuestionAttemptDetail> = emptyList(),
+    val isPaletteOpen: Boolean = false,
+    val isSubmitConfirmOpen: Boolean = false,
+    val config: MockTestConfig = MockTestConfig()
 )
 
 class MainViewModel(
@@ -121,6 +125,9 @@ class MainViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val flashcards: StateFlow<List<FlashcardItem>> = studyRepository.allFlashcards
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val userQuestionMaterials: StateFlow<List<UserQuestionMaterial>> = studyRepository.allUserQuestionMaterials
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _isFlashcardGenerating = MutableStateFlow(false)
@@ -747,36 +754,62 @@ class MainViewModel(
 
     // --- Mock Test & Practice Actions ---
 
-    fun startMockTest(subject: String, chapter: String, mode: String = "AI Practice", questionCount: Int = 5) {
+    fun startMockTestWithConfig(config: MockTestConfig) {
         viewModelScope.launch {
             _isTestGenerating.value = true
             val result = geminiRepository.generateMockTestQuestions(
-                subject = subject,
-                chapter = chapter,
-                count = questionCount
+                subject = config.subject,
+                chapter = config.topic,
+                count = config.questionCount
             )
             result.onSuccess { questions ->
+                val totalSeconds = config.timeLimitMinutes * 60
                 _activeTestState.value = ActiveTestState(
                     isTestInProgress = true,
-                    subject = subject,
-                    title = "$subject $mode ($chapter)",
+                    subject = config.subject,
+                    title = "${config.exam} - ${config.subject} (${config.topic})",
                     questions = questions,
                     currentQuestionIndex = 0,
                     selectedAnswers = emptyMap(),
                     markedForReview = emptySet(),
-                    remainingSeconds = questionCount * 120,
+                    remainingSeconds = totalSeconds,
                     isCompleted = false,
-                    completedAttempt = null
+                    completedAttempt = null,
+                    config = config
                 )
             }
             _isTestGenerating.value = false
         }
     }
 
+    fun startMockTest(subject: String, chapter: String, mode: String = "AI Practice", questionCount: Int = 5) {
+        startMockTestWithConfig(
+            MockTestConfig(
+                subject = subject,
+                topic = chapter,
+                questionCount = questionCount
+            )
+        )
+    }
+
     fun selectTestAnswer(questionIndex: Int, optionIndex: Int) {
         val currentAnswers = _activeTestState.value.selectedAnswers.toMutableMap()
         currentAnswers[questionIndex] = optionIndex
         _activeTestState.value = _activeTestState.value.copy(selectedAnswers = currentAnswers)
+    }
+
+    fun clearTestAnswer(questionIndex: Int) {
+        val currentAnswers = _activeTestState.value.selectedAnswers.toMutableMap()
+        currentAnswers.remove(questionIndex)
+        _activeTestState.value = _activeTestState.value.copy(selectedAnswers = currentAnswers)
+    }
+
+    fun skipQuestion(questionIndex: Int) {
+        clearTestAnswer(questionIndex)
+        val nextIdx = questionIndex + 1
+        if (nextIdx < _activeTestState.value.questions.size) {
+            navigateTestQuestion(nextIdx)
+        }
     }
 
     fun toggleMarkForReview(questionIndex: Int) {
@@ -795,25 +828,51 @@ class MainViewModel(
         }
     }
 
+    fun setPaletteOpen(isOpen: Boolean) {
+        _activeTestState.value = _activeTestState.value.copy(isPaletteOpen = isOpen)
+    }
+
+    fun setSubmitConfirmOpen(isOpen: Boolean) {
+        _activeTestState.value = _activeTestState.value.copy(isSubmitConfirmOpen = isOpen)
+    }
+
     fun submitMockTest() {
         val state = _activeTestState.value
         val questions = state.questions
         val answers = state.selectedAnswers
         var correctCount = 0
+        var incorrectCount = 0
+        var skippedCount = 0
         val weakTopics = mutableListOf<String>()
         val strongTopics = mutableListOf<String>()
+
+        val details = questions.mapIndexed { idx, q ->
+            val chosen = answers[idx]
+            val isCorr = chosen != null && chosen == q.correctOptionIndex
+            if (chosen == null) {
+                skippedCount++
+            } else if (isCorr) {
+                correctCount++
+                if (!strongTopics.contains(q.topic)) strongTopics.add(q.topic)
+            } else {
+                incorrectCount++
+                if (!weakTopics.contains(q.topic)) weakTopics.add(q.topic)
+            }
+            QuestionAttemptDetail(
+                question = q,
+                selectedIndex = chosen,
+                isCorrect = isCorr,
+                isMarkedForReview = state.markedForReview.contains(idx),
+                timeSpentSeconds = 60
+            )
+        }
 
         viewModelScope.launch {
             questions.forEachIndexed { idx, q ->
                 val chosen = answers[idx]
-                if (chosen == q.correctOptionIndex) {
-                    correctCount++
-                    if (!strongTopics.contains(q.topic)) strongTopics.add(q.topic)
-                } else {
-                    if (!weakTopics.contains(q.topic)) weakTopics.add(q.topic)
-                    val chosenText = chosen?.let { q.options.getOrNull(it) } ?: "Not attempted"
+                if (chosen != null && chosen != q.correctOptionIndex) {
+                    val chosenText = q.options.getOrNull(chosen) ?: "Not attempted"
                     val correctText = q.options.getOrNull(q.correctOptionIndex) ?: ""
-                    // Record in Mistake Book
                     studyRepository.recordMistake(
                         questionText = q.questionText,
                         studentAnswer = chosenText,
@@ -825,7 +884,8 @@ class MainViewModel(
                 }
             }
 
-            val timeSpent = (questions.size * 120) - state.remainingSeconds
+            val totalAllowedSecs = state.config.timeLimitMinutes * 60
+            val timeSpent = totalAllowedSecs - state.remainingSeconds
             val recommendation = if (weakTopics.isNotEmpty()) {
                 "Revise ${weakTopics.take(2).joinToString(" & ")} and attempt 5 targeted numericals."
             } else {
@@ -840,14 +900,66 @@ class MainViewModel(
                 timeSpentSeconds = timeSpent.coerceAtLeast(10),
                 weakTopics = weakTopics,
                 strongTopics = strongTopics,
-                aiRecommendation = recommendation
+                aiRecommendation = recommendation,
+                examName = state.config.exam,
+                topic = state.config.topic,
+                difficulty = state.config.difficulty,
+                correctCount = correctCount,
+                incorrectCount = incorrectCount,
+                skippedCount = skippedCount,
+                avgTimePerQuestionSeconds = if (questions.isNotEmpty()) timeSpent.toFloat() / questions.size else 0f,
+                markingScheme = "+4 / -1 (Standard)",
+                totalTimeAllowedSeconds = totalAllowedSecs
             )
 
             _activeTestState.value = state.copy(
                 isTestInProgress = false,
                 isCompleted = true,
-                completedAttempt = attempt
+                completedAttempt = attempt,
+                detailedQuestions = details,
+                isPaletteOpen = false,
+                isSubmitConfirmOpen = false
             )
+        }
+    }
+
+    fun reviewPastTest(attempt: MockTestAttempt) {
+        _activeTestState.value = ActiveTestState(
+            isTestInProgress = false,
+            isCompleted = true,
+            completedAttempt = attempt,
+            detailedQuestions = emptyList()
+        )
+    }
+
+    fun retakeMockTest(attempt: MockTestAttempt) {
+        startMockTestWithConfig(
+            MockTestConfig(
+                exam = attempt.examName,
+                subject = attempt.subject,
+                topic = attempt.topic,
+                difficulty = attempt.difficulty,
+                questionCount = attempt.totalQuestions,
+                timeLimitMinutes = (attempt.totalTimeAllowedSeconds / 60).coerceAtLeast(5)
+            )
+        )
+    }
+
+    fun deletePastTest(id: Long) {
+        viewModelScope.launch {
+            studyRepository.deleteMockTestAttempt(id)
+        }
+    }
+
+    fun saveUserQuestionMaterial(title: String, exam: String, subject: String, topic: String, rawText: String) {
+        viewModelScope.launch {
+            studyRepository.saveUserQuestionMaterial(title, exam, subject, topic, rawText)
+        }
+    }
+
+    fun deleteUserQuestionMaterial(id: Long) {
+        viewModelScope.launch {
+            studyRepository.deleteUserQuestionMaterial(id)
         }
     }
 
