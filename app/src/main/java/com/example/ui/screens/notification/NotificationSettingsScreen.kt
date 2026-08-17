@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -62,6 +63,10 @@ fun NotificationSettingsScreen(
     onTestDailyMotivation: () -> Unit = {}
 ) {
     val context = LocalContext.current
+
+    BackHandler(enabled = true) {
+        onBack()
+    }
     var hasPostNotificationPermission by remember {
         mutableStateOf(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

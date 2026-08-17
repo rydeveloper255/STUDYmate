@@ -1,5 +1,8 @@
 package com.example.ui.screens.focus
 
+import android.content.Intent
+import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -23,6 +26,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.service.FocusShieldManager
 import com.example.ui.components.GlassButton
 import com.example.ui.components.GlassCard
@@ -44,6 +50,27 @@ fun FocusModeScreen(
     var selectedSubject by remember { mutableStateOf(focusState.subject) }
     var selectedTopic by remember { mutableStateOf(focusState.topic) }
     var showAppShieldModal by remember { mutableStateOf(false) }
+
+    var isAccessibilityGranted by remember { mutableStateOf(FocusShieldManager.isAccessibilityServiceEnabled(context)) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isAccessibilityGranted = FocusShieldManager.isAccessibilityServiceEnabled(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    if (showAppShieldModal) {
+        BackHandler(enabled = true) {
+            showAppShieldModal = false
+        }
+    }
 
     val blockedAppsCount = remember(showAppShieldModal, focusState.isRunning) {
         FocusShieldManager.getRestrictedPackages().size
@@ -291,23 +318,48 @@ fun FocusModeScreen(
 
                             Spacer(modifier = Modifier.height(12.dp))
 
-                            // Focus shield status hint
+                            // Focus shield status hint (FEATURE 1 — Accessibility Permission Flow)
                             Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = Color(0x1538BDF8),
-                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { showAppShieldModal = true }
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isAccessibilityGranted) Color(0x1538BDF8) else Color(0x25F59E0B),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (isAccessibilityGranted) Color(0x3038BDF8) else Color(0x50F59E0B)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { showAppShieldModal = true }
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Filled.Shield, null, tint = NeonCyan, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Focus App Shield: $blockedAppsCount Apps Blocked", color = Color(0xFFCBD5E1), fontSize = 12.sp)
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                        Icon(
+                                            imageVector = if (isAccessibilityGranted) Icons.Filled.Shield else Icons.Filled.Warning,
+                                            contentDescription = null,
+                                            tint = if (isAccessibilityGranted) NeonCyan else GoldenSpark,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = if (isAccessibilityGranted)
+                                                "App Blocking: ✓ $blockedAppsCount Apps Blocked"
+                                            else
+                                                "App Blocking: Accessibility not enabled",
+                                            color = if (isAccessibilityGranted) Color(0xFFCBD5E1) else GoldenSpark,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isAccessibilityGranted) FontWeight.Normal else FontWeight.Bold
+                                        )
                                     }
-                                    Text("Configure →", color = NeonCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = if (isAccessibilityGranted) "Configure →" else "Enable →",
+                                        color = if (isAccessibilityGranted) NeonCyan else GoldenSpark,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
                         }

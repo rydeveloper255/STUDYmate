@@ -13,6 +13,7 @@ import androidx.credentials.exceptions.NoCredentialException
 import com.example.data.local.UserDao
 import com.example.data.model.UserProfile
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
@@ -84,17 +85,38 @@ class AuthRepository(
         Log.d(TAG, "Initiating Google Sign-In with server client id: $serverClientId")
 
         try {
-            val googleIdOption = GetGoogleIdOption.Builder()
-                .setFilterByAuthorizedAccounts(false)
-                .setServerClientId(serverClientId)
-                .setAutoSelectEnabled(false)
-                .build()
+            val signInOption = try {
+                GetSignInWithGoogleOption.Builder(serverClientId).build()
+            } catch (e: Exception) {
+                GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(false)
+                    .setServerClientId(serverClientId)
+                    .setAutoSelectEnabled(false)
+                    .build()
+            }
 
             val request = GetCredentialRequest.Builder()
-                .addCredentialOption(googleIdOption)
+                .addCredentialOption(signInOption)
                 .build()
 
-            val result = credentialManager.getCredential(activityContext, request)
+            val result = try {
+                credentialManager.getCredential(activityContext, request)
+            } catch (noCredEx: NoCredentialException) {
+                // Fallback to GetGoogleIdOption if GetSignInWithGoogleOption failed with NoCredentialException
+                if (signInOption is GetSignInWithGoogleOption) {
+                    val fallbackOption = GetGoogleIdOption.Builder()
+                        .setFilterByAuthorizedAccounts(false)
+                        .setServerClientId(serverClientId)
+                        .setAutoSelectEnabled(false)
+                        .build()
+                    val fallbackRequest = GetCredentialRequest.Builder()
+                        .addCredentialOption(fallbackOption)
+                        .build()
+                    credentialManager.getCredential(activityContext, fallbackRequest)
+                } else {
+                    throw noCredEx
+                }
+            }
             val credential = result.credential
 
             var googleIdToken: String? = null
@@ -175,8 +197,8 @@ class AuthRepository(
             Log.d(TAG, "Google Sign-In cancelled by user")
             Result.failure(Exception("Sign-in cancelled."))
         } catch (e: NoCredentialException) {
-            Log.e(TAG, "No Google accounts found", e)
-            Result.failure(Exception("No Google account found on this device. Please add an account in Settings."))
+            Log.e(TAG, "No credential returned from Credential Manager", e)
+            Result.failure(Exception(e.localizedMessage ?: "Google Sign-In failed to retrieve credentials. Please try again."))
         } catch (e: GetCredentialProviderConfigurationException) {
             Log.e(TAG, "Google Sign-In configuration error", e)
             Result.failure(Exception("Google Sign-In configuration error. Please check Google Play Services."))

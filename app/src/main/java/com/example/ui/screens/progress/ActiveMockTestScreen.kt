@@ -1,5 +1,6 @@
 package com.example.ui.screens.progress
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -49,6 +50,18 @@ fun ActiveMockTestScreen(
     onExitTest: () -> Unit,
     onRetakeTest: () -> Unit
 ) {
+    BackHandler(enabled = true) {
+        if (state.isCompleted) {
+            onExitTest()
+        } else if (state.isSubmitConfirmOpen) {
+            onSetSubmitConfirmOpen(false)
+        } else if (state.isPaletteOpen) {
+            onSetPaletteOpen(false)
+        } else {
+            onSetSubmitConfirmOpen(true)
+        }
+    }
+
     val currentIdx = state.currentQuestionIndex
     val total = state.questions.size
     val currentQ = state.questions.getOrNull(currentIdx)

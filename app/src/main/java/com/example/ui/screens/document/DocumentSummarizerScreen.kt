@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -58,6 +59,10 @@ fun DocumentSummarizerScreen(
     onGenerateStudyKit: ((android.net.Uri) -> Unit)? = null
 ) {
     val context = LocalContext.current
+
+    BackHandler(enabled = true) {
+        onBack()
+    }
     var isTextInputMode by remember { mutableStateOf(false) }
     var inputDocTitle by remember { mutableStateOf("") }
     var inputDocText by remember { mutableStateOf("") }

@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -33,6 +34,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.service.FocusShieldManager
 import com.example.service.InstalledAppInfo
 import com.example.ui.components.GlassButton
@@ -49,10 +53,28 @@ fun FocusShieldSettingsScreen(
 ) {
     val context = LocalContext.current
 
+    BackHandler(enabled = true) {
+        onBack()
+    }
+
     var isShieldEnabled by remember { mutableStateOf(FocusShieldManager.isShieldEnabled()) }
     var isAccessibilityGranted by remember { mutableStateOf(FocusShieldManager.isAccessibilityServiceEnabled(context)) }
     var isUsageAccessGranted by remember { mutableStateOf(FocusShieldManager.isUsageAccessGranted(context)) }
     var showPermissionExplanationDialog by remember { mutableStateOf(false) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isAccessibilityGranted = FocusShieldManager.isAccessibilityServiceEnabled(context)
+                isUsageAccessGranted = FocusShieldManager.isUsageAccessGranted(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("All Apps") }
@@ -229,17 +251,15 @@ fun FocusShieldSettingsScreen(
                 }
             }
 
-            // Permission Status & Clear Explanation Card
+            // Permission Status & Clear Explanation Card (FEATURE 1 — Accessibility Permission Flow)
             item {
-                val hasAnyMonitoringPermission = isAccessibilityGranted || isUsageAccessGranted
-
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
-                    color = if (hasAnyMonitoringPermission) Color(0x2010B981) else Color(0x25F59E0B),
+                    color = if (isAccessibilityGranted) Color(0x2010B981) else Color(0x25F59E0B),
                     border = androidx.compose.foundation.BorderStroke(
                         1.dp,
-                        if (hasAnyMonitoringPermission) Color(0x5010B981) else Color(0x60F59E0B)
+                        if (isAccessibilityGranted) Color(0x5010B981) else Color(0x60F59E0B)
                     )
                 ) {
                     Column(
@@ -254,75 +274,66 @@ fun FocusShieldSettingsScreen(
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
-                                    imageVector = if (hasAnyMonitoringPermission) Icons.Filled.VerifiedUser else Icons.Filled.Warning,
+                                    imageVector = if (isAccessibilityGranted) Icons.Filled.CheckCircle else Icons.Filled.Shield,
                                     contentDescription = null,
-                                    tint = if (hasAnyMonitoringPermission) EmeraldSuccess else GoldenSpark,
+                                    tint = if (isAccessibilityGranted) EmeraldSuccess else GoldenSpark,
                                     modifier = Modifier.size(22.dp)
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = if (hasAnyMonitoringPermission) "App Blocking Ready" else "Android Setup Required",
+                                    text = "App Blocking",
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
                             }
 
-                            TextButton(
-                                onClick = { showPermissionExplanationDialog = true }
+                            // Status Indicator Badge
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isAccessibilityGranted) Color(0x3010B981) else Color(0x30F59E0B)
                             ) {
-                                Text("Why Needed?", color = NeonCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = if (isAccessibilityGranted) "✓ Accessibility enabled" else "Accessibility not enabled",
+                                    color = if (isAccessibilityGranted) EmeraldSuccess else GoldenSpark,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
                         Text(
-                            text = if (hasAnyMonitoringPermission)
-                                "StudyMate AI is ready to detect when blocked apps are launched during your scheduled focus sessions and show the study reminder screen."
-                            else
-                                "To detect foreground distracting apps during active study sessions, Android requires either Accessibility or Usage Access permission.",
+                            text = "Accessibility permission is required to block the apps you select during study time.",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFFCBD5E1),
                             lineHeight = 18.sp
                         )
 
-                        if (!hasAnyMonitoringPermission) {
-                            Spacer(modifier = Modifier.height(12.dp))
+                        if (!isAccessibilityGranted) {
+                            Spacer(modifier = Modifier.height(14.dp))
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            Button(
+                                onClick = {
+                                    try {
+                                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                        context.startActivity(intent)
+                                    } catch (e: Exception) {
+                                        context.startActivity(Intent(Settings.ACTION_SETTINGS))
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = GoldenSpark, contentColor = Color(0xFF070B19)),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(44.dp)
+                                    .testTag("enable_accessibility_btn")
                             ) {
-                                Button(
-                                    onClick = {
-                                        try {
-                                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                                        } catch (e: Exception) {
-                                            context.startActivity(Intent(Settings.ACTION_SETTINGS))
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = GoldenSpark, contentColor = Color(0xFF070B19)),
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.weight(1f).testTag("grant_accessibility_btn")
-                                ) {
-                                    Text("1. Accessibility", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                }
-
-                                Button(
-                                    onClick = {
-                                        try {
-                                            context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-                                        } catch (e: Exception) {
-                                            context.startActivity(Intent(Settings.ACTION_SETTINGS))
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0x30FFFFFF), contentColor = Color.White),
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.weight(1f).testTag("grant_usage_btn")
-                                ) {
-                                    Text("2. Usage Access", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                }
+                                Icon(Icons.Filled.Lock, null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Enable Accessibility", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             }
                         }
                     }

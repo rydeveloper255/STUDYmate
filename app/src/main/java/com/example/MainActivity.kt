@@ -1,10 +1,13 @@
 package com.example
 
 import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -67,8 +70,22 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val authErrorMessage by viewModel.authErrorMessage.collectAsStateWithLifecycle()
 
     var isSplashFinished by remember { mutableStateOf(false) }
-    var currentTab by remember { mutableStateOf(AppNavTab.HOME) }
+    var tabStack by remember { mutableStateOf(listOf(AppNavTab.HOME)) }
+    val currentTab = tabStack.lastOrNull() ?: AppNavTab.HOME
     var showProfileDialog by remember { mutableStateOf(false) }
+
+    val onSelectTab: (AppNavTab) -> Unit = { selected ->
+        if (selected == AppNavTab.HOME) {
+            tabStack = listOf(AppNavTab.HOME)
+        } else {
+            val idx = tabStack.indexOf(selected)
+            tabStack = if (idx >= 0) {
+                tabStack.subList(0, idx + 1)
+            } else {
+                tabStack + selected
+            }
+        }
+    }
 
     // Dynamic Notification Permission Request (Android 13+)
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -147,6 +164,44 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val completeStudyKit by viewModel.completeStudyKit.collectAsStateWithLifecycle()
     val isStudyKitGenerating by viewModel.isStudyKitGenerating.collectAsStateWithLifecycle()
 
+    val activity = context as? Activity
+    var lastBackPressTime by remember { mutableLongStateOf(0L) }
+
+    BackHandler(enabled = true) {
+        when {
+            showProfileDialog -> {
+                showProfileDialog = false
+            }
+            showDocumentSummarizer -> {
+                showDocumentSummarizer = false
+            }
+            activeTestState.isTestInProgress -> {
+                if (activeTestState.isSubmitConfirmOpen) {
+                    viewModel.setSubmitConfirmOpen(false)
+                } else if (activeTestState.isPaletteOpen) {
+                    viewModel.setPaletteOpen(false)
+                } else {
+                    viewModel.setSubmitConfirmOpen(true)
+                }
+            }
+            activeTestState.isCompleted -> {
+                viewModel.exitTest()
+            }
+            tabStack.size > 1 -> {
+                tabStack = tabStack.dropLast(1)
+            }
+            else -> {
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastBackPressTime < 2000L) {
+                    activity?.finish()
+                } else {
+                    lastBackPressTime = currentTime
+                    Toast.makeText(context, "Press back again to exit", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
@@ -156,7 +211,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
             if (!activeTestState.isTestInProgress && !activeTestState.isCompleted && !showDocumentSummarizer) {
                 FloatingGlassNavBar(
                     currentTab = currentTab,
-                    onTabSelected = { currentTab = it }
+                    onTabSelected = { onSelectTab(it) }
                 )
             }
         }
@@ -203,11 +258,11 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onTogglePlanItem = { id, done -> viewModel.togglePlanItem(id, done) },
                             onStartFocusSession = { sub, top ->
                                 viewModel.startFocusSession(sub, top, 25)
-                                currentTab = AppNavTab.FOCUS
+                                onSelectTab(AppNavTab.FOCUS)
                             },
-                            onNavigateToTab = { currentTab = it },
+                            onNavigateToTab = { onSelectTab(it) },
                             onOpenProfileSettings = { showProfileDialog = true },
-                            onScanQuestion = { currentTab = AppNavTab.AI_TUTOR },
+                            onScanQuestion = { onSelectTab(AppNavTab.AI_TUTOR) },
                             onOpenDocumentSummarizer = { showDocumentSummarizer = true }
                         )
 
@@ -246,7 +301,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onDeletePlanItem = { viewModel.deletePlanItem(it) },
                             onStartFocusSession = { sub, top ->
                                 viewModel.startFocusSession(sub, top, 25)
-                                currentTab = AppNavTab.FOCUS
+                                onSelectTab(AppNavTab.FOCUS)
                             },
                             onAddFlashcard = { subject, topic, front, back, hint, difficulty, sourceDoc ->
                                 viewModel.addFlashcard(subject, topic, front, back, hint, difficulty, sourceDoc)
