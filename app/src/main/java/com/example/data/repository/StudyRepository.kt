@@ -17,6 +17,99 @@ class StudyRepository(
     val allMistakes: Flow<List<MistakeItem>> = database.mistakeDao().getAllMistakes()
     val allFlashcards: Flow<List<FlashcardItem>> = database.flashcardDao().getAllFlashcards()
     val allUserQuestionMaterials: Flow<List<UserQuestionMaterial>> = database.userQuestionMaterialDao().getAllMaterials()
+    val allNovaMemories: Flow<List<NovaMemoryItem>> = database.novaMemoryDao().getAllMemories()
+    val activeNovaMemories: Flow<List<NovaMemoryItem>> = database.novaMemoryDao().getActiveMemories()
+    val allNovaReminders: Flow<List<NovaReminderItem>> = database.novaReminderDao().getAllReminders()
+    val pendingNovaReminders: Flow<List<NovaReminderItem>> = database.novaReminderDao().getPendingReminders()
+
+    suspend fun saveNovaMemory(memory: NovaMemoryItem): Long = withContext(Dispatchers.IO) {
+        database.novaMemoryDao().insertMemory(memory)
+    }
+
+    suspend fun saveNovaMemories(memories: List<NovaMemoryItem>) = withContext(Dispatchers.IO) {
+        database.novaMemoryDao().insertMemories(memories)
+    }
+
+    suspend fun updateNovaMemory(memory: NovaMemoryItem) = withContext(Dispatchers.IO) {
+        database.novaMemoryDao().updateMemory(memory)
+    }
+
+    suspend fun toggleNovaMemory(id: Long, isEnabled: Boolean) = withContext(Dispatchers.IO) {
+        database.novaMemoryDao().toggleMemoryEnabled(id, isEnabled)
+    }
+
+    suspend fun deleteNovaMemory(id: Long) = withContext(Dispatchers.IO) {
+        database.novaMemoryDao().deleteMemory(id)
+    }
+
+    suspend fun clearAllNovaMemories() = withContext(Dispatchers.IO) {
+        database.novaMemoryDao().clearAllMemories()
+    }
+
+    suspend fun getActiveMemoriesOnce(): List<NovaMemoryItem> = withContext(Dispatchers.IO) {
+        database.novaMemoryDao().getActiveMemoriesOnce()
+    }
+
+    suspend fun addNovaReminder(reminder: NovaReminderItem): Long = withContext(Dispatchers.IO) {
+        database.novaReminderDao().insertReminder(reminder)
+    }
+
+    suspend fun setNovaReminderCompleted(id: Long, completed: Boolean) = withContext(Dispatchers.IO) {
+        database.novaReminderDao().setCompleted(id, completed)
+    }
+
+    suspend fun deleteNovaReminder(id: Long) = withContext(Dispatchers.IO) {
+        database.novaReminderDao().deleteReminder(id)
+    }
+
+    suspend fun clearAllNovaReminders() = withContext(Dispatchers.IO) {
+        database.novaReminderDao().clearAllReminders()
+    }
+
+    suspend fun populateInitialNovaMemoriesIfEmpty(userProfile: UserProfile) = withContext(Dispatchers.IO) {
+        val existing = database.novaMemoryDao().getActiveMemoriesOnce()
+        if (existing.isEmpty()) {
+            val initial = listOf(
+                NovaMemoryItem(
+                    category = NovaMemoryCategory.ACADEMIC,
+                    key = "Target Exam",
+                    value = "${userProfile.examName} (${userProfile.grade})",
+                    source = "Onboarding"
+                ),
+                NovaMemoryItem(
+                    category = NovaMemoryCategory.ACADEMIC,
+                    key = "Subjects of Focus",
+                    value = userProfile.subjects.joinToString(", "),
+                    source = "Onboarding"
+                ),
+                NovaMemoryItem(
+                    category = NovaMemoryCategory.WEAK_AREAS,
+                    key = "Weak Areas",
+                    value = if (userProfile.weakTopics.isNotEmpty()) userProfile.weakTopics.joinToString(", ") else "Rotational Motion, Organic Synthesis",
+                    source = "Self Assessment"
+                ),
+                NovaMemoryItem(
+                    category = NovaMemoryCategory.STUDY_PREFERENCES,
+                    key = "Daily Target",
+                    value = "${userProfile.dailyTargetMinutes / 60}h ${userProfile.dailyTargetMinutes % 60}m per day (${userProfile.preferredStudyTime} slots)",
+                    source = "Preferences"
+                ),
+                NovaMemoryItem(
+                    category = NovaMemoryCategory.GOALS,
+                    key = "Milestone Goal",
+                    value = userProfile.targetScore.ifBlank { "Top 500 AIR / 99th percentile" },
+                    source = "Goals"
+                ),
+                NovaMemoryItem(
+                    category = NovaMemoryCategory.CONVERSATION,
+                    key = "Preferred Title",
+                    value = "Boss",
+                    source = "NOVA Persona"
+                )
+            )
+            database.novaMemoryDao().insertMemories(initial)
+        }
+    }
 
     suspend fun saveUserProfile(profile: UserProfile) = withContext(Dispatchers.IO) {
         database.userDao().insertOrUpdateUserProfile(profile)

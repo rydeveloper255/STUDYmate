@@ -43,4 +43,18 @@ class Converters {
             RevisionCategory.PRACTICE_SOON
         }
     }
+
+    @TypeConverter
+    fun fromNovaMemoryCategory(value: com.example.data.model.NovaMemoryCategory): String {
+        return value.name
+    }
+
+    @TypeConverter
+    fun toNovaMemoryCategory(value: String): com.example.data.model.NovaMemoryCategory {
+        return try {
+            com.example.data.model.NovaMemoryCategory.valueOf(value)
+        } catch (e: Exception) {
+            com.example.data.model.NovaMemoryCategory.ACADEMIC
+        }
+    }
 }

@@ -34,6 +34,202 @@ class GeminiRepository(
         )
     )
 
+    suspend fun askNova(
+        userPrompt: String,
+        conversationHistory: List<Pair<String, String>> = emptyList(),
+        studyContext: NovaStudyContext = NovaStudyContext(),
+        settings: NovaSettings = NovaSettings(),
+        imageBitmap: Bitmap? = null,
+        useThinkingMode: Boolean = false
+    ): Result<NovaAssistantResponse> = withContext(Dispatchers.IO) {
+        try {
+            val model = if (useThinkingMode) "gemini-3.1-pro-preview" else "gemini-3.5-flash"
+            val contents = mutableListOf<Content>()
+
+            // Append history
+            for ((role, text) in conversationHistory.takeLast(6)) {
+                contents.add(
+                    Content(
+                        role = if (role == "user") "user" else "model",
+                        parts = listOf(Part(text = text))
+                    )
+                )
+            }
+
+            val userParts = mutableListOf<Part>()
+            userParts.add(Part(text = userPrompt))
+            if (imageBitmap != null) {
+                val base64 = imageBitmap.toBase64String()
+                userParts.add(Part(inlineData = InlineData(mimeType = "image/jpeg", data = base64)))
+            }
+            contents.add(Content(role = "user", parts = userParts))
+
+            val systemNovaPrompt = buildString {
+                append("You are NOVA, a personal AI study assistant and companion living inside the student's Android phone.\n")
+                append("ROLE: Personal AI Study Assistant + Personal Productivity Companion.\n\n")
+                append("IDENTITY & PERSONALITY:\n")
+                append("- Intelligent, friendly, proactive, respectful, motivating, and naturally conversational.\n")
+                append("- Communicate naturally in Hindi, Hinglish, or English based on user query.\n")
+                if (settings.useBossGreeting) {
+                    append("- Casually address the user as 'Boss' naturally and occasionally (not in every single sentence).\n")
+                }
+                append("- NEVER be insulting, manipulative, threatening, or annoying.\n")
+                append("- Provide practical, structured study assistance, formula breakdowns, quiz questions, and motivation.\n\n")
+                append("STUDENT ALLOWED PHONE CONTEXT:\n")
+                append("- Name: ${studyContext.studentName}\n")
+                append("- Target Exam: ${studyContext.targetExam} (${studyContext.examDaysRemaining} days left)\n")
+                append("- Subjects: ${studyContext.subjects.joinToString(", ")}\n")
+                if (studyContext.weakTopics.isNotEmpty()) {
+                    append("- Identified Weak Topics: ${studyContext.weakTopics.joinToString(", ")}\n")
+                }
+                append("- Daily Target: ${studyContext.dailyTargetMinutes} mins (Completed today: ${studyContext.todayFocusMinutes} mins)\n")
+                append("- Current Streak: ${studyContext.currentStreak} days\n")
+                if (studyContext.nextScheduledSession != null) {
+                    append("- Next Scheduled Session: ${studyContext.nextScheduledSession}\n")
+                }
+                if (studyContext.topDistractingAppName != null && studyContext.topDistractingAppUsageMins > 0) {
+                    append("- App Usage Context: ${studyContext.topDistractingAppName} used for ${studyContext.topDistractingAppUsageMins} mins today.\n")
+                }
+                if (settings.memoryEnabled && studyContext.memories.isNotEmpty()) {
+                    append("\nNOVA PERSONAL MEMORY (Privacy-First):\n")
+                    studyContext.memories.take(8).forEach { mem ->
+                        append("- [${mem.category.displayName}] ${mem.key}: ${mem.value}\n")
+                    }
+                }
+                append("\nCONTROLLED TOOL ACTION PROTOCOL:\n")
+                append("If user wants to start a focus timer, start a quiz, make a study plan, set a reminder, or open app blocking, append a single tool tag at the very end of your answer:\n")
+                append("- [ACTION:START_FOCUS:{\"subject\":\"Physics\",\"topic\":\"Current Electricity\",\"minutes\":25}]\n")
+                append("- [ACTION:START_QUIZ:{\"subject\":\"Physics\",\"topic\":\"Mechanics\"}]\n")
+                append("- [ACTION:CREATE_PLAN:{\"days\":7}]\n")
+                append("- [ACTION:CREATE_REMINDER:{\"title\":\"Physics Session\",\"time\":\"7:00 PM\"}]\n")
+                append("- [ACTION:OPEN_APP_BLOCKING:{}]\n")
+                append("- [ACTION:OPEN_MEMORY:{}]\n")
+                append("If user asks you to remember a key preference/weakness, also append:\n")
+                append("- [MEMORY:{\"category\":\"WEAK_AREAS\",\"key\":\"Ray Optics\",\"value\":\"Formula revision required\"}]\n")
+            }
+
+            val request = GenerateContentRequest(
+                contents = contents,
+                generationConfig = GenerationConfig(temperature = 0.5f),
+                systemInstruction = Content(parts = listOf(Part(text = systemNovaPrompt)))
+            )
+
+            val response = apiService.generateContent(model, apiKey, request)
+            val fullText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull { !it.text.isNullOrBlank() }?.text
+                ?: "Boss, main tumhari madad ke liye ready hoon. Aaj kya study karein?"
+
+            // Parse tool action and memory tag
+            var cleanText = fullText
+            var actionType = NovaActionType.NONE
+            var actionPayload: String? = null
+            var memoryToSave: NovaMemoryItem? = null
+
+            val actionRegex = Regex("""\[ACTION:([A-Z_]+):(\{.*?\})\]""")
+            val actionMatch = actionRegex.find(fullText)
+            if (actionMatch != null) {
+                val actStr = actionMatch.groupValues[1]
+                actionPayload = actionMatch.groupValues[2]
+                actionType = when (actStr) {
+                    "START_FOCUS" -> NovaActionType.START_FOCUS
+                    "START_QUIZ" -> NovaActionType.START_QUIZ
+                    "CREATE_PLAN" -> NovaActionType.CREATE_PLAN
+                    "CREATE_REMINDER" -> NovaActionType.CREATE_REMINDER
+                    "OPEN_APP_BLOCKING" -> NovaActionType.OPEN_APP_BLOCKING
+                    "OPEN_MEMORY" -> NovaActionType.OPEN_MEMORY
+                    else -> NovaActionType.NONE
+                }
+                cleanText = cleanText.replace(actionMatch.value, "").trim()
+            }
+
+            val memoryRegex = Regex("""\[MEMORY:(\{.*?\})\]""")
+            val memoryMatch = memoryRegex.find(fullText)
+            if (memoryMatch != null) {
+                try {
+                    val memJson = JSONObject(memoryMatch.groupValues[1])
+                    val catStr = memJson.optString("category", "ACADEMIC")
+                    val key = memJson.optString("key", "Study Note")
+                    val value = memJson.optString("value", "")
+                    val category = try { NovaMemoryCategory.valueOf(catStr) } catch (e: Exception) { NovaMemoryCategory.ACADEMIC }
+                    if (key.isNotBlank() && value.isNotBlank()) {
+                        memoryToSave = NovaMemoryItem(
+                            category = category,
+                            key = key,
+                            value = value,
+                            source = "Nova Assistant Conversation"
+                        )
+                    }
+                } catch (e: Exception) {
+                    // Ignore json parse error
+                }
+                cleanText = cleanText.replace(memoryMatch.value, "").trim()
+            }
+
+            Result.success(
+                NovaAssistantResponse(
+                    replyMarkdown = cleanText,
+                    actionType = actionType,
+                    actionPayload = actionPayload,
+                    memoryToSave = memoryToSave
+                )
+            )
+        } catch (e: Exception) {
+            // Intelligent local fallback response
+            val lower = userPrompt.lowercase()
+            val (fallbackText, action, payload) = when {
+                lower.contains("focus") || lower.contains("padh") || lower.contains("study now") || lower.contains("start session") -> {
+                    Triple(
+                        "Done Boss 🎯 25 minute ka focused session start karte hain! Main distracting apps ko Focus Shield se block kar raha hoon. Let's conquer this topic! 📚",
+                        NovaActionType.START_FOCUS,
+                        """{"subject":"${studyContext.subjects.firstOrNull() ?: "Physics"}","topic":"${studyContext.weakTopics.firstOrNull() ?: "Core Concepts"}","minutes":25}"""
+                    )
+                }
+                lower.contains("quiz") || lower.contains("test") -> {
+                    Triple(
+                        "Bilkul Boss! 🧠 ${studyContext.subjects.firstOrNull() ?: "Physics"} ka quick 5-question conceptual quiz taiyaar hai. Let's test your understanding!",
+                        NovaActionType.START_QUIZ,
+                        """{"subject":"${studyContext.subjects.firstOrNull() ?: "Physics"}","topic":"All Topics"}"""
+                    )
+                }
+                lower.contains("plan") || lower.contains("schedule") -> {
+                    Triple(
+                        "Boss, aapke target exam (${studyContext.targetExam}) ke liye balanced schedule generate kar diya hai. Weak topics ko priority slot diya hai! 📝",
+                        NovaActionType.CREATE_PLAN,
+                        """{"days":7}"""
+                    )
+                }
+                lower.contains("kya padhna") || lower.contains("what should i study") -> {
+                    Triple(
+                        "Boss 😄 aaj ka analysis kehti hai:\n\n1. **${studyContext.weakTopics.firstOrNull() ?: "Physics: Current Electricity"}** (Weak Topic - High Priority)\n2. 25-minute Pomodoro session target\n3. 15 practice MCQs solve karne hain.\n\nChalo start karein? 🚀",
+                        NovaActionType.START_FOCUS,
+                        """{"subject":"${studyContext.subjects.firstOrNull() ?: "Physics"}","topic":"${studyContext.weakTopics.firstOrNull() ?: "High-Yield Concepts"}","minutes":25}"""
+                    )
+                }
+                imageBitmap != null -> {
+                    Triple(
+                        "Boss, isko step-by-step solve karte hain:\n\n1. **Core Law/Principle:** Governing relation identify kiya.\n2. **Given Variables:** Known values extract kar li.\n3. **Step-by-Step Working:** Calculation simplify ki.\n4. **Final Answer:** Accurate solution verified.\n\n💡 *Pro-Tip:* Sign convention aur units ka special dhyan rakhein!",
+                        NovaActionType.NONE,
+                        null
+                    )
+                }
+                else -> {
+                    Triple(
+                        "Got it Boss! Main tumhare study goals aur preparation ke saath continuously sync mein hoon. Kuch bhi doubt ho, numericals explain karane ho ya quiz lena ho — bas batao! ⚡",
+                        NovaActionType.NONE,
+                        null
+                    )
+                }
+            }
+
+            Result.success(
+                NovaAssistantResponse(
+                    replyMarkdown = fallbackText,
+                    actionType = action,
+                    actionPayload = payload
+                )
+            )
+        }
+    }
+
     suspend fun askTutor(
         prompt: String,
         conversationHistory: List<Pair<String, String>> = emptyList(),

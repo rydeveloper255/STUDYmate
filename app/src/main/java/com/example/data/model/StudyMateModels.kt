@@ -426,4 +426,120 @@ data class TutorResponseResult(
     val isOfflineFallback: Boolean = false
 )
 
+// =========================================================================
+// NOVA PERSONAL AI ASSISTANT MODELS
+// =========================================================================
+
+enum class NovaMemoryCategory(val displayName: String, val iconName: String) {
+    ACADEMIC("Academic & Exam", "School"),
+    WEAK_AREAS("Weak Areas & Topics", "Warning"),
+    STUDY_PREFERENCES("Study Habits & Times", "Schedule"),
+    GOALS("Targets & Aspirations", "Flag"),
+    USER_NOTES("Personal Notes & Memory", "Note"),
+    CONVERSATION("Preferences & Interactions", "Chat")
+}
+
+@Entity(tableName = "nova_memory")
+data class NovaMemoryItem(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val category: NovaMemoryCategory = NovaMemoryCategory.ACADEMIC,
+    val key: String,
+    val value: String,
+    val source: String = "User Profile", // "Onboarding", "Chat Conversation", "Focus Session", "User Added"
+    val timestamp: Long = System.currentTimeMillis(),
+    val isEnabled: Boolean = true
+)
+
+@Entity(tableName = "nova_reminders")
+data class NovaReminderItem(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val title: String,
+    val subject: String = "General",
+    val topic: String = "",
+    val timeMillis: Long,
+    val timeFormatted: String = "",
+    val isCompleted: Boolean = false,
+    val isSnoozed: Boolean = false,
+    val reminderType: String = "Study Session", // "Study Session", "Mock Test", "Revision", "Custom"
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+enum class NovaSender {
+    USER, NOVA
+}
+
+enum class NovaActionType {
+    NONE,
+    START_FOCUS,
+    CREATE_PLAN,
+    START_QUIZ,
+    CREATE_REMINDER,
+    OPEN_MEMORY,
+    OPEN_SETTINGS,
+    OPEN_APP_BLOCKING,
+    OPEN_DOCUMENT_SUMMARIZER
+}
+
+data class NovaChatMessage(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val sender: NovaSender = NovaSender.NOVA,
+    val text: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val actionType: NovaActionType = NovaActionType.NONE,
+    val actionPayload: String? = null,
+    val isActionCompleted: Boolean = false,
+    val attachedImageUri: String? = null,
+    val isThinking: Boolean = false
+)
+
+enum class NovaVoiceState {
+    IDLE,
+    LISTENING,
+    PROCESSING,
+    SPEAKING
+}
+
+data class NovaSettings(
+    val novaName: String = "NOVA",
+    val personality: String = "Personal AI Companion & Mentor",
+    val language: String = "Hinglish (Auto)", // "Hinglish (Auto)", "English", "Hindi"
+    val useBossGreeting: Boolean = true,
+    val voiceEnabled: Boolean = true,
+    val ttsAutoSpeak: Boolean = false,
+    val memoryEnabled: Boolean = true,
+    val smartCoachEnabled: Boolean = true,
+    val appUsageAwarenessEnabled: Boolean = true,
+    val studyRemindersEnabled: Boolean = true,
+    val motivationalMessagesEnabled: Boolean = true,
+    val quietHoursEnabled: Boolean = true,
+    val quietStartHour: Int = 22,
+    val quietEndHour: Int = 7
+)
+
+data class NovaStudyContext(
+    val studentName: String = "Scholar",
+    val preferredTitle: String = "Boss",
+    val targetExam: String = "JEE / NEET / Board Exam",
+    val examDaysRemaining: Int = 30,
+    val subjects: List<String> = listOf("Physics", "Mathematics", "Chemistry"),
+    val weakTopics: List<String> = listOf("Rotational Dynamics", "Organic Reactions"),
+    val dailyTargetMinutes: Int = 180,
+    val todayFocusMinutes: Int = 45,
+    val currentStreak: Int = 4,
+    val pendingPlanCount: Int = 2,
+    val nextScheduledSession: String? = "Physics (7:00 PM)",
+    val topDistractingAppUsageMins: Int = 0,
+    val topDistractingAppName: String? = null,
+    val memories: List<NovaMemoryItem> = emptyList()
+)
+
+data class NovaAssistantResponse(
+    val replyMarkdown: String,
+    val actionType: NovaActionType = NovaActionType.NONE,
+    val actionPayload: String? = null,
+    val memoryToSave: NovaMemoryItem? = null,
+    val quickSuggestions: List<String> = emptyList()
+)
+
+
 

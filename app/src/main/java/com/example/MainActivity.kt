@@ -30,6 +30,7 @@ import com.example.ui.screens.auth.SplashScreen
 import com.example.ui.screens.document.DocumentSummarizerScreen
 import com.example.ui.screens.focus.FocusModeScreen
 import com.example.ui.screens.home.HomeScreen
+import com.example.ui.screens.nova.NovaScreen
 import com.example.ui.screens.planner.StudyPlannerScreen
 import com.example.ui.screens.profile.ProfileSettingsDialog
 import com.example.ui.screens.progress.ProgressDashboardScreen
@@ -38,6 +39,8 @@ import com.example.ui.theme.StudyMateTheme
 import com.example.ui.theme.appBackgroundGradient
 import com.example.viewmodel.MainViewModel
 import com.example.viewmodel.MainViewModelFactory
+import com.example.viewmodel.NovaViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 class MainActivity : ComponentActivity() {
 
@@ -268,29 +271,18 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onOpenDocumentSummarizer = { showDocumentSummarizer = true }
                         )
 
-                        AppNavTab.AI_TUTOR -> GeminiTutorScreen(
-                            user = userProfile,
-                            messages = chatMessages,
-                            isAiThinking = isAiThinking,
-                            useThinkingMode = useThinkingMode,
-                            tutorPersona = tutorPersona,
-                            isTtsSpeaking = isTtsSpeaking,
-                            mistakes = mistakes,
-                            studyPlan = studyPlan,
-                            onSendMessage = { prompt, subject, topic -> viewModel.sendTutorMessage(prompt, subject, topic) },
-                            onExecuteTutorAction = { actionType, subject, topic, extra ->
-                                viewModel.executeTutorAction(actionType, subject, topic, extra)
-                            },
-                            onSaveFlashcardsToDeck = { viewModel.saveFlashcardsToDeck(it) },
-                            onImportPlanItems = { viewModel.importPlanItems(it) },
-                            onSendQuickAction = { viewModel.sendQuickActionChip(it) },
-                            onSolveImage = { bmp, sub, top -> viewModel.solveImageQuestion(bmp, sub, top) },
-                            onToggleThinkingMode = { viewModel.setThinkingMode(it) },
-                            onSelectPersona = { viewModel.setTutorPersona(it) },
-                            onSpeakTts = { viewModel.speakTts(it) },
-                            onClearChat = { viewModel.clearChatMessages() },
-                            onOpenDocumentSummarizer = { showDocumentSummarizer = true }
-                        )
+                        AppNavTab.AI_TUTOR -> {
+                            val novaViewModel: NovaViewModel = viewModel()
+                            NovaScreen(
+                                viewModel = novaViewModel,
+                                onNavigateToFocus = { sub, top, mins ->
+                                    viewModel.startFocusSession(sub, top, mins)
+                                    onSelectTab(AppNavTab.FOCUS)
+                                },
+                                onNavigateToPlanner = { onSelectTab(AppNavTab.STUDY) },
+                                onOpenDocumentSummarizer = { showDocumentSummarizer = true }
+                            )
+                        }
 
                         AppNavTab.STUDY -> StudyPlannerScreen(
                             planItems = studyPlan,

@@ -24,6 +24,7 @@ val GoldenSpark = Color(0xFFFBBF24)
 val CyberAmber = Color(0xFFFBBF24)
 val EmeraldSuccess = Color(0xFF10B981)
 val MatrixGreen = Color(0xFF10B981)
+val NeonGreen = Color(0xFF10B981)
 val CoralRose = Color(0xFFF43F5E)
 
 // Liquid Glass Translucencies

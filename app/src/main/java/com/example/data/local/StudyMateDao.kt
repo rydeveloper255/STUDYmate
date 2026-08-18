@@ -144,3 +144,61 @@ interface FlashcardDao {
     @Query("DELETE FROM flashcards")
     suspend fun clearAllFlashcards()
 }
+
+@Dao
+interface NovaMemoryDao {
+    @Query("SELECT * FROM nova_memory ORDER BY timestamp DESC")
+    fun getAllMemories(): Flow<List<NovaMemoryItem>>
+
+    @Query("SELECT * FROM nova_memory WHERE isEnabled = 1 ORDER BY timestamp DESC")
+    fun getActiveMemories(): Flow<List<NovaMemoryItem>>
+
+    @Query("SELECT * FROM nova_memory WHERE isEnabled = 1 ORDER BY timestamp DESC")
+    suspend fun getActiveMemoriesOnce(): List<NovaMemoryItem>
+
+    @Query("SELECT * FROM nova_memory WHERE category = :category ORDER BY timestamp DESC")
+    fun getMemoriesByCategory(category: NovaMemoryCategory): Flow<List<NovaMemoryItem>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMemory(memory: NovaMemoryItem): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMemories(memories: List<NovaMemoryItem>)
+
+    @Update
+    suspend fun updateMemory(memory: NovaMemoryItem)
+
+    @Query("UPDATE nova_memory SET isEnabled = :isEnabled WHERE id = :id")
+    suspend fun toggleMemoryEnabled(id: Long, isEnabled: Boolean)
+
+    @Query("DELETE FROM nova_memory WHERE id = :id")
+    suspend fun deleteMemory(id: Long)
+
+    @Query("DELETE FROM nova_memory")
+    suspend fun clearAllMemories()
+}
+
+@Dao
+interface NovaReminderDao {
+    @Query("SELECT * FROM nova_reminders ORDER BY timeMillis ASC")
+    fun getAllReminders(): Flow<List<NovaReminderItem>>
+
+    @Query("SELECT * FROM nova_reminders WHERE isCompleted = 0 ORDER BY timeMillis ASC")
+    fun getPendingReminders(): Flow<List<NovaReminderItem>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertReminder(reminder: NovaReminderItem): Long
+
+    @Update
+    suspend fun updateReminder(reminder: NovaReminderItem)
+
+    @Query("UPDATE nova_reminders SET isCompleted = :completed WHERE id = :id")
+    suspend fun setCompleted(id: Long, completed: Boolean)
+
+    @Query("DELETE FROM nova_reminders WHERE id = :id")
+    suspend fun deleteReminder(id: Long)
+
+    @Query("DELETE FROM nova_reminders")
+    suspend fun clearAllReminders()
+}
+

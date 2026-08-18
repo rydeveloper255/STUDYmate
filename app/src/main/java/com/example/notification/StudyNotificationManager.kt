@@ -70,6 +70,8 @@ object StudyNotificationManager {
     private const val NOTIF_ID_FOCUS_ACTIVE = 1006
     private const val NOTIF_ID_FOCUS_COMPLETED = 1007
     private const val NOTIF_ID_MOTIVATION = 1008
+    private const val NOTIF_ID_STUDY_REMINDER = 1009
+    private const val NOTIF_ID_APP_USAGE = 1010
 
     private const val PREFS_NAME = "studymate_notifications_prefs"
     private const val SPAM_PREFS = "studymate_spam_cooldown_prefs"
@@ -937,6 +939,199 @@ object StudyNotificationManager {
             actions.forEach { act ->
                 cancelAlarm(context, alarmManager, code, act)
             }
+        }
+    }
+
+    // =========================================================================
+    // NOVA PERSONAL AI ASSISTANT PROACTIVE NOTIFICATIONS
+    // =========================================================================
+
+    fun sendNovaStudyReminder(
+        context: Context,
+        userName: String = "Boss",
+        subject: String = "Physics",
+        topic: String = "Current Electricity",
+        durationMins: Int = 25,
+        isTest: Boolean = false
+    ) {
+        val settings = getSettings(context)
+        if (!isTest) {
+            if (!settings.masterEnabled || !settings.studySessionReminders) return
+            if (isInQuietHours(context)) return
+            if (isSpamCooldownActive(context, "nova_study_reminder", settings.antiSpamCooldownMinutes)) return
+        }
+
+        val title = "Boss 😄 $subject ka time ho gaya 📚"
+        val body = "Aaj $topic ka session pending hai. $durationMins minutes se start karein?"
+
+        val startFocusIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("NAVIGATE_TO", "FOCUS")
+            putExtra("AUTO_START_FOCUS", true)
+            putExtra("FOCUS_SUBJECT", subject)
+            putExtra("FOCUS_TOPIC", topic)
+            putExtra("FOCUS_DURATION", durationMins)
+        }
+        val startFocusPendingIntent = PendingIntent.getActivity(
+            context,
+            2401,
+            startFocusIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val snoozeIntent = Intent(context, StudyReminderReceiver::class.java).apply {
+            action = ACTION_SNOOZE_STUDY
+            putExtra("EXTRA_SUBJECT", subject)
+            putExtra("EXTRA_TOPIC", topic)
+            putExtra("EXTRA_DURATION", durationMins)
+        }
+        val snoozePendingIntent = PendingIntent.getBroadcast(
+            context,
+            2402,
+            snoozeIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_STUDY_REMINDERS)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .setBigContentTitle(title)
+                    .bigText(body)
+            )
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(startFocusPendingIntent)
+            .setAutoCancel(true)
+            .addAction(android.R.drawable.ic_media_play, "Start Study ($durationMins m)", startFocusPendingIntent)
+            .addAction(android.R.drawable.ic_popup_sync, "Snooze 10 min", snoozePendingIntent)
+
+        try {
+            NotificationManagerCompat.from(context).notify(NOTIF_ID_STUDY_REMINDER, builder.build())
+            markNotificationSent(context, "nova_study_reminder")
+        } catch (e: SecurityException) {
+            // Handled
+        }
+    }
+
+    fun sendNovaMissedStudyAlert(
+        context: Context,
+        userName: String = "Boss",
+        subject: String = "Physics",
+        topic: String = "Current Electricity",
+        isTest: Boolean = false
+    ) {
+        val settings = getSettings(context)
+        if (!isTest) {
+            if (!settings.masterEnabled || !settings.missedStudyReminders) return
+            if (isInQuietHours(context)) return
+            if (isSpamCooldownActive(context, "nova_missed_study", settings.antiSpamCooldownMinutes)) return
+        }
+
+        val title = "Boss, aaj ka $subject session miss ho gaya 😅"
+        val body = "Agar free ho to abhi 20 minutes ka quick recovery session kar sakte hain."
+
+        val startNowIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("NAVIGATE_TO", "FOCUS")
+            putExtra("AUTO_START_FOCUS", true)
+            putExtra("FOCUS_SUBJECT", subject)
+            putExtra("FOCUS_TOPIC", topic)
+            putExtra("FOCUS_DURATION", 20)
+        }
+        val startNowPendingIntent = PendingIntent.getActivity(
+            context,
+            2411,
+            startNowIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val planIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("NAVIGATE_TO", "PLANNER")
+        }
+        val planPendingIntent = PendingIntent.getActivity(
+            context,
+            2412,
+            planIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_MISSED_STUDY)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .setBigContentTitle(title)
+                    .bigText(body)
+            )
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(startNowPendingIntent)
+            .setAutoCancel(true)
+            .addAction(android.R.drawable.ic_media_play, "Start Now (20m)", startNowPendingIntent)
+            .addAction(android.R.drawable.ic_menu_agenda, "Reschedule", planPendingIntent)
+
+        try {
+            NotificationManagerCompat.from(context).notify(NOTIF_ID_MISSED_STUDY, builder.build())
+            markNotificationSent(context, "nova_missed_study")
+        } catch (e: SecurityException) {
+            // Handled
+        }
+    }
+
+    fun sendNovaExcessiveAppUsageAlert(
+        context: Context,
+        userName: String = "Boss",
+        appName: String = "YouTube",
+        pendingSubject: String = "Physics",
+        durationMins: Int = 25,
+        isTest: Boolean = false
+    ) {
+        val settings = getSettings(context)
+        if (!isTest) {
+            if (!settings.masterEnabled) return
+            if (isInQuietHours(context)) return
+            if (isSpamCooldownActive(context, "nova_excessive_usage", 45)) return
+        }
+
+        val title = "Boss 😅 $appName par kaafi time ho gaya"
+        val body = "Aaj ka $pendingSubject session abhi pending hai. Chalo $durationMins minutes padh lete hain? 📚"
+
+        val startFocusIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("NAVIGATE_TO", "FOCUS")
+            putExtra("AUTO_START_FOCUS", true)
+            putExtra("FOCUS_SUBJECT", pendingSubject)
+            putExtra("FOCUS_DURATION", durationMins)
+        }
+        val startFocusPendingIntent = PendingIntent.getActivity(
+            context,
+            2421,
+            startFocusIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_STUDY_REMINDERS)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .setBigContentTitle(title)
+                    .bigText(body)
+            )
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(startFocusPendingIntent)
+            .setAutoCancel(true)
+            .addAction(android.R.drawable.ic_media_play, "Start Study ($durationMins m)", startFocusPendingIntent)
+
+        try {
+            NotificationManagerCompat.from(context).notify(NOTIF_ID_STUDY_REMINDER + 10, builder.build())
+            markNotificationSent(context, "nova_excessive_usage")
+        } catch (e: SecurityException) {
+            // Handled
         }
     }
 }

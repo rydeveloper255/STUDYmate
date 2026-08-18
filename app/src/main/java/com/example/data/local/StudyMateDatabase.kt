@@ -15,9 +15,11 @@ import com.example.data.model.*
         MockTestAttempt::class,
         MistakeItem::class,
         FlashcardItem::class,
-        UserQuestionMaterial::class
+        UserQuestionMaterial::class,
+        NovaMemoryItem::class,
+        NovaReminderItem::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -29,6 +31,8 @@ abstract class StudyMateDatabase : RoomDatabase() {
     abstract fun mistakeDao(): MistakeDao
     abstract fun flashcardDao(): FlashcardDao
     abstract fun userQuestionMaterialDao(): UserQuestionMaterialDao
+    abstract fun novaMemoryDao(): NovaMemoryDao
+    abstract fun novaReminderDao(): NovaReminderDao
 
     companion object {
         @Volatile

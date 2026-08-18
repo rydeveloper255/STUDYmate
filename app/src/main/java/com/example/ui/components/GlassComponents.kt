@@ -280,7 +280,7 @@ fun LiquidProgressRing(
 
 enum class AppNavTab(val title: String, val icon: ImageVector, val selectedIcon: ImageVector) {
     HOME("Home", Icons.Outlined.Home, Icons.Filled.Home),
-    AI_TUTOR("AI", Icons.Outlined.AutoAwesome, Icons.Filled.AutoAwesome),
+    AI_TUTOR("NOVA", Icons.Outlined.AutoAwesome, Icons.Filled.AutoAwesome),
     STUDY("Study", Icons.AutoMirrored.Outlined.MenuBook, Icons.AutoMirrored.Filled.MenuBook),
     FOCUS("Focus", Icons.Outlined.TrackChanges, Icons.Filled.TrackChanges),
     PROGRESS("Progress", Icons.Outlined.Assessment, Icons.Filled.Assessment)
