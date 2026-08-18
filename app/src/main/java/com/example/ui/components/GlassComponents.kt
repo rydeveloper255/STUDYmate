@@ -139,6 +139,7 @@ fun GlassButton(
     icon: ImageVector? = null,
     isPrimary: Boolean = true,
     isLoading: Boolean = false,
+    loadingText: String = "Signing in...",
     testTag: String = "glass_button"
 ) {
     val shape = RoundedCornerShape(16.dp)
@@ -171,11 +172,23 @@ fun GlassButton(
         contentAlignment = Alignment.Center
     ) {
         if (isLoading) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(22.dp),
-                color = contentColor,
-                strokeWidth = 2.5.dp
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = contentColor,
+                    strokeWidth = 2.5.dp
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = loadingText,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = contentColor,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         } else {
             Row(
                 verticalAlignment = Alignment.CenterVertically,

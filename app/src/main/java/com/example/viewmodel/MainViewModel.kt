@@ -258,12 +258,16 @@ class MainViewModel(
             val result = authRepository.signInWithGoogle(activityContext)
             result.onFailure {
                 val errorMsg = it.message ?: "Google Sign-In failed"
-                if (errorMsg != "Sign-in cancelled.") {
+                if (errorMsg != "Sign-in cancelled." && errorMsg != "Google Sign-In was cancelled.") {
                     _authErrorMessage.value = errorMsg
                 }
             }
             _isAuthLoading.value = false
         }
+    }
+
+    fun clearAuthError() {
+        _authErrorMessage.value = null
     }
 
     fun signInWithEmail(email: String, pass: String) {

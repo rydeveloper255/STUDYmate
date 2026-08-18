@@ -54,6 +54,7 @@ fun HomeScreen(
     onStartFocusSession: (subject: String, topic: String) -> Unit,
     onNavigateToTab: (AppNavTab) -> Unit,
     onOpenProfileSettings: () -> Unit,
+    onSignOut: () -> Unit = {},
     onScanQuestion: () -> Unit,
     onOpenDocumentSummarizer: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -87,7 +88,7 @@ fun HomeScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Top Header with User Greeting & Profile Avatar
+        // 1. Top Header with User Greeting & Quick Actions
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -171,6 +172,15 @@ fun HomeScreen(
                     }
                 }
             }
+        }
+
+        // 2. User Profile & Authentication Status Widget
+        item {
+            UserProfileWidget(
+                user = user,
+                onSignOut = onSignOut,
+                onOpenSettings = onOpenProfileSettings
+            )
         }
 
         // 2. Large Glass Card: Today's Progress

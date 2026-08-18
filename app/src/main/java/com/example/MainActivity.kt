@@ -114,7 +114,8 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
             errorMessage = authErrorMessage,
             onGoogleSignIn = { viewModel.signInWithGoogle(context) },
             onEmailSignIn = { email, pass -> viewModel.signInWithEmail(email, pass) },
-            onGuestSignIn = { viewModel.continueAsGuest() }
+            onGuestSignIn = { viewModel.continueAsGuest() },
+            onDismissError = { viewModel.clearAuthError() }
         )
         return
     }
@@ -262,6 +263,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             },
                             onNavigateToTab = { onSelectTab(it) },
                             onOpenProfileSettings = { showProfileDialog = true },
+                            onSignOut = { viewModel.signOut(context) },
                             onScanQuestion = { onSelectTab(AppNavTab.AI_TUTOR) },
                             onOpenDocumentSummarizer = { showDocumentSummarizer = true }
                         )

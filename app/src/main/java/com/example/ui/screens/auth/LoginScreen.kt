@@ -1,6 +1,9 @@
 package com.example.ui.screens.auth
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -13,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -39,11 +43,49 @@ fun LoginScreen(
     errorMessage: String?,
     onGoogleSignIn: () -> Unit,
     onEmailSignIn: (email: String, pass: String) -> Unit,
-    onGuestSignIn: () -> Unit
+    onGuestSignIn: () -> Unit,
+    onDismissError: () -> Unit = {}
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
     var showEmailDialog by remember { mutableStateOf(false) }
     var emailInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
+
+    // Display Snackbar and Toast feedback whenever a sign-in error occurs
+    LaunchedEffect(errorMessage) {
+        if (!errorMessage.isNullOrBlank()) {
+            Toast.makeText(context, errorMessage, Toast.LENGTH_LONG).show()
+            snackbarHostState.showSnackbar(
+                message = errorMessage,
+                actionLabel = "Dismiss",
+                duration = SnackbarDuration.Short
+            )
+        }
+    }
+
+    // Verify and listen to Firebase Auth currentUser changes in LoginScreen lifecycle
+    DisposableEffect(Unit) {
+        val auth = try {
+            if (com.google.firebase.FirebaseApp.getApps(context).isNotEmpty()) {
+                com.google.firebase.auth.FirebaseAuth.getInstance()
+            } else null
+        } catch (e: Exception) {
+            null
+        }
+
+        val listener = com.google.firebase.auth.FirebaseAuth.AuthStateListener { firebaseAuth ->
+            val user = firebaseAuth.currentUser
+            if (user != null) {
+                android.util.Log.d("LoginScreen", "FirebaseAuth StateListener detected currentUser: ${user.uid} (${user.email})")
+            }
+        }
+
+        auth?.addAuthStateListener(listener)
+        onDispose {
+            auth?.removeAuthStateListener(listener)
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -98,22 +140,54 @@ fun LoginScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    if (errorMessage != null) {
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 14.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            color = CoralRose.copy(alpha = 0.15f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, CoralRose.copy(alpha = 0.5f))
-                        ) {
-                            Text(
-                                text = errorMessage,
-                                color = CoralRose,
-                                style = MaterialTheme.typography.labelMedium,
-                                modifier = Modifier.padding(10.dp),
-                                textAlign = TextAlign.Center
-                            )
+                    // Human-readable Error Banner
+                    AnimatedVisibility(
+                        visible = errorMessage != null,
+                        enter = fadeIn(),
+                        exit = fadeOut()
+                    ) {
+                        if (errorMessage != null) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 16.dp)
+                                    .testTag("login_error_banner"),
+                                shape = RoundedCornerShape(14.dp),
+                                color = CoralRose.copy(alpha = 0.18f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, CoralRose.copy(alpha = 0.6f))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Warning,
+                                        contentDescription = "Error",
+                                        tint = CoralRose,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Text(
+                                        text = errorMessage,
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(
+                                        onClick = onDismissError,
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Close,
+                                            contentDescription = "Dismiss",
+                                            tint = CoralRose,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -124,6 +198,7 @@ fun LoginScreen(
                         icon = Icons.Filled.AccountCircle,
                         isPrimary = true,
                         isLoading = isLoading,
+                        loadingText = "Authenticating with Google...",
                         testTag = "google_signin_button"
                     )
 
@@ -132,7 +207,7 @@ fun LoginScreen(
                     // Secondary: Continue with Email
                     GlassButton(
                         text = "Continue with Email",
-                        onClick = { showEmailDialog = true },
+                        onClick = { if (!isLoading) showEmailDialog = true },
                         icon = Icons.Outlined.Email,
                         isPrimary = false,
                         testTag = "email_signin_button"
@@ -142,14 +217,16 @@ fun LoginScreen(
 
                     // Tertiary: Continue as Guest
                     OutlinedButton(
-                        onClick = onGuestSignIn,
+                        onClick = { if (!isLoading) onGuestSignIn() },
+                        enabled = !isLoading,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
                             .testTag("guest_signin_button"),
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = Color(0xFF94A3B8)
+                            contentColor = Color(0xFF94A3B8),
+                            disabledContentColor = Color(0x6694A3B8)
                         ),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x33FFFFFF))
                     ) {
@@ -180,6 +257,52 @@ fun LoginScreen(
                 modifier = Modifier.padding(bottom = 12.dp)
             )
         }
+
+        // Snackbar Host for Floating Alerts
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 16.dp)
+                .testTag("login_snackbar_host"),
+            snackbar = { data ->
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFF1E293B),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, CoralRose.copy(alpha = 0.5f)),
+                    shadowElevation = 8.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Warning,
+                            contentDescription = null,
+                            tint = CoralRose,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = data.visuals.message,
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (data.visuals.actionLabel != null) {
+                            TextButton(onClick = { data.dismiss() }) {
+                                Text(
+                                    text = data.visuals.actionLabel ?: "OK",
+                                    color = NeonCyan,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        )
 
         // Email / Password Modal Dialog
         if (showEmailDialog) {

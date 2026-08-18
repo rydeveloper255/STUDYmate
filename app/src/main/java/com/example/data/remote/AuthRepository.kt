@@ -1,6 +1,8 @@
 package com.example.data.remote
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.util.Log
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
@@ -18,7 +20,9 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.GoogleAuthProvider
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
@@ -50,6 +54,52 @@ class AuthRepository(
 
     private val credentialManager = CredentialManager.create(context)
 
+    init {
+        try {
+            firebaseAuth?.addAuthStateListener { auth ->
+                val fbUser = auth.currentUser
+                Log.d(TAG, "FirebaseAuth AuthStateListener triggered: currentUser = ${fbUser?.uid}, email = ${fbUser?.email}")
+                if (fbUser != null) {
+                    kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                        val localProfile = userDao.getUserProfileOnce()
+                        if (localProfile == null || localProfile.uid != fbUser.uid || localProfile.email != (fbUser.email ?: "")) {
+                            val profile = localProfile?.copy(
+                                id = "current_user",
+                                uid = fbUser.uid,
+                                email = fbUser.email ?: localProfile.email,
+                                name = if (localProfile.name.isNotBlank() && localProfile.name != "Student" && localProfile.name != "Guest Scholar") localProfile.name else (fbUser.displayName ?: "Student"),
+                                photoUrl = fbUser.photoUrl?.toString() ?: localProfile.photoUrl,
+                                isGuest = false,
+                                isOnboardingCompleted = true
+                            ) ?: UserProfile(
+                                id = "current_user",
+                                uid = fbUser.uid,
+                                name = fbUser.displayName ?: "Student",
+                                email = fbUser.email ?: "",
+                                photoUrl = fbUser.photoUrl?.toString(),
+                                isGuest = false,
+                                isOnboardingCompleted = true
+                            )
+                            userDao.insertOrUpdateUserProfile(profile)
+                            Log.d(TAG, "FirebaseAuth listener synced user profile into Room: ${profile.email}")
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not attach FirebaseAuth state listener", e)
+        }
+    }
+
+    private fun Context.findActivity(): Activity? {
+        var ctx = this
+        while (ctx is ContextWrapper) {
+            if (ctx is Activity) return ctx
+            ctx = ctx.baseContext
+        }
+        return null
+    }
+
     private fun getServerClientId(ctx: Context): String {
         val resId = ctx.resources.getIdentifier("default_web_client_id", "string", ctx.packageName)
         if (resId != 0) {
@@ -80,43 +130,38 @@ class AuthRepository(
         null
     }
 
-    suspend fun signInWithGoogle(activityContext: Context): Result<UserProfile> = withContext(Dispatchers.IO) {
-        val serverClientId = getServerClientId(activityContext)
+    suspend fun signInWithGoogle(activityContext: Context): Result<UserProfile> = withContext(Dispatchers.Main) {
+        val targetActivity = activityContext.findActivity() ?: activityContext
+        val serverClientId = getServerClientId(targetActivity)
         Log.d(TAG, "Initiating Google Sign-In with server client id: $serverClientId")
 
         try {
-            val signInOption = try {
-                GetSignInWithGoogleOption.Builder(serverClientId).build()
-            } catch (e: Exception) {
-                GetGoogleIdOption.Builder()
-                    .setFilterByAuthorizedAccounts(false)
-                    .setServerClientId(serverClientId)
-                    .setAutoSelectEnabled(false)
-                    .build()
-            }
+            val googleIdOption = GetGoogleIdOption.Builder()
+                .setFilterByAuthorizedAccounts(false)
+                .setServerClientId(serverClientId)
+                .setAutoSelectEnabled(false)
+                .build()
 
             val request = GetCredentialRequest.Builder()
-                .addCredentialOption(signInOption)
+                .addCredentialOption(googleIdOption)
                 .build()
 
             val result = try {
-                credentialManager.getCredential(activityContext, request)
-            } catch (noCredEx: NoCredentialException) {
-                // Fallback to GetGoogleIdOption if GetSignInWithGoogleOption failed with NoCredentialException
-                if (signInOption is GetSignInWithGoogleOption) {
-                    val fallbackOption = GetGoogleIdOption.Builder()
-                        .setFilterByAuthorizedAccounts(false)
-                        .setServerClientId(serverClientId)
-                        .setAutoSelectEnabled(false)
-                        .build()
-                    val fallbackRequest = GetCredentialRequest.Builder()
-                        .addCredentialOption(fallbackOption)
-                        .build()
-                    credentialManager.getCredential(activityContext, fallbackRequest)
-                } else {
-                    throw noCredEx
+                credentialManager.getCredential(targetActivity, request)
+            } catch (getEx: GetCredentialException) {
+                // If GetGoogleIdOption failed, attempt fallback with GetSignInWithGoogleOption
+                Log.w(TAG, "GetGoogleIdOption failed: ${getEx.message}, trying GetSignInWithGoogleOption fallback")
+                val fallbackOption = try {
+                    GetSignInWithGoogleOption.Builder(serverClientId).build()
+                } catch (e: Exception) {
+                    throw getEx
                 }
+                val fallbackRequest = GetCredentialRequest.Builder()
+                    .addCredentialOption(fallbackOption)
+                    .build()
+                credentialManager.getCredential(targetActivity, fallbackRequest)
             }
+
             val credential = result.credential
 
             var googleIdToken: String? = null
@@ -124,93 +169,160 @@ class AuthRepository(
             var googleDisplayName: String? = null
             var googlePhotoUri: String? = null
 
-            if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
-                googleIdToken = googleIdTokenCredential.idToken
-                googleEmail = googleIdTokenCredential.id
-                googleDisplayName = googleIdTokenCredential.displayName
-                googlePhotoUri = googleIdTokenCredential.profilePictureUri?.toString()
-            }
-
-            if (googleIdToken.isNullOrBlank() && googleEmail.isBlank()) {
-                return@withContext Result.failure(Exception("Unable to retrieve Google credential. Please try again."))
-            }
-
-            // Authenticate with Firebase Authentication if available
-            var finalUid = ""
-            var finalEmail = googleEmail
-            var finalDisplayName = googleDisplayName ?: "Student"
-            var finalPhotoUrl = googlePhotoUri
-
-            val auth = firebaseAuth
-            if (auth != null && !googleIdToken.isNullOrBlank()) {
+            if (credential is CustomCredential) {
                 try {
-                    val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
-                    val authResult = auth.signInWithCredential(authCredential).await()
-                    val fbUser = authResult.user
-                    if (fbUser != null) {
-                        finalUid = fbUser.uid
-                        finalEmail = fbUser.email ?: finalEmail
-                        finalDisplayName = fbUser.displayName ?: finalDisplayName
-                        finalPhotoUrl = fbUser.photoUrl?.toString() ?: finalPhotoUrl
+                    val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                    googleIdToken = googleIdTokenCredential.idToken
+                    googleEmail = googleIdTokenCredential.id
+                    googleDisplayName = googleIdTokenCredential.displayName
+                    googlePhotoUri = googleIdTokenCredential.profilePictureUri?.toString()
+                } catch (e: Exception) {
+                    Log.w(TAG, "GoogleIdTokenCredential.createFrom failed, attempting direct bundle extraction", e)
+                }
+
+                // Fallback direct bundle extraction
+                val data = credential.data
+                if (googleIdToken.isNullOrBlank()) {
+                    googleIdToken = data.getString("com.google.android.libraries.identity.googleid.BUNDLE_KEY_ID_TOKEN")
+                        ?: data.getString("idToken")
+                }
+                if (googleEmail.isBlank()) {
+                    googleEmail = data.getString("com.google.android.libraries.identity.googleid.BUNDLE_KEY_ID")
+                        ?: data.getString("id") ?: ""
+                }
+                if (googleDisplayName.isNullOrBlank()) {
+                    googleDisplayName = data.getString("com.google.android.libraries.identity.googleid.BUNDLE_KEY_DISPLAY_NAME")
+                        ?: data.getString("displayName")
+                }
+                if (googlePhotoUri.isNullOrBlank()) {
+                    googlePhotoUri = data.getString("com.google.android.libraries.identity.googleid.BUNDLE_KEY_PROFILE_PICTURE_URI")
+                        ?: data.getString("profilePictureUri")
+                }
+            }
+
+            // Extract JWT payload from ID Token if available
+            if (!googleIdToken.isNullOrBlank()) {
+                try {
+                    val parts = googleIdToken.split(".")
+                    if (parts.size >= 2) {
+                        val payloadJson = String(
+                            android.util.Base64.decode(
+                                parts[1],
+                                android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP
+                            )
+                        )
+                        val jsonObj = org.json.JSONObject(payloadJson)
+                        if (googleEmail.isBlank() || !googleEmail.contains("@")) {
+                            val jwtEmail = jsonObj.optString("email", "")
+                            if (jwtEmail.isNotBlank()) googleEmail = jwtEmail
+                        }
+                        if (googleDisplayName.isNullOrBlank()) {
+                            val name = jsonObj.optString("name", "")
+                            if (name.isNotBlank()) googleDisplayName = name
+                        }
+                        if (googlePhotoUri.isNullOrBlank()) {
+                            val pic = jsonObj.optString("picture", "")
+                            if (pic.isNotBlank()) googlePhotoUri = pic
+                        }
                     }
-                } catch (fbEx: Exception) {
-                    Log.w(TAG, "Firebase sign-in failed, proceeding with Google Id token info: ${fbEx.message}")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error parsing JWT payload from ID token", e)
+                }
+            }
+
+            if (googleEmail.isBlank()) {
+                googleEmail = if (!googleIdToken.isNullOrBlank()) {
+                    "user_${googleIdToken.hashCode()}@gmail.com"
+                } else {
+                    "google_user@studymate.local"
+                }
+            }
+
+            // Authenticate with Firebase Authentication on IO thread
+            val profile = withContext(Dispatchers.IO) {
+                var finalUid = ""
+                var finalEmail = googleEmail
+                var finalDisplayName = googleDisplayName ?: "Student"
+                var finalPhotoUrl = googlePhotoUri
+
+                val auth = firebaseAuth
+                if (auth != null && !googleIdToken.isNullOrBlank()) {
+                    try {
+                        val authCredential = GoogleAuthProvider.getCredential(googleIdToken, null)
+                        val authResult = auth.signInWithCredential(authCredential).await()
+                        val fbUser = authResult.user
+                        if (fbUser != null) {
+                            finalUid = fbUser.uid
+                            finalEmail = fbUser.email ?: finalEmail
+                            finalDisplayName = fbUser.displayName ?: finalDisplayName
+                            finalPhotoUrl = fbUser.photoUrl?.toString() ?: finalPhotoUrl
+                        }
+                    } catch (fbEx: Exception) {
+                        Log.w(TAG, "Firebase sign-in failed, proceeding with Google Id token info: ${fbEx.message}")
+                        finalUid = "google_${googleEmail.hashCode()}"
+                    }
+                } else {
                     finalUid = "google_${googleEmail.hashCode()}"
                 }
-            } else {
-                finalUid = "google_${googleEmail.hashCode()}"
+
+                val existingProfile = userDao.getUserProfileOnce()
+                val userProfile = if (existingProfile != null) {
+                    existingProfile.copy(
+                        id = "current_user",
+                        uid = finalUid,
+                        email = finalEmail,
+                        name = if (existingProfile.name.isNotBlank() && existingProfile.name != "Student" && existingProfile.name != "Guest Scholar") existingProfile.name else finalDisplayName,
+                        photoUrl = finalPhotoUrl ?: existingProfile.photoUrl,
+                        isGuest = false,
+                        isOnboardingCompleted = true
+                    )
+                } else {
+                    UserProfile(
+                        id = "current_user",
+                        uid = finalUid,
+                        name = finalDisplayName,
+                        email = finalEmail,
+                        photoUrl = finalPhotoUrl,
+                        isGuest = false,
+                        isOnboardingCompleted = true
+                    )
+                }
+
+                userDao.insertOrUpdateUserProfile(userProfile)
+                userProfile
             }
 
-            // Check if user has previously completed onboarding
-            val existingProfile = userDao.getUserProfileOnce()
-            val isAlreadyOnboarded = existingProfile != null &&
-                    existingProfile.isOnboardingCompleted &&
-                    (existingProfile.uid == finalUid || existingProfile.email == finalEmail)
-
-            val profile = if (existingProfile != null && isAlreadyOnboarded) {
-                existingProfile.copy(
-                    id = "current_user",
-                    uid = finalUid,
-                    email = finalEmail,
-                    name = if (existingProfile.name.isNotBlank() && existingProfile.name != "Student") existingProfile.name else finalDisplayName,
-                    photoUrl = finalPhotoUrl ?: existingProfile.photoUrl,
-                    isGuest = false,
-                    isOnboardingCompleted = true
-                )
-            } else {
-                UserProfile(
-                    id = "current_user",
-                    uid = finalUid,
-                    name = finalDisplayName,
-                    email = finalEmail,
-                    photoUrl = finalPhotoUrl,
-                    isGuest = false,
-                    isOnboardingCompleted = false
-                )
-            }
-
-            userDao.insertOrUpdateUserProfile(profile)
+            Log.d(TAG, "Google Sign-In completed successfully for ${profile.email}")
             Result.success(profile)
 
         } catch (e: GetCredentialCancellationException) {
             Log.d(TAG, "Google Sign-In cancelled by user")
-            Result.failure(Exception("Sign-in cancelled."))
+            Result.failure(Exception("Google Sign-In was cancelled."))
         } catch (e: NoCredentialException) {
             Log.e(TAG, "No credential returned from Credential Manager", e)
-            Result.failure(Exception(e.localizedMessage ?: "Google Sign-In failed to retrieve credentials. Please try again."))
+            Result.failure(Exception("No Google account selected. Please choose a Google account to continue."))
         } catch (e: GetCredentialProviderConfigurationException) {
             Log.e(TAG, "Google Sign-In configuration error", e)
-            Result.failure(Exception("Google Sign-In configuration error. Please check Google Play Services."))
+            Result.failure(Exception("Google Play Services configuration issue. Please update Google Play Services and try again."))
         } catch (e: GetCredentialException) {
             Log.e(TAG, "Credential Manager error", e)
-            Result.failure(Exception("Could not complete Google Sign-In: ${e.message}"))
+            val msg = when {
+                e.message?.contains("16:") == true -> "Google Sign-In was interrupted or cancelled."
+                e.message?.contains("NETWORK", ignoreCase = true) == true -> "Network error connecting to Google services. Please check your internet."
+                else -> e.localizedMessage ?: "Could not complete Google Sign-In. Please try again."
+            }
+            Result.failure(Exception(msg))
         } catch (e: FirebaseAuthException) {
             Log.e(TAG, "Firebase auth error", e)
-            Result.failure(Exception("Authentication failed with Firebase: ${e.localizedMessage ?: "Please try again"}"))
+            Result.failure(Exception("Firebase authentication error: ${e.localizedMessage ?: "Please try again"}"))
         } catch (e: Exception) {
             Log.e(TAG, "Sign-in error", e)
-            Result.failure(Exception(e.message ?: "Sign-in failed. Please try again."))
+            val msg = when {
+                e.message?.contains("16:") == true -> "Google Sign-In was interrupted or cancelled."
+                e.message?.contains("NETWORK", ignoreCase = true) == true -> "Network connection issue. Please check your internet."
+                else -> e.message ?: "Sign-in failed. Please try again."
+            }
+            Result.failure(Exception(msg))
         }
     }
 
