@@ -17,9 +17,10 @@ import com.example.data.model.*
         FlashcardItem::class,
         UserQuestionMaterial::class,
         NovaMemoryItem::class,
-        NovaReminderItem::class
+        NovaReminderItem::class,
+        VoiceNoteItem::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -33,6 +34,7 @@ abstract class StudyMateDatabase : RoomDatabase() {
     abstract fun userQuestionMaterialDao(): UserQuestionMaterialDao
     abstract fun novaMemoryDao(): NovaMemoryDao
     abstract fun novaReminderDao(): NovaReminderDao
+    abstract fun voiceNoteDao(): VoiceNoteDao
 
     companion object {
         @Volatile

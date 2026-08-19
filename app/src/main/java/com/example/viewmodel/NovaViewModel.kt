@@ -10,22 +10,26 @@ import com.example.data.local.StudyMateDatabase
 import com.example.data.model.*
 import com.example.data.remote.GeminiRepository
 import com.example.data.repository.StudyRepository
+import com.example.notification.NovaNotificationEngine
 import com.example.notification.StudyNotificationManager
-import com.example.service.FocusShieldManager
 import com.example.service.NovaUsageStatsHelper
 import com.example.service.NovaVoiceManager
+import com.example.service.coach.NovaStudyCoach
+import com.example.service.voice.NovaVoiceEmotion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Calendar
 
-enum class NovaScreenTab {
-    DASHBOARD,
-    ASSISTANT_CHAT,
-    INTERACTIVE_STUDY_QUIZ,
-    MEMORY_CENTER,
-    NOVA_SETTINGS
+enum class NovaScreenTab(val title: String, val icon: String) {
+    DASHBOARD("Dashboard", "⚡"),
+    ASSISTANT_CHAT("NOVA Voice & Chat", "🤖"),
+    VOICE_NOTES("Voice Notes & Lectures", "🎙️"),
+    INTERACTIVE_STUDY_QUIZ("Quiz Intelligence", "🎯"),
+    MEMORY_CENTER("Memory Center", "🧠"),
+    ANALYTICS_STRATEGY("Study Strategy", "📊"),
+    NOVA_SETTINGS("Settings & Privacy", "⚙️")
 }
 
 data class InteractiveQuizState(
@@ -41,12 +45,25 @@ data class InteractiveQuizState(
     val explanation: String = ""
 )
 
+data class NovaAnalyticsData(
+    val totalFocusHours: Float = 4.5f,
+    val completedSessionsCount: Int = 6,
+    val weeklyConsistencyScore: Int = 88,
+    val averageQuizAccuracy: Float = 78.5f,
+    val topStrongSubject: String = "Physics",
+    val topWeakSubject: String = "Chemistry",
+    val topWeakTopic: String = "Organic Reactions",
+    val daysUntilExam: Int = 28,
+    val subjectMinutes: Map<String, Int> = mapOf("Physics" to 140, "Mathematics" to 95, "Chemistry" to 45)
+)
+
 class NovaViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = StudyMateDatabase.getDatabase(application)
     private val studyRepository = StudyRepository(db)
     private val geminiRepository = GeminiRepository()
     val voiceManager = NovaVoiceManager(application)
+    val notificationEngine = NovaNotificationEngine(application)
 
     private val _currentTab = MutableStateFlow(NovaScreenTab.DASHBOARD)
     val currentTab: StateFlow<NovaScreenTab> = _currentTab.asStateFlow()
@@ -75,8 +92,38 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
     val pendingReminders: StateFlow<List<NovaReminderItem>> = studyRepository.pendingNovaReminders
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val allPlanItems: StateFlow<List<StudyPlanItem>> = studyRepository.allPlanItems
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allAttempts: StateFlow<List<MockTestAttempt>> = studyRepository.allMockTestAttempts
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allMistakes: StateFlow<List<MistakeItem>> = studyRepository.allMistakes
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allSessions: StateFlow<List<FocusSession>> = studyRepository.allFocusSessions
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     private val _quizState = MutableStateFlow(InteractiveQuizState())
     val quizState: StateFlow<InteractiveQuizState> = _quizState.asStateFlow()
+
+    private val _analyticsData = MutableStateFlow(NovaAnalyticsData())
+    val analyticsData: StateFlow<NovaAnalyticsData> = _analyticsData.asStateFlow()
+
+    private val _dailyBriefingText = MutableStateFlow<String?>(null)
+    val dailyBriefingText: StateFlow<String?> = _dailyBriefingText.asStateFlow()
+
+    private val _dailyReviewText = MutableStateFlow<String?>(null)
+    val dailyReviewText: StateFlow<String?> = _dailyReviewText.asStateFlow()
+
+    private val _adaptiveRecommendation = MutableStateFlow<StudyNowRecommendation?>(null)
+    val adaptiveRecommendation: StateFlow<StudyNowRecommendation?> = _adaptiveRecommendation.asStateFlow()
+
+    private val _missedSessionAlert = MutableStateFlow<Pair<StudyPlanItem, String>?>(null)
+    val missedSessionAlert: StateFlow<Pair<StudyPlanItem, String>?> = _missedSessionAlert.asStateFlow()
+
+    private val _socialMediaNudge = MutableStateFlow<String?>(null)
+    val socialMediaNudge: StateFlow<String?> = _socialMediaNudge.asStateFlow()
 
     private val _navigationEvent = MutableSharedFlow<Pair<String, Map<String, Any>>>()
     val navigationEvent: SharedFlow<Pair<String, Map<String, Any>>> = _navigationEvent.asSharedFlow()
@@ -87,6 +134,7 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
     init {
         loadInitialData()
         observeStudyContext()
+        observeAnalytics()
     }
 
     fun setTab(tab: NovaScreenTab) {
@@ -103,7 +151,6 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Add initial greeting message
         if (_messages.value.isEmpty()) {
             val greeting = getProactiveGreeting()
             _messages.value = listOf(
@@ -127,15 +174,16 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         val title = if (_settings.value.useBossGreeting) "Boss 👋" else "there 👋"
 
         return """
-        $timeGreeting, $title! Main tumhara personal AI study companion **NOVA** hoon.
+        $timeGreeting, $title! Main tumhara personal AI study assistant **NOVA** hoon.
         
-        Aaj ka study target track ho raha hai. Aap kya karna chahenge?
-        - **[📚 Study Focus]** 25-min deep work session
-        - **[🧠 Interactive Quiz]** Test yourself on high-yield questions
-        - **[📝 Study Planner]** Smart exam prep schedule
-        - **[📷 Vision Solver]** Textbook ya notes ki photo bhej kar samjhein
+        Aaj ke study targets aur exam countdown active hain:
+        - **[⚡ Dashboard]** Daily Briefing, Recovery & Adaptive Suggestions
+        - **[🤖 NOVA Voice & Chat]** Ask any doubt, voice commands & image solver
+        - **[🎯 Quiz Intelligence]** Target weak areas with concept remediations
+        - **[🧠 Memory Center]** Manage study preferences and personal context
+        - **[📊 Study Strategy]** Track consistency, accuracy and subject hours
         
-        Kuch bhi doubt ho ya distraction rokna ho — bas batao! ⚡
+        Batao, aaj sabse pehle kaunsa subject master karna hai? 🚀
         """.trimIndent()
     }
 
@@ -145,31 +193,71 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                 studyRepository.userProfile,
                 studyRepository.allPlanItems,
                 studyRepository.allFocusSessions,
-                studyRepository.activeNovaMemories
-            ) { profile, planItems, sessions, activeMemories ->
+                studyRepository.activeNovaMemories,
+                studyRepository.allMistakes,
+                studyRepository.allMockTestAttempts
+            ) { args: Array<Any?> ->
+                val profile = args[0] as? UserProfile
+                @Suppress("UNCHECKED_CAST")
+                val planItems = (args[1] as? List<StudyPlanItem>) ?: emptyList()
+                @Suppress("UNCHECKED_CAST")
+                val sessions = (args[2] as? List<FocusSession>) ?: emptyList()
+                @Suppress("UNCHECKED_CAST")
+                val activeMemories = (args[3] as? List<NovaMemoryItem>) ?: emptyList()
+                @Suppress("UNCHECKED_CAST")
+                val mistakes = (args[4] as? List<MistakeItem>) ?: emptyList()
+                @Suppress("UNCHECKED_CAST")
+                val attempts = (args[5] as? List<MockTestAttempt>) ?: emptyList()
+
                 val user = profile ?: UserProfile()
                 val pendingPlans = planItems.filter { !it.isCompleted }
+                val completedPlans = planItems.filter { it.isCompleted }
                 val nextSession = pendingPlans.firstOrNull()?.let { "${it.subject}: ${it.topic}" }
-                
+
                 val appUsage = try {
                     NovaUsageStatsHelper.getTodayDistractingAppUsage(getApplication())
                 } catch (e: Exception) {
                     null
                 }
 
-                val remainingDays = ((user.examDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).coerceAtLeast(1).toInt()
+                val remainingDays = ((user.examDateMillis - System.currentTimeMillis()) / (1000L * 60 * 60 * 24)).coerceAtLeast(0L).toInt()
+
+                // Generate Coach Decisions
+                _dailyBriefingText.value = NovaStudyCoach.generateDailyBriefing(user, planItems, mistakes, activeMemories)
+                _dailyReviewText.value = NovaStudyCoach.generateDailyReview(user, planItems, sessions)
+                _adaptiveRecommendation.value = NovaStudyCoach.generateAdaptiveRecommendation(user, attempts, mistakes, planItems)
+
+                // Check Missed Session
+                val missedCandidate = pendingPlans.firstOrNull { it.priority == PlanPriority.HIGH }
+                if (missedCandidate != null && _settings.value.missedSessionRecoveryEnabled) {
+                    val (recoveryMsg, _) = NovaStudyCoach.calculateMissedSessionRecovery(missedCandidate)
+                    _missedSessionAlert.value = Pair(missedCandidate, recoveryMsg)
+                } else {
+                    _missedSessionAlert.value = null
+                }
+
+                // Check Distracting Apps
+                if (_settings.value.appUsageAwarenessEnabled) {
+                    _socialMediaNudge.value = NovaStudyCoach.checkSocialMediaIntervention(getApplication(), pendingPlans)
+                } else {
+                    _socialMediaNudge.value = null
+                }
 
                 NovaStudyContext(
                     studentName = user.name.ifBlank { "Scholar" },
                     preferredTitle = if (_settings.value.useBossGreeting) "Boss" else user.name,
                     targetExam = user.examName,
                     examDaysRemaining = remainingDays,
+                    examDateMillis = user.examDateMillis,
                     subjects = user.subjects,
                     weakTopics = if (user.weakTopics.isNotEmpty()) user.weakTopics else listOf("Core Principles", "Numerical Practice"),
                     dailyTargetMinutes = user.dailyTargetMinutes,
-                    todayFocusMinutes = user.totalFocusMinutes,
+                    todayFocusMinutes = sessions.filter { it.timestamp > System.currentTimeMillis() - 24 * 3600 * 1000 }.sumOf { it.actualMinutesSpent },
                     currentStreak = user.streakDays,
+                    weeklyConsistencyPercent = 88,
                     pendingPlanCount = pendingPlans.size,
+                    completedPlanCount = completedPlans.size,
+                    missedSessionsCount = if (missedCandidate != null) 1 else 0,
                     nextScheduledSession = nextSession,
                     topDistractingAppName = appUsage?.topDistractingAppName,
                     topDistractingAppUsageMins = appUsage?.topDistractingAppMinutes ?: 0,
@@ -181,8 +269,43 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun observeAnalytics() {
+        viewModelScope.launch {
+            combine(
+                studyRepository.allFocusSessions,
+                studyRepository.allMockTestAttempts,
+                studyRepository.allMistakes,
+                studyRepository.userProfile
+            ) { sessions, attempts, mistakes, profile ->
+                val totalMins = sessions.sumOf { it.actualMinutesSpent }
+                val totalHours = totalMins / 60f
+                val avgAcc = if (attempts.isNotEmpty()) attempts.map { it.accuracyPercent }.average().toFloat() else 75f
+
+                val subjectMins = sessions.groupBy { it.subject }.mapValues { (_, v) -> v.sumOf { it.actualMinutesSpent } }
+                val strongSub = subjectMins.maxByOrNull { it.value }?.key ?: profile?.strongSubjects?.firstOrNull() ?: "Physics"
+                val weakSub = profile?.weakSubjects?.firstOrNull() ?: "Chemistry"
+                val weakTop = mistakes.groupBy { it.topic }.maxByOrNull { it.value.size }?.key ?: profile?.weakTopics?.firstOrNull() ?: "Rotational Dynamics"
+                val daysLeft = profile?.let { ((it.examDateMillis - System.currentTimeMillis()) / (1000L * 60 * 60 * 24)).coerceAtLeast(0L).toInt() } ?: 30
+
+                NovaAnalyticsData(
+                    totalFocusHours = totalHours,
+                    completedSessionsCount = sessions.size,
+                    weeklyConsistencyScore = 88,
+                    averageQuizAccuracy = avgAcc,
+                    topStrongSubject = strongSub,
+                    topWeakSubject = weakSub,
+                    topWeakTopic = weakTop,
+                    daysUntilExam = daysLeft,
+                    subjectMinutes = if (subjectMins.isNotEmpty()) subjectMins else mapOf("Physics" to 120, "Mathematics" to 90, "Chemistry" to 45)
+                )
+            }.collectLatest { data ->
+                _analyticsData.value = data
+            }
+        }
+    }
+
     private fun updateContextWithProfile(profile: UserProfile) {
-        val remainingDays = ((profile.examDateMillis - System.currentTimeMillis()) / (1000 * 60 * 60 * 24)).coerceAtLeast(1).toInt()
+        val remainingDays = ((profile.examDateMillis - System.currentTimeMillis()) / (1000L * 60 * 60 * 24)).coerceAtLeast(0L).toInt()
         _studyContext.update {
             it.copy(
                 studentName = profile.name.ifBlank { "Scholar" },
@@ -206,7 +329,6 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         _messages.update { it + userMessage }
 
         val imageToSend = _attachedImageBitmap.value
-        // Clear attached image
         _attachedImageBitmap.value = null
         _attachedImageUri.value = null
 
@@ -237,20 +359,20 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 _messages.update { it + novaMessage }
 
-                // Auto speak if TTS enabled
-                if (_settings.value.ttsAutoSpeak) {
-                    voiceManager.speak(response.replyMarkdown)
+                // Auto speak if enabled
+                if (_settings.value.ttsAutoSpeak && _settings.value.voiceEnabled) {
+                    voiceManager.speak(response.replyMarkdown, NovaVoiceEmotion.CALM)
                 }
 
                 // Save memory if suggested
                 if (_settings.value.memoryEnabled && response.memoryToSave != null) {
                     studyRepository.saveNovaMemory(response.memoryToSave)
-                    _snackbarMessage.emit("🧠 Nova remembered: \"${response.memoryToSave.key}\"")
+                    _snackbarMessage.emit("🧠 NOVA remembered: \"${response.memoryToSave.key}\"")
                 }
-            }.onFailure { error ->
+            }.onFailure {
                 val fallbackMessage = NovaChatMessage(
                     sender = NovaSender.NOVA,
-                    text = "Boss, network issue ki wajah se offline mode use kar raha hoon. Let me know if you want to start a Focus session or Quick Quiz! 🚀"
+                    text = "Boss, abhi internet connection available nahi hai. Aap offline Focus Mode ya Practice Quiz start kar sakte hain! 🚀"
                 )
                 _messages.update { it + fallbackMessage }
             }
@@ -323,12 +445,21 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                 NovaActionType.OPEN_SETTINGS -> {
                     setTab(NovaScreenTab.NOVA_SETTINGS)
                 }
+                NovaActionType.RECOVER_MISSED_SESSION -> {
+                    val alert = _missedSessionAlert.value
+                    val sub = alert?.first?.subject ?: "Physics"
+                    val top = alert?.first?.topic ?: "Recovery Session"
+                    _navigationEvent.emit("NAVIGATE_TO_FOCUS" to mapOf(
+                        "subject" to sub,
+                        "topic" to top,
+                        "duration" to 20
+                    ))
+                }
                 else -> {}
             }
         }
     }
 
-    // --- Interactive Quiz Mode ---
     fun startQuizSession(subject: String, topic: String) {
         _currentTab.value = NovaScreenTab.INTERACTIVE_STUDY_QUIZ
         _quizState.value = InteractiveQuizState(
@@ -354,14 +485,13 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                     isGenerating = false
                 )
             }.onFailure {
-                // Fallback default questions
                 val fallbackList = listOf(
                     Question(
                         id = "q1",
-                        questionText = "Which law states that the induced electromotive force in any closed circuit is equal to the negative of the time rate of change of the magnetic flux?",
+                        questionText = "Which law states that the induced electromotive force in any closed circuit is equal to the negative rate of change of magnetic flux?",
                         options = listOf("Faraday's Law", "Ampere's Circuital Law", "Coulomb's Law", "Biot-Savart Law"),
                         correctOptionIndex = 0,
-                        explanation = "Faraday's Law of Electromagnetic Induction states that EMF = -dΦ/dt (Lenz's law provides the direction).",
+                        explanation = "Faraday's Law of Induction states EMF = -dΦ/dt (Lenz's Law gives the negative sign).",
                         subject = subject,
                         topic = topic
                     ),
@@ -376,10 +506,10 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                     ),
                     Question(
                         id = "q3",
-                        questionText = "A dielectric slab is inserted between the plates of an isolated charged capacitor. What happens to its capacitance?",
+                        questionText = "When a dielectric slab is inserted between the plates of an isolated charged capacitor, what happens to its capacitance?",
                         options = listOf("Decreases", "Increases", "Remains constant", "Becomes zero"),
                         correctOptionIndex = 1,
-                        explanation = "Inserting a dielectric of constant K multiplies capacitance by K (C = K·C0).",
+                        explanation = "Capacitance increases by factor K (C = K·C0) due to dielectric polarization.",
                         subject = subject,
                         topic = topic
                     )
@@ -413,6 +543,12 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                 explanation = question.explanation
             )
         }
+
+        // Voice audio response on answer submit if voice enabled
+        if (_settings.value.voiceEnabled) {
+            val audioMsg = if (isCorrect) "Correct answer Boss! Well done." else "Incorrect. Let's review the explanation."
+            voiceManager.speak(audioMsg, if (isCorrect) NovaVoiceEmotion.HAPPY_ACHIEVEMENT else NovaVoiceEmotion.GENTLE_MOTIVATION)
+        }
     }
 
     fun nextQuizQuestion() {
@@ -431,7 +567,6 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- Image Handling ---
     fun setAttachedImage(uri: Uri) {
         _attachedImageUri.value = uri
         viewModelScope.launch(Dispatchers.IO) {
@@ -450,7 +585,7 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         _attachedImageBitmap.value = null
     }
 
-    // --- Memory Management ---
+    // --- Memory Operations ---
     fun addManualMemory(category: NovaMemoryCategory, key: String, value: String) {
         viewModelScope.launch {
             if (key.isNotBlank() && value.isNotBlank()) {
@@ -461,7 +596,23 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                     source = "User Added"
                 )
                 studyRepository.saveNovaMemory(item)
-                _snackbarMessage.emit("Saved to Nova Memory: \"$key\"")
+                _snackbarMessage.emit("Saved to NOVA Memory: \"$key\"")
+            }
+        }
+    }
+
+    fun editManualMemory(id: Long, category: NovaMemoryCategory, key: String, value: String) {
+        viewModelScope.launch {
+            if (key.isNotBlank() && value.isNotBlank()) {
+                val item = NovaMemoryItem(
+                    id = id,
+                    category = category,
+                    key = key,
+                    value = value,
+                    source = "User Edited"
+                )
+                studyRepository.saveNovaMemory(item)
+                _snackbarMessage.emit("Memory updated: \"$key\"")
             }
         }
     }
@@ -482,45 +633,56 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
     fun clearAllMemories() {
         viewModelScope.launch {
             studyRepository.clearAllNovaMemories()
-            _snackbarMessage.emit("All Nova memories cleared")
+            _snackbarMessage.emit("All NOVA memories cleared")
         }
     }
 
-    // --- Settings Updates ---
+    // --- Voice & Coach Settings ---
     fun updateSettings(newSettings: NovaSettings) {
         _settings.value = newSettings
+        voiceManager.setSpeechSpeed(newSettings.speechSpeed)
+        voiceManager.setPitch(newSettings.voicePitch)
+        voiceManager.setVolume(newSettings.voiceVolume)
     }
 
-    fun triggerProactiveCoachAlert() {
-        StudyNotificationManager.sendNovaStudyReminder(
-            context = getApplication(),
-            userName = _studyContext.value.preferredTitle,
-            subject = _studyContext.value.subjects.firstOrNull() ?: "Physics",
-            topic = _studyContext.value.weakTopics.firstOrNull() ?: "Current Electricity",
-            durationMins = 25,
-            isTest = true
+    fun previewNovaVoice() {
+        voiceManager.previewVoice(
+            text = "Boss 😄, 7 baj gaye hain. Aaj ka Physics session abhi pending hai. Chalo 25 minutes se start karte hain?",
+            emotion = NovaVoiceEmotion.GENTLE_MOTIVATION
         )
+    }
+
+    fun triggerProactiveStudyNotification() {
+        val sub = _studyContext.value.subjects.firstOrNull() ?: "Physics"
+        val top = _studyContext.value.weakTopics.firstOrNull() ?: "Current Electricity"
+        notificationEngine.sendStudyReminder(sub, top, 25, _settings.value.voiceNotifications)
         viewModelScope.launch {
-            _snackbarMessage.emit("Sent Proactive Smart Study notification!")
+            _snackbarMessage.emit("🔔 Sent Study Reminder with [Start Study], [Snooze], [Skip] actions")
         }
     }
 
-    fun triggerExcessiveUsageAlert() {
-        StudyNotificationManager.sendNovaExcessiveAppUsageAlert(
-            context = getApplication(),
-            userName = _studyContext.value.preferredTitle,
-            appName = "YouTube",
-            pendingSubject = _studyContext.value.subjects.firstOrNull() ?: "Physics",
-            durationMins = 25,
-            isTest = true
-        )
+    fun triggerDailyBriefingNotification() {
+        val brief = _dailyBriefingText.value ?: "Good morning Boss ☀️ Aaj 2 sessions planned hain. Let's make today count!"
+        notificationEngine.sendDailyBriefing(brief)
         viewModelScope.launch {
-            _snackbarMessage.emit("Sent Excessive App Usage study prompt!")
+            _snackbarMessage.emit("☀️ Sent NOVA Daily Briefing notification")
         }
     }
 
-    fun selectTab(tab: NovaScreenTab) {
-        _currentTab.value = tab
+    fun triggerDailyReviewNotification() {
+        val rev = _dailyReviewText.value ?: "🌙 NOVA Daily Review: Great effort today! Check progress in app."
+        notificationEngine.sendDailyReview(rev)
+        viewModelScope.launch {
+            _snackbarMessage.emit("🌙 Sent NOVA Daily Review notification")
+        }
+    }
+
+    fun triggerSocialMediaNudgeNotification() {
+        val pendingSub = _studyContext.value.subjects.firstOrNull() ?: "Physics"
+        notificationEngine.sendSocialMediaNudge("YouTube", 40, pendingSub)
+        viewModelScope.launch {
+            _snackbarMessage.emit("📱 Sent Distracting App Usage nudge")
+        }
     }
 
     fun askPromptFromDashboard(prompt: String) {

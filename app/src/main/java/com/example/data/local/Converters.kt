@@ -57,4 +57,18 @@ class Converters {
             com.example.data.model.NovaMemoryCategory.ACADEMIC
         }
     }
+
+    @TypeConverter
+    fun fromVoiceNoteType(value: com.example.data.model.VoiceNoteType): String {
+        return value.name
+    }
+
+    @TypeConverter
+    fun toVoiceNoteType(value: String): com.example.data.model.VoiceNoteType {
+        return try {
+            com.example.data.model.VoiceNoteType.valueOf(value)
+        } catch (e: Exception) {
+            com.example.data.model.VoiceNoteType.LECTURE
+        }
+    }
 }

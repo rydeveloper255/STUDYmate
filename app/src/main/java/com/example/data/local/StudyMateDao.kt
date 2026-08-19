@@ -202,3 +202,45 @@ interface NovaReminderDao {
     suspend fun clearAllReminders()
 }
 
+@Dao
+interface VoiceNoteDao {
+    @Query("SELECT * FROM voice_notes ORDER BY createdAt DESC")
+    fun getAllVoiceNotes(): Flow<List<VoiceNoteItem>>
+
+    @Query("SELECT * FROM voice_notes WHERE id = :id LIMIT 1")
+    suspend fun getVoiceNoteById(id: Long): VoiceNoteItem?
+
+    @Query("SELECT * FROM voice_notes WHERE isBookmarked = 1 ORDER BY createdAt DESC")
+    fun getBookmarkedVoiceNotes(): Flow<List<VoiceNoteItem>>
+
+    @Query("SELECT * FROM voice_notes WHERE subject = :subject ORDER BY createdAt DESC")
+    fun getVoiceNotesBySubject(subject: String): Flow<List<VoiceNoteItem>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertVoiceNote(note: VoiceNoteItem): Long
+
+    @Update
+    suspend fun updateVoiceNote(note: VoiceNoteItem)
+
+    @Query("UPDATE voice_notes SET isBookmarked = :isBookmarked WHERE id = :id")
+    suspend fun toggleBookmark(id: Long, isBookmarked: Boolean)
+
+    @Query("UPDATE voice_notes SET isTranscribing = :isTranscribing, transcription = :transcription, summary = :summary, keyPoints = :keyPoints, extractedReminders = :reminders, title = :title WHERE id = :id")
+    suspend fun updateTranscriptionResult(
+        id: Long,
+        isTranscribing: Boolean,
+        transcription: String,
+        summary: String,
+        keyPoints: List<String>,
+        reminders: List<String>,
+        title: String
+    )
+
+    @Query("DELETE FROM voice_notes WHERE id = :id")
+    suspend fun deleteVoiceNote(id: Long)
+
+    @Query("DELETE FROM voice_notes")
+    suspend fun clearAllVoiceNotes()
+}
+
+

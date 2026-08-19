@@ -6,19 +6,29 @@ import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import com.example.data.model.NovaVoiceState
+import com.example.service.voice.AndroidAcousticTtsProvider
+import com.example.service.voice.NovaVoiceEmotion
+import com.example.service.voice.NovaVoiceService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import java.util.Locale
 
-class NovaVoiceManager(private val context: Context) : RecognitionListener {
+/**
+ * High-level Coordinator managing Speech-to-Text, Voice synthesis via modular NovaVoiceService,
+ * Audio Level (RMS) metering for visual animations, and playback controls.
+ */
+class NovaVoiceManager(
+    private val context: Context,
+    private var voiceService: NovaVoiceService = AndroidAcousticTtsProvider(context)
+) : RecognitionListener {
 
     private var speechRecognizer: SpeechRecognizer? = null
-    private var textToSpeech: TextToSpeech? = null
-    private var isTtsReady = false
 
     private val _voiceState = MutableStateFlow(NovaVoiceState.IDLE)
     val voiceState: StateFlow<NovaVoiceState> = _voiceState.asStateFlow()
@@ -30,36 +40,22 @@ class NovaVoiceManager(private val context: Context) : RecognitionListener {
     val recognizedText: StateFlow<String> = _recognizedText.asStateFlow()
 
     private var onSpeechResultCallback: ((String) -> Unit)? = null
+    private val scope = CoroutineScope(Dispatchers.Main)
+    private var voiceStateJob: kotlinx.coroutines.Job? = null
 
     init {
-        initTts()
+        observeVoiceState()
     }
 
-    private fun initTts() {
-        textToSpeech = TextToSpeech(context.applicationContext) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                isTtsReady = true
-                val result = textToSpeech?.setLanguage(Locale.ENGLISH)
-                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    textToSpeech?.language = Locale.getDefault()
+    private fun observeVoiceState() {
+        voiceStateJob?.cancel()
+        voiceStateJob = scope.launch {
+            voiceService.isSpeakingFlow.collectLatest { isSpeaking ->
+                if (isSpeaking) {
+                    _voiceState.value = NovaVoiceState.SPEAKING
+                } else if (_voiceState.value == NovaVoiceState.SPEAKING) {
+                    _voiceState.value = NovaVoiceState.IDLE
                 }
-                textToSpeech?.setSpeechRate(1.0f)
-                textToSpeech?.setPitch(1.05f)
-
-                textToSpeech?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) {
-                        _voiceState.value = NovaVoiceState.SPEAKING
-                    }
-
-                    override fun onDone(utteranceId: String?) {
-                        _voiceState.value = NovaVoiceState.IDLE
-                    }
-
-                    @Deprecated("Deprecated in Java")
-                    override fun onError(utteranceId: String?) {
-                        _voiceState.value = NovaVoiceState.IDLE
-                    }
-                })
             }
         }
     }
@@ -112,38 +108,61 @@ class NovaVoiceManager(private val context: Context) : RecognitionListener {
         _voiceState.value = NovaVoiceState.IDLE
     }
 
-    fun speak(text: String, onDone: (() -> Unit)? = null) {
-        if (!isTtsReady || textToSpeech == null) return
-
-        val cleanSpokenText = text
-            .replace(Regex("""[*#_`~>\[\]\(\)]"""), "")
-            .replace(Regex("""\[ACTION:.*?\]"""), "")
-            .replace(Regex("""\[MEMORY:.*?\]"""), "")
-            .trim()
-
-        if (cleanSpokenText.isBlank()) return
-
+    fun speak(
+        text: String,
+        emotion: NovaVoiceEmotion = NovaVoiceEmotion.CALM,
+        onDone: (() -> Unit)? = null
+    ) {
         stopListening()
         _voiceState.value = NovaVoiceState.SPEAKING
-        textToSpeech?.speak(cleanSpokenText, TextToSpeech.QUEUE_FLUSH, null, "NOVA_UTTERANCE_${System.currentTimeMillis()}")
+        voiceService.speak(
+            text = text,
+            emotion = emotion,
+            onStart = { _voiceState.value = NovaVoiceState.SPEAKING },
+            onDone = {
+                _voiceState.value = NovaVoiceState.IDLE
+                onDone?.invoke()
+            }
+        )
     }
 
     fun stopSpeaking() {
-        if (textToSpeech?.isSpeaking == true) {
-            textToSpeech?.stop()
-        }
+        voiceService.stopSpeaking()
         if (_voiceState.value == NovaVoiceState.SPEAKING) {
             _voiceState.value = NovaVoiceState.IDLE
         }
+    }
+
+    fun setSpeechSpeed(speed: Float) {
+        voiceService.setSpeechSpeed(speed)
+    }
+
+    fun setPitch(pitch: Float) {
+        voiceService.setPitch(pitch)
+    }
+
+    fun setVolume(volume: Float) {
+        voiceService.setVolume(volume)
+    }
+
+    fun switchProvider(providerType: com.example.service.voice.NovaVoiceProviderType) {
+        voiceService.release()
+        voiceService = com.example.service.voice.NovaVoiceServiceFactory.create(context, providerType)
+        observeVoiceState()
+    }
+
+    fun previewVoice(
+        text: String = "Boss, main tumhari AI assistant NOVA hoon. Aaj ka study session start karein?",
+        emotion: NovaVoiceEmotion = NovaVoiceEmotion.CALM
+    ) {
+        speak(text, emotion)
     }
 
     fun destroy() {
         try {
             speechRecognizer?.destroy()
             speechRecognizer = null
-            textToSpeech?.stop()
-            textToSpeech?.shutdown()
-            textToSpeech = null
+            voiceService.release()
         } catch (e: Exception) {
             // Ignore
         }

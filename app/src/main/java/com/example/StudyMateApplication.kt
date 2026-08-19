@@ -57,7 +57,7 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
                 imageLoaderInstance?.memoryCache?.clear()
             }
         } catch (e: Exception) {
-            // Ignore if imageLoader not initialized
+            // Handled safely
         }
     }
 

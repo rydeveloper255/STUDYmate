@@ -8,6 +8,15 @@ val BackgroundDark = Color(0xFF090D16)
 val SurfaceDark = Color(0xFF111827)
 val CardSurfaceDark = Color(0xFF161F30)
 
+val DarkCanvas = Color(0xFF090D16)
+val DarkSurface = Color(0xFF111827)
+val DarkSurfaceElevated = Color(0xFF161F30)
+
+// Text Colors
+val TextPrimary = Color(0xFFFFFFFF)
+val TextSecondary = Color(0xFF94A3B8)
+val TextMuted = Color(0xFF64748B)
+
 // Base Light Canvas
 val BackgroundLight = Color(0xFFF8FAFC)
 val SurfaceLight = Color(0xFFFFFFFF)
@@ -20,12 +29,16 @@ val DeepIndigo = Color(0xFF6366F1)
 val ElectricIndigo = Color(0xFF6366F1)
 val NebulaPurple = Color(0xFFA855F7)
 val VibrantMagenta = Color(0xFFA855F7)
+val CyberPink = Color(0xFFEC4899)
 val GoldenSpark = Color(0xFFFBBF24)
 val CyberAmber = Color(0xFFFBBF24)
+val AmberGold = Color(0xFFFBBF24)
 val EmeraldSuccess = Color(0xFF10B981)
+val EmeraldGreen = Color(0xFF10B981)
 val MatrixGreen = Color(0xFF10B981)
 val NeonGreen = Color(0xFF10B981)
 val CoralRose = Color(0xFFF43F5E)
+val CoralPink = Color(0xFFF43F5E)
 
 // Liquid Glass Translucencies
 val GlassFillDark = Color(0x241E293B)

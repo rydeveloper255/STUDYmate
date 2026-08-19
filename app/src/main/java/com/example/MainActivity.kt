@@ -26,6 +26,7 @@ import com.example.ui.components.AppNavTab
 import com.example.ui.components.FloatingGlassNavBar
 import com.example.ui.screens.auth.LoginScreen
 import com.example.ui.screens.auth.OnboardingScreen
+import com.example.ui.screens.auth.PermissionSetupScreen
 import com.example.ui.screens.auth.SplashScreen
 import com.example.ui.screens.document.DocumentSummarizerScreen
 import com.example.ui.screens.focus.FocusModeScreen
@@ -119,6 +120,22 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
             onEmailSignIn = { email, pass -> viewModel.signInWithEmail(email, pass) },
             onGuestSignIn = { viewModel.continueAsGuest() },
             onDismissError = { viewModel.clearAuthError() }
+        )
+        return
+    }
+
+    // First-Time User -> Setup / Permission Screen
+    val appPrefs = remember(context) { context.getSharedPreferences("studymate_app_prefs", android.content.Context.MODE_PRIVATE) }
+    var isPermissionSetupCompleted by remember {
+        mutableStateOf(appPrefs.getBoolean("has_completed_permission_setup", false))
+    }
+
+    if (!isPermissionSetupCompleted) {
+        PermissionSetupScreen(
+            onCompleteSetup = {
+                appPrefs.edit().putBoolean("has_completed_permission_setup", true).apply()
+                isPermissionSetupCompleted = true
+            }
         )
         return
     }

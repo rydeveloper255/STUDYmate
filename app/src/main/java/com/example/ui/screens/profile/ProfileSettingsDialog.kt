@@ -59,6 +59,7 @@ fun ProfileSettingsDialog(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showFocusShieldSettings by remember { mutableStateOf(false) }
     var showNotificationCenter by remember { mutableStateOf(false) }
+    var showPermissionSetup by remember { mutableStateOf(false) }
 
     // ==========================================
     // Editable Profile State (Steps 1 to 5)
@@ -415,6 +416,17 @@ fun ProfileSettingsDialog(
                                 status = "Configure",
                                 isGranted = true,
                                 onClick = { showFocusShieldSettings = true }
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // App Permissions & Setup Center
+                            PermissionRow(
+                                title = "App Permissions & System Access ⚙️",
+                                subtitle = "Manage Microphone, Camera, Storage, Notifications & Accessibility",
+                                status = "Review",
+                                isGranted = true,
+                                onClick = { showPermissionSetup = true }
                             )
                         } else {
                             // ====================================================
@@ -1013,6 +1025,28 @@ fun ProfileSettingsDialog(
                     }
                 }
             )
+        }
+
+        if (showFocusShieldSettings) {
+            Dialog(
+                onDismissRequest = { showFocusShieldSettings = false },
+                properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    FocusShieldSettingsScreen(onBack = { showFocusShieldSettings = false })
+                }
+            }
+        }
+
+        if (showPermissionSetup) {
+            Dialog(
+                onDismissRequest = { showPermissionSetup = false },
+                properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    com.example.ui.screens.auth.PermissionSetupScreen(onCompleteSetup = { showPermissionSetup = false })
+                }
+            }
         }
     }
 }

@@ -471,13 +471,17 @@ enum class NovaSender {
 enum class NovaActionType {
     NONE,
     START_FOCUS,
+    STOP_FOCUS,
     CREATE_PLAN,
     START_QUIZ,
     CREATE_REMINDER,
     OPEN_MEMORY,
     OPEN_SETTINGS,
     OPEN_APP_BLOCKING,
-    OPEN_DOCUMENT_SUMMARIZER
+    OPEN_DOCUMENT_SUMMARIZER,
+    RECOVER_MISSED_SESSION,
+    SHOW_DAILY_BRIEF,
+    SHOW_DAILY_REVIEW
 }
 
 data class NovaChatMessage(
@@ -501,19 +505,40 @@ enum class NovaVoiceState {
 
 data class NovaSettings(
     val novaName: String = "NOVA",
-    val personality: String = "Personal AI Companion & Mentor",
+    val personality: String = "Friendly & Professional", // "Friendly & Professional", "Concise & Analytical", "Empathetic Mentor"
     val language: String = "Hinglish (Auto)", // "Hinglish (Auto)", "English", "Hindi"
     val useBossGreeting: Boolean = true,
+    
+    // Voice Controls
     val voiceEnabled: Boolean = true,
+    val voiceNotifications: Boolean = false,
     val ttsAutoSpeak: Boolean = false,
+    val speechSpeed: Float = 1.0f,
+    val voiceVolume: Float = 1.0f,
+    val voicePitch: Float = 1.12f,
+    val selectedVoicePersona: String = "NOVA Original Female AI (Warm & Intelligent)",
+    
+    // Smart Coach Controls
     val memoryEnabled: Boolean = true,
     val smartCoachEnabled: Boolean = true,
-    val appUsageAwarenessEnabled: Boolean = true,
     val studyRemindersEnabled: Boolean = true,
+    val missedSessionRecoveryEnabled: Boolean = true,
+    val dailyBriefingEnabled: Boolean = true,
+    val dailyBriefingHour: Int = 8,
+    val dailyBriefingMinute: Int = 0,
+    val dailyReviewEnabled: Boolean = true,
+    val dailyReviewHour: Int = 21,
+    val dailyReviewMinute: Int = 0,
+    val appUsageAwarenessEnabled: Boolean = true,
+    val breakCoachEnabled: Boolean = true,
     val motivationalMessagesEnabled: Boolean = true,
+    
+    // Quiet Hours & Notification Limits
     val quietHoursEnabled: Boolean = true,
     val quietStartHour: Int = 22,
-    val quietEndHour: Int = 7
+    val quietStartMinute: Int = 0,
+    val quietEndHour: Int = 7,
+    val quietEndMinute: Int = 0
 )
 
 data class NovaStudyContext(
@@ -521,15 +546,20 @@ data class NovaStudyContext(
     val preferredTitle: String = "Boss",
     val targetExam: String = "JEE / NEET / Board Exam",
     val examDaysRemaining: Int = 30,
+    val examDateMillis: Long = System.currentTimeMillis() + 30L * 24 * 3600 * 1000,
     val subjects: List<String> = listOf("Physics", "Mathematics", "Chemistry"),
     val weakTopics: List<String> = listOf("Rotational Dynamics", "Organic Reactions"),
     val dailyTargetMinutes: Int = 180,
     val todayFocusMinutes: Int = 45,
     val currentStreak: Int = 4,
+    val weeklyConsistencyPercent: Int = 85,
     val pendingPlanCount: Int = 2,
+    val completedPlanCount: Int = 1,
+    val missedSessionsCount: Int = 0,
     val nextScheduledSession: String? = "Physics (7:00 PM)",
     val topDistractingAppUsageMins: Int = 0,
     val topDistractingAppName: String? = null,
+    val isFocusModeActive: Boolean = false,
     val memories: List<NovaMemoryItem> = emptyList()
 )
 
@@ -540,6 +570,50 @@ data class NovaAssistantResponse(
     val memoryToSave: NovaMemoryItem? = null,
     val quickSuggestions: List<String> = emptyList()
 )
+
+// =========================================================================
+// AUDIO RECORDING, VOICE NOTES & LECTURE TRANSCRIBER MODELS
+// =========================================================================
+
+enum class VoiceNoteType(val displayName: String, val icon: String) {
+    LECTURE("Lecture Recording", "🎓"),
+    QUICK_REMINDER("Quick Reminder", "⏰"),
+    CONCEPT_DOUBT("Concept / Doubt", "💡"),
+    REVISION_NOTE("Audio Revision", "📝")
+}
+
+@Entity(tableName = "voice_notes")
+data class VoiceNoteItem(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val title: String,
+    val audioFilePath: String,
+    val durationMillis: Long = 0L,
+    val subject: String = "General",
+    val noteType: VoiceNoteType = VoiceNoteType.LECTURE,
+    val transcription: String = "",
+    val summary: String = "",
+    val keyPoints: List<String> = emptyList(),
+    val extractedReminders: List<String> = emptyList(),
+    val isTranscribing: Boolean = false,
+    val isBookmarked: Boolean = false,
+    val tags: List<String> = emptyList(),
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+data class VoiceNoteAiAnalysis(
+    val title: String,
+    val transcription: String,
+    val summary: String,
+    val keyPoints: List<String> = emptyList(),
+    val extractedReminders: List<String> = emptyList(),
+    val flashcards: List<VoiceNoteFlashcard> = emptyList()
+)
+
+data class VoiceNoteFlashcard(
+    val question: String,
+    val answer: String
+)
+
 
 
 

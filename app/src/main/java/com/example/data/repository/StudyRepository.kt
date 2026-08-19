@@ -21,6 +21,48 @@ class StudyRepository(
     val activeNovaMemories: Flow<List<NovaMemoryItem>> = database.novaMemoryDao().getActiveMemories()
     val allNovaReminders: Flow<List<NovaReminderItem>> = database.novaReminderDao().getAllReminders()
     val pendingNovaReminders: Flow<List<NovaReminderItem>> = database.novaReminderDao().getPendingReminders()
+    val allVoiceNotes: Flow<List<VoiceNoteItem>> = database.voiceNoteDao().getAllVoiceNotes()
+    val bookmarkedVoiceNotes: Flow<List<VoiceNoteItem>> = database.voiceNoteDao().getBookmarkedVoiceNotes()
+
+    suspend fun saveVoiceNote(note: VoiceNoteItem): Long = withContext(Dispatchers.IO) {
+        database.voiceNoteDao().insertVoiceNote(note)
+    }
+
+    suspend fun updateVoiceNote(note: VoiceNoteItem) = withContext(Dispatchers.IO) {
+        database.voiceNoteDao().updateVoiceNote(note)
+    }
+
+    suspend fun toggleVoiceNoteBookmark(id: Long, isBookmarked: Boolean) = withContext(Dispatchers.IO) {
+        database.voiceNoteDao().toggleBookmark(id, isBookmarked)
+    }
+
+    suspend fun updateVoiceNoteTranscription(
+        id: Long,
+        isTranscribing: Boolean,
+        transcription: String,
+        summary: String,
+        keyPoints: List<String>,
+        reminders: List<String>,
+        title: String
+    ) = withContext(Dispatchers.IO) {
+        database.voiceNoteDao().updateTranscriptionResult(
+            id = id,
+            isTranscribing = isTranscribing,
+            transcription = transcription,
+            summary = summary,
+            keyPoints = keyPoints,
+            reminders = reminders,
+            title = title
+        )
+    }
+
+    suspend fun deleteVoiceNote(id: Long) = withContext(Dispatchers.IO) {
+        database.voiceNoteDao().deleteVoiceNote(id)
+    }
+
+    suspend fun getVoiceNoteById(id: Long): VoiceNoteItem? = withContext(Dispatchers.IO) {
+        database.voiceNoteDao().getVoiceNoteById(id)
+    }
 
     suspend fun saveNovaMemory(memory: NovaMemoryItem): Long = withContext(Dispatchers.IO) {
         database.novaMemoryDao().insertMemory(memory)
@@ -337,6 +379,16 @@ class StudyRepository(
             database.userDao().insertOrUpdateUserProfile(user.copy(xp = user.xp + 20))
         }
         id
+    }
+
+    suspend fun insertFlashcards(cards: List<FlashcardItem>) = withContext(Dispatchers.IO) {
+        cards.forEach { card ->
+            database.flashcardDao().insertFlashcard(card)
+        }
+        val user = database.userDao().getUserProfileOnce()
+        if (user != null) {
+            database.userDao().insertOrUpdateUserProfile(user.copy(xp = user.xp + (cards.size * 15)))
+        }
     }
 
     suspend fun updateFlashcard(card: FlashcardItem) = withContext(Dispatchers.IO) {

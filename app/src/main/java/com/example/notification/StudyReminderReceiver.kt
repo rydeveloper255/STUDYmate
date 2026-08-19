@@ -151,6 +151,26 @@ class StudyReminderReceiver : BroadcastReceiver() {
                             timeString = timeStr
                         )
                     }
+
+                    NovaNotificationEngine.ACTION_START_STUDY -> {
+                        val sSubject = intent.getStringExtra(NovaNotificationEngine.EXTRA_SUBJECT) ?: subject
+                        val sTopic = intent.getStringExtra(NovaNotificationEngine.EXTRA_TOPIC) ?: topic
+                        val sMins = intent.getIntExtra(NovaNotificationEngine.EXTRA_MINUTES, 25)
+
+                        val mainIntent = Intent(context, com.example.MainActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            putExtra(NovaNotificationEngine.EXTRA_SUBJECT, sSubject)
+                            putExtra(NovaNotificationEngine.EXTRA_TOPIC, sTopic)
+                            putExtra(NovaNotificationEngine.EXTRA_MINUTES, sMins)
+                        }
+                        context.startActivity(mainIntent)
+                    }
+
+                    NovaNotificationEngine.ACTION_SKIP_STUDY -> {
+                        // User chose to skip; no spamming, gracefully close notification
+                        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+                        nm?.cancel(2001)
+                    }
                 }
             } catch (e: Exception) {
                 // Handled gracefully

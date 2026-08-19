@@ -112,11 +112,32 @@ fun GlassCard(
     borderWidth: Dp = 1.dp,
     elevation: Dp = 6.dp,
     fillAlpha: Float = 0.65f,
+    backgroundColor: Color? = null,
+    borderColor: Color? = null,
     onClick: (() -> Unit)? = null,
     testTag: String? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
-    var cardModifier = modifier.glassEffect(shape, borderWidth, elevation, fillAlpha)
+    val isDark = isAppInDarkTheme()
+    val finalBg = backgroundColor ?: if (isDark) {
+        Color(0xFF131C2E).copy(alpha = fillAlpha)
+    } else {
+        Color(0xFFFFFFFF).copy(alpha = (fillAlpha + 0.25f).coerceAtMost(0.95f))
+    }
+    val finalBorderBrush = if (borderColor != null) {
+        Brush.linearGradient(listOf(borderColor, borderColor.copy(alpha = 0.4f)))
+    } else if (isDark) {
+        Brush.linearGradient(listOf(Color(0x4DFFFFFF), Color(0x15FFFFFF), Color(0x3538BDF8)))
+    } else {
+        Brush.linearGradient(listOf(Color(0x70CBD5E1), Color(0x3594A3B8), Color(0x406366F1)))
+    }
+
+    var cardModifier = modifier
+        .shadow(elevation, shape, clip = false, spotColor = if (isDark) Color(0x3338BDF8) else Color(0x200F172A))
+        .clip(shape)
+        .background(finalBg, shape)
+        .border(borderWidth, finalBorderBrush, shape)
+
     if (onClick != null) {
         cardModifier = cardModifier.springClickable(testTag = testTag, onClick = onClick)
     } else if (testTag != null) {
