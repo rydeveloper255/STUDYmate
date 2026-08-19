@@ -13,10 +13,19 @@ import com.example.BuildConfig
 object SupabaseConfig {
     private const val TAG = "SupabaseConfig"
 
+    private fun getBuildConfigField(fieldName: String): String {
+        return try {
+            val field = BuildConfig::class.java.getField(fieldName)
+            (field.get(null) as? String)?.trim() ?: ""
+        } catch (e: Throwable) {
+            ""
+        }
+    }
+
     val supabaseUrl: String
         get() {
             return try {
-                val url = BuildConfig.SUPABASE_URL.trim()
+                val url = getBuildConfigField("SUPABASE_URL")
                 if (url.isNotBlank() && url != "https://your-project.supabase.co" && !url.contains("dummy")) {
                     url.removeSuffix("/")
                 } else {
@@ -31,7 +40,7 @@ object SupabaseConfig {
     val supabaseAnonKey: String
         get() {
             return try {
-                val key = BuildConfig.SUPABASE_ANON_KEY.trim()
+                val key = getBuildConfigField("SUPABASE_ANON_KEY")
                 if (key.isNotBlank() && key != "eyJhbGciOi..." && !key.contains("dummy")) {
                     key
                 } else {
