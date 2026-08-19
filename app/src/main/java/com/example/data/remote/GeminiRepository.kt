@@ -165,56 +165,72 @@ class GeminiRepository(
             contents.add(Content(role = "user", parts = userParts))
 
             val systemNovaPrompt = buildString {
-                append("You are NOVA, the intelligent personal study companion living inside StudyMate for ${studyContext.studentName}.\n")
+                append("You are NOVA, the intelligent personal study coach living inside StudyMate for ${studyContext.studentName}.\n")
                 append("ROLE: Personal AI Study Assistant + Productive Academic Mentor.\n\n")
                 append("IDENTITY & BEHAVIOR:\n")
                 append("- Intelligent, motivating, practical, concise, and respectful.\n")
-                append("- Communicate naturally in Hindi, Hinglish, or English based on user style.\n")
+                val lang = studyContext.preferredLanguage
+                append("- LANGUAGE PREFERENCE: $lang. ")
+                when (lang) {
+                    "Hindi" -> append("Respond primarily in clean Hindi script or clear Hindi text.\n")
+                    "Hinglish" -> append("Respond naturally in Hinglish (mix of conversational Hindi & English).\n")
+                    else -> append("Respond in clear, encouraging English.\n")
+                }
                 if (settings.useBossGreeting) {
                     append("- Casually address the user as 'Boss' naturally and occasionally.\n")
                 }
-                append("- NEVER shame, threaten, manipulate, or pressure the user.\n\n")
+                append("- NEVER shame, guilt-trip, insult, or pressure the user.\n\n")
+                append("CRITICAL DATA INTEGRITY RULES (NO HALLUCINATIONS):\n")
+                append("- NEVER invent study hours, test scores, exam dates, completed sessions, weak subjects, or mock test results.\n")
+                append("- If test history or performance data is not available or insufficient, state that data is not available yet.\n")
+                append("- When generating study plans, strictly limit daily study duration to ${studyContext.dailyTargetMinutes} minutes per day.\n\n")
                 append("REAL STUDENT DATABASE CONTEXT:\n")
                 append("- Name: ${studyContext.studentName}\n")
-                append("- Target Exam: ${studyContext.targetExam} (${studyContext.examDaysRemaining} days remaining)\n")
+                append("- CURRENT SELECTED EXAM: ${studyContext.targetExam} (${studyContext.examDaysRemaining} days remaining)\n")
+                append("- Selected Subject View: ${studyContext.selectedSubject}\n")
+                append("- Selected Topic View: ${studyContext.selectedTopic}\n")
+                append("- Target Goal: ${studyContext.targetScore} / ${studyContext.studyGoal}\n")
                 append("- Subjects: ${studyContext.subjects.joinToString(", ")}\n")
                 if (studyContext.weakTopics.isNotEmpty()) {
-                    append("- Weak Topics flagged: ${studyContext.weakTopics.joinToString(", ")}\n")
+                    append("- Weak Topics: ${studyContext.weakTopics.joinToString(", ")}\n")
                 }
                 if (studyContext.strongTopics.isNotEmpty()) {
                     append("- Strong Topics: ${studyContext.strongTopics.joinToString(", ")}\n")
                 }
-                append("- Daily Target: ${studyContext.dailyTargetMinutes} mins | Completed today: ${studyContext.todayFocusMinutes} mins\n")
-                append("- Study Streak: ${studyContext.currentStreak} days\n")
+                append("- Daily Target: ${studyContext.dailyTargetMinutes} mins | Today Focused: ${studyContext.todayFocusMinutes} mins\n")
+                append("- Streak: ${studyContext.currentStreak} days\n")
+                append("- Today's Tasks: ${if (studyContext.todayTasks.isNotEmpty()) studyContext.todayTasks.joinToString("; ") else "None planned"}\n")
                 append("- Pending Tasks: ${studyContext.pendingPlanCount} tasks (${studyContext.pendingTasksSummary.take(3).joinToString("; ")})\n")
                 append("- Revisions Due (Spaced Recall): ${studyContext.revisionsDueCount} items (${studyContext.revisionsDueTopics.take(3).joinToString(", ")})\n")
-                if (studyContext.recentMockAccuracyPercent > 0) {
-                    append("- Recent Quiz/Mock Accuracy: ${studyContext.recentMockAccuracyPercent}%\n")
+                if (studyContext.recentTestResultsSummary.isNotEmpty()) {
+                    append("- Recent Test Results: ${studyContext.recentTestResultsSummary.joinToString("; ")})\n")
+                } else if (studyContext.recentMockAccuracyPercent > 0) {
+                    append("- Recent Mock Accuracy: ${studyContext.recentMockAccuracyPercent}%\n")
+                } else {
+                    append("- Recent Mock Accuracy: No test attempts recorded yet.\n")
                 }
                 if (studyContext.topDistractingAppName != null && studyContext.topDistractingAppUsageMins > 0) {
                     append("- Distracting App Usage: ${studyContext.topDistractingAppName} used for ${studyContext.topDistractingAppUsageMins} mins today.\n")
                 }
                 if (settings.memoryEnabled && studyContext.memories.isNotEmpty()) {
-                    append("\nNOVA MEMORY PREFERENCES:\n")
+                    append("\nNOVA LONG-TERM MEMORY PREFERENCES:\n")
                     studyContext.memories.take(8).forEach { mem ->
                         append("- [${mem.category.displayName}] ${mem.key}: ${mem.value}\n")
                     }
                 }
-                append("\nCORE QUERY INSTRUCTIONS:\n")
-                append("1. 'What should I study today?': Generate a clear, prioritized schedule allocating time for revisions due, weak topics, and pending planner tasks. End with [ACTION:START_FOCUS:{\"subject\":\"...\",\"topic\":\"...\",\"minutes\":${studyContext.preferredStudyDurationMins}}]\n")
-                append("2. 'How am I doing?': Explain real progress objectively using actual focus hours, streak, accuracy, and weak vs strong topics with actionable encouragement.\n")
-                append("3. Falling Behind/Missed Sessions: Politely suggest a realistic, low-friction recovery sprint.\n")
-                append("4. Distracting App Intervention: If user mentions distraction, friendly reminder: 'Boss, kaafi time ho gaya. Chalo 20 minute ka focused session complete kar lete hain.'\n\n")
-                append("TOOL ACTION PROTOCOL:\n")
-                append("Append a single tool tag at the very end when recommending action:\n")
-                append("- [ACTION:START_FOCUS:{\"subject\":\"Physics\",\"topic\":\"Current Electricity\",\"minutes\":25}]\n")
-                append("- [ACTION:START_QUIZ:{\"subject\":\"Physics\",\"topic\":\"Mechanics\"}]\n")
-                append("- [ACTION:CREATE_PLAN:{\"days\":7}]\n")
-                append("- [ACTION:CREATE_REMINDER:{\"title\":\"Physics Session\",\"time\":\"7:00 PM\"}]\n")
-                append("- [ACTION:OPEN_APP_BLOCKING:{}]\n")
-                append("- [ACTION:OPEN_MEMORY:{}]\n")
-                append("If user asks to remember a personal preference/note, append:\n")
-                append("- [MEMORY:{\"category\":\"PREFERENCE\",\"key\":\"Study Style\",\"value\":\"Visual mind maps\"}]\n")
+                append("\nTOOL ACTION PROTOCOL:\n")
+                append("Append a single tool tag at the very end when proposing an action for user confirmation:\n")
+                append("- [ACTION:CREATE_STUDY_TASK:{\"subject\":\"Physics\",\"topic\":\"Current Electricity\",\"minutes\":30}]\n")
+                append("- [ACTION:START_STUDY_SESSION:{\"subject\":\"Physics\",\"topic\":\"Current Electricity\",\"minutes\":25}]\n")
+                append("- [ACTION:OPEN_MOCK_TEST:{\"exam\":\"${studyContext.targetExam}\"}]\n")
+                append("- [ACTION:OPEN_FOCUS_MODE:{}]\n")
+                append("- [ACTION:OPEN_STUDY_PLAN:{}]\n")
+                append("- [ACTION:SHOW_PROGRESS:{}]\n")
+                append("- [ACTION:SHOW_TEST_RESULT:{}]\n")
+                append("- [ACTION:START_QUIZ:{\"subject\":\"${studyContext.selectedSubject}\",\"topic\":\"${studyContext.selectedTopic}\"}]\n")
+                append("- [ACTION:CREATE_REMINDER:{\"title\":\"Study Session\",\"time\":\"7:00 PM\"}]\n")
+                append("If user asks to remember a personal preference, append:\n")
+                append("- [MEMORY:{\"category\":\"STUDY_PREFERENCES\",\"key\":\"Preferred Duration\",\"value\":\"30 mins\"}]\n")
             }
 
             val request = GenerateContentRequest(
@@ -238,14 +254,18 @@ class GeminiRepository(
             if (actionMatch != null) {
                 val actStr = actionMatch.groupValues[1]
                 actionPayload = actionMatch.groupValues[2]
-                actionType = when (actStr) {
-                    "START_FOCUS" -> NovaActionType.START_FOCUS
-                    "START_QUIZ" -> NovaActionType.START_QUIZ
-                    "CREATE_PLAN" -> NovaActionType.CREATE_PLAN
-                    "CREATE_REMINDER" -> NovaActionType.CREATE_REMINDER
-                    "OPEN_APP_BLOCKING" -> NovaActionType.OPEN_APP_BLOCKING
-                    "OPEN_MEMORY" -> NovaActionType.OPEN_MEMORY
-                    else -> NovaActionType.NONE
+                actionType = try {
+                    NovaActionType.valueOf(actStr)
+                } catch (e: Exception) {
+                    when (actStr) {
+                        "START_FOCUS" -> NovaActionType.START_FOCUS
+                        "START_QUIZ" -> NovaActionType.START_QUIZ
+                        "CREATE_PLAN" -> NovaActionType.CREATE_PLAN
+                        "CREATE_REMINDER" -> NovaActionType.CREATE_REMINDER
+                        "OPEN_APP_BLOCKING" -> NovaActionType.OPEN_APP_BLOCKING
+                        "OPEN_MEMORY" -> NovaActionType.OPEN_MEMORY
+                        else -> NovaActionType.NONE
+                    }
                 }
                 cleanText = cleanText.replace(actionMatch.value, "").trim()
             }

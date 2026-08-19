@@ -11,8 +11,10 @@ import com.example.StudyMateApplication
 import com.example.data.model.*
 import com.example.data.remote.AuthRepository
 import com.example.data.remote.GeminiRepository
+import com.example.data.repository.ExamCatalogRepository
 import com.example.data.repository.StudyRepository
 import com.example.service.intelligence.StudyMateIntelligenceEngine
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -68,12 +70,60 @@ class MainViewModel(
     application: Application,
     private val authRepository: AuthRepository,
     private val geminiRepository: GeminiRepository,
-    private val studyRepository: StudyRepository
+    private val studyRepository: StudyRepository,
+    val examCatalogRepository: ExamCatalogRepository
 ) : AndroidViewModel(application) {
 
     // --- User Profile & Auth ---
     val userProfile: StateFlow<UserProfile?> = studyRepository.userProfile
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    // --- Verified Exam Catalog & Single Authoritative Selected Exam ---
+    val allCatalogExams: StateFlow<List<ExamEntity>> = examCatalogRepository.allExams
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val selectedExam: StateFlow<SelectedExam> = combine(
+        userProfile,
+        examCatalogRepository.allExams
+    ) { profile, catalogList ->
+        if (profile == null) {
+            SelectedExam.defaultExam()
+        } else {
+            val matchedCatalog = catalogList.firstOrNull {
+                it.name.equals(profile.examName, ignoreCase = true) ||
+                it.shortCode.equals(profile.examName, ignoreCase = true) ||
+                it.id.equals(profile.examName, ignoreCase = true) ||
+                profile.examName.contains(it.shortCode, ignoreCase = true)
+            }
+            SelectedExam(
+                examId = matchedCatalog?.id ?: "exam_${profile.examName.lowercase().replace("[^a-z0-9]".toRegex(), "_")}",
+                examName = profile.examName,
+                examCategory = profile.examCategory.ifBlank { matchedCatalog?.category ?: "Competitive Exam" },
+                targetDateMillis = profile.examDateMillis,
+                targetScore = profile.targetScore,
+                priority = "HIGH",
+                status = "ACTIVE",
+                examPattern = matchedCatalog?.examPattern ?: "",
+                totalMarks = matchedCatalog?.totalMarks ?: 100,
+                durationMinutes = matchedCatalog?.durationMinutes ?: 90,
+                isCustom = matchedCatalog?.isCustom ?: (matchedCatalog == null)
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, SelectedExam.defaultExam())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val selectedExamSubjects: StateFlow<List<ExamSubjectEntity>> = selectedExam
+        .flatMapLatest { exam ->
+            examCatalogRepository.getSubjectsForExam(exam.examId)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val selectedExamSyllabusTree: StateFlow<Map<String, List<ChapterWithTopics>>> = selectedExam
+        .flatMapLatest { exam ->
+            examCatalogRepository.getSyllabusHierarchyForExam(exam.examId)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     private val _isAuthLoading = MutableStateFlow(false)
     val isAuthLoading: StateFlow<Boolean> = _isAuthLoading.asStateFlow()
@@ -492,6 +542,49 @@ class MainViewModel(
         }
     }
 
+    fun updatePlanItem(item: StudyPlanItem) {
+        viewModelScope.launch {
+            studyRepository.updateStudyPlanItem(item)
+        }
+    }
+
+    fun recoverMissedSessions(mode: String) {
+        viewModelScope.launch {
+            val currentPlans = studyPlanItems.value
+            val missedItems = currentPlans.filter { !it.isCompleted && it.priority == PlanPriority.HIGH }
+            if (missedItems.isEmpty()) return@launch
+
+            when (mode) {
+                "LATER_TODAY" -> {
+                    // Reduce duration slightly and keep on today's schedule
+                    missedItems.forEach { item ->
+                        studyRepository.updateStudyPlanItem(
+                            item.copy(
+                                targetMinutes = (item.targetMinutes * 0.75).toInt().coerceAtLeast(20),
+                                notes = "Recovered Session: Scheduled for later today."
+                            )
+                        )
+                    }
+                }
+                "SPREAD_WEEK" -> {
+                    // Downgrade urgency and mark notes for smooth distribution
+                    missedItems.forEachIndexed { idx, item ->
+                        studyRepository.updateStudyPlanItem(
+                            item.copy(
+                                priority = PlanPriority.MEDIUM,
+                                notes = "Distributed Recovery Session #${idx + 1}"
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun updateDailyAvailableTime(minutes: Int) {
+        _selectedAvailableTimeMinutes.value = minutes
+    }
+
     fun deletePlanItem(id: Long) {
         viewModelScope.launch {
             studyRepository.deletePlanItem(id)
@@ -843,39 +936,95 @@ class MainViewModel(
         _focusState.value = _focusState.value.copy(showCelebration = false)
     }
 
+    val examQuestionBankRepository = com.example.data.repository.ExamQuestionBankRepository()
+    private var mockTestTimerJob: kotlinx.coroutines.Job? = null
+
     // --- Mock Test & Practice Actions ---
 
     fun startMockTestWithConfig(config: MockTestConfig) {
         viewModelScope.launch {
             _isTestGenerating.value = true
-            val result = geminiRepository.generateMockTestQuestions(
+
+            val targetExamName = config.exam.ifBlank { selectedExam.value.examName }
+
+            // 1. Fetch verified exam questions
+            var questions = examQuestionBankRepository.getQuestionsForTest(
+                examName = targetExamName,
                 subject = config.subject,
-                chapter = config.topic,
-                count = config.questionCount
+                topic = config.topic,
+                difficulty = config.difficulty,
+                language = config.language,
+                desiredCount = config.questionCount,
+                testType = config.testType
             )
-            result.onSuccess { questions ->
-                val totalSeconds = config.timeLimitMinutes * 60
-                _activeTestState.value = ActiveTestState(
-                    isTestInProgress = true,
-                    subject = config.subject,
-                    title = "${config.exam} - ${config.subject} (${config.topic})",
-                    questions = questions,
-                    currentQuestionIndex = 0,
-                    selectedAnswers = emptyMap(),
-                    markedForReview = emptySet(),
-                    remainingSeconds = totalSeconds,
-                    isCompleted = false,
-                    completedAttempt = null,
-                    config = config
+
+            // 2. If additional questions needed, request exam-aware questions from AI
+            if (questions.size < config.questionCount) {
+                val needCount = config.questionCount - questions.size
+                val aiResult = geminiRepository.generateMockTestQuestions(
+                    subject = if (config.subject == "All Subjects") (selectedExamSubjects.value.firstOrNull()?.name ?: "General") else config.subject,
+                    chapter = config.topic,
+                    count = needCount
                 )
+                aiResult.onSuccess { aiQs ->
+                    val tagged = aiQs.map { q ->
+                        q.copy(
+                            subject = if (q.subject.isBlank() || q.subject == "General") config.subject else q.subject,
+                            topic = if (q.topic.isBlank()) config.topic else q.topic,
+                            source = QuestionSource.AI_GENERATED,
+                            sourceLabel = "AI Exam Concept",
+                            yearOrTag = targetExamName
+                        )
+                    }
+                    questions = questions + tagged
+                }
             }
+
+            val finalQuestions = questions.take(config.questionCount.coerceAtLeast(1))
+            val totalSeconds = (config.timeLimitMinutes * 60).coerceAtLeast(60)
+
+            _activeTestState.value = ActiveTestState(
+                isTestInProgress = true,
+                subject = config.subject,
+                title = when (config.testType) {
+                    MockTestType.FULL_MOCK -> "$targetExamName Full Mock Test"
+                    MockTestType.SUBJECT_TEST -> "$targetExamName - ${config.subject}"
+                    MockTestType.TOPIC_TEST -> "$targetExamName - ${config.topic}"
+                    MockTestType.QUICK_PRACTICE -> "$targetExamName Speed Practice"
+                },
+                questions = finalQuestions,
+                currentQuestionIndex = 0,
+                selectedAnswers = emptyMap(),
+                markedForReview = emptySet(),
+                remainingSeconds = totalSeconds,
+                isCompleted = false,
+                completedAttempt = null,
+                config = config
+            )
             _isTestGenerating.value = false
+
+            // Cancel any old timer and start countdown job
+            mockTestTimerJob?.cancel()
+            mockTestTimerJob = viewModelScope.launch {
+                while (_activeTestState.value.isTestInProgress && _activeTestState.value.remainingSeconds > 0) {
+                    kotlinx.coroutines.delay(1000L)
+                    val currentRemaining = _activeTestState.value.remainingSeconds
+                    if (currentRemaining <= 1) {
+                        _activeTestState.value = _activeTestState.value.copy(remainingSeconds = 0)
+                        submitMockTest()
+                        break
+                    } else {
+                        _activeTestState.value = _activeTestState.value.copy(remainingSeconds = currentRemaining - 1)
+                    }
+                }
+            }
         }
     }
 
     fun startMockTest(subject: String, chapter: String, mode: String = "AI Practice", questionCount: Int = 5) {
         startMockTestWithConfig(
             MockTestConfig(
+                exam = selectedExam.value.examName,
                 subject = subject,
                 topic = chapter,
                 questionCount = questionCount
@@ -928,34 +1077,58 @@ class MainViewModel(
     }
 
     fun submitMockTest() {
+        mockTestTimerJob?.cancel()
         val state = _activeTestState.value
         val questions = state.questions
         val answers = state.selectedAnswers
         var correctCount = 0
         var incorrectCount = 0
         var skippedCount = 0
-        val weakTopics = mutableListOf<String>()
-        val strongTopics = mutableListOf<String>()
+
+        val topicAttemptCounts = mutableMapOf<String, Int>()
+        val topicIncorrectCounts = mutableMapOf<String, Int>()
+        val topicCorrectCounts = mutableMapOf<String, Int>()
 
         val details = questions.mapIndexed { idx, q ->
             val chosen = answers[idx]
             val isCorr = chosen != null && chosen == q.correctOptionIndex
+            val topicKey = q.topic.ifBlank { q.subject }
+
+            topicAttemptCounts[topicKey] = (topicAttemptCounts[topicKey] ?: 0) + 1
+
             if (chosen == null) {
                 skippedCount++
             } else if (isCorr) {
                 correctCount++
-                if (!strongTopics.contains(q.topic)) strongTopics.add(q.topic)
+                topicCorrectCounts[topicKey] = (topicCorrectCounts[topicKey] ?: 0) + 1
             } else {
                 incorrectCount++
-                if (!weakTopics.contains(q.topic)) weakTopics.add(q.topic)
+                topicIncorrectCounts[topicKey] = (topicIncorrectCounts[topicKey] ?: 0) + 1
             }
+
             QuestionAttemptDetail(
                 question = q,
                 selectedIndex = chosen,
                 isCorrect = isCorr,
                 isMarkedForReview = state.markedForReview.contains(idx),
-                timeSpentSeconds = 60
+                timeSpentSeconds = if (questions.isNotEmpty()) (state.config.timeLimitMinutes * 60 - state.remainingSeconds) / questions.size else 30
             )
+        }
+
+        // Apply strict sample threshold before classifying weak or strong topics
+        val weakTopics = mutableListOf<String>()
+        val strongTopics = mutableListOf<String>()
+
+        topicAttemptCounts.forEach { (topic, totalAttempts) ->
+            if (totalAttempts >= 2) {
+                val incorrects = topicIncorrectCounts[topic] ?: 0
+                val corrects = topicCorrectCounts[topic] ?: 0
+                if (incorrects.toFloat() / totalAttempts >= 0.5f) {
+                    weakTopics.add(topic)
+                } else if (corrects.toFloat() / totalAttempts >= 0.8f) {
+                    strongTopics.add(topic)
+                }
+            }
         }
 
         viewModelScope.launch {
@@ -977,10 +1150,12 @@ class MainViewModel(
 
             val totalAllowedSecs = state.config.timeLimitMinutes * 60
             val timeSpent = totalAllowedSecs - state.remainingSeconds
-            val recommendation = if (weakTopics.isNotEmpty()) {
-                "Revise ${weakTopics.take(2).joinToString(" & ")} and attempt 5 targeted numericals."
+            val recommendation = if (questions.size < 3) {
+                "Not enough data yet for a reliable topic analysis. Practice more questions to identify specific topic strengths and weaknesses."
+            } else if (weakTopics.isNotEmpty()) {
+                "Focus on ${weakTopics.take(2).joinToString(" & ")}. Practice targeted PYQs and concept revisions."
             } else {
-                "Excellent mastery! Proceed to advanced PYQs and timed speed tests."
+                "Excellent mastery across attempted topics! Maintain momentum with full-length timed tests."
             }
 
             val attempt = studyRepository.recordMockTestAttempt(
@@ -1014,6 +1189,11 @@ class MainViewModel(
         }
     }
 
+    fun exitTest() {
+        mockTestTimerJob?.cancel()
+        _activeTestState.value = ActiveTestState()
+    }
+
     fun reviewPastTest(attempt: MockTestAttempt) {
         _activeTestState.value = ActiveTestState(
             isTestInProgress = false,
@@ -1036,6 +1216,41 @@ class MainViewModel(
         )
     }
 
+    fun addWeakTopicsToStudyPlan(attempt: MockTestAttempt) {
+        viewModelScope.launch {
+            attempt.weakTopics.forEach { topic ->
+                val item = StudyPlanItem(
+                    subject = attempt.subject,
+                    chapter = topic,
+                    topic = topic,
+                    targetMinutes = 45,
+                    isCompleted = false,
+                    scheduledDateMillis = System.currentTimeMillis() + 86400000L,
+                    priority = PlanPriority.HIGH,
+                    notes = "Recommended practice from ${attempt.examName} Mock Test."
+                )
+                studyRepository.addStudyPlanItem(item)
+            }
+        }
+    }
+
+    fun addMistakesToRevisionFlashcards(attempt: MockTestAttempt, details: List<QuestionAttemptDetail>) {
+        viewModelScope.launch {
+            details.filter { !it.isCorrect && it.selectedIndex != null }.forEach { detail ->
+                val q = detail.question
+                studyRepository.addFlashcard(
+                    subject = q.subject,
+                    topic = q.topic,
+                    front = q.questionText,
+                    back = "Correct Answer: ${q.options.getOrNull(q.correctOptionIndex) ?: ""}\n\nExplanation: ${q.explanation}",
+                    hint = "Review mistake from ${attempt.examName} mock test",
+                    difficulty = q.difficulty,
+                    sourceDocTitle = "Mock Test Mistake"
+                )
+            }
+        }
+    }
+
     fun deletePastTest(id: Long) {
         viewModelScope.launch {
             studyRepository.deleteMockTestAttempt(id)
@@ -1052,10 +1267,6 @@ class MainViewModel(
         viewModelScope.launch {
             studyRepository.deleteUserQuestionMaterial(id)
         }
-    }
-
-    fun exitTest() {
-        _activeTestState.value = ActiveTestState()
     }
 
     fun diagnoseMistakes(subject: String) {
@@ -1892,6 +2103,81 @@ class MainViewModel(
         }
     }
 
+    fun changeSelectedExam(
+        examId: String,
+        customName: String? = null,
+        targetDateMillis: Long? = null,
+        targetScore: String? = null,
+        refreshStudyPlan: Boolean = true
+    ) {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            val current = userProfile.value ?: UserProfile()
+            val examEntity = examCatalogRepository.getExamById(examId)
+            val finalExamName = customName?.takeIf { it.isNotBlank() } ?: examEntity?.name ?: examId
+            val finalCategory = examEntity?.category ?: current.examCategory
+            val finalDate = targetDateMillis ?: current.examDateMillis
+            val finalScore = targetScore ?: current.targetScore
+
+            // Fetch official subjects for this new exam
+            val officialSubjects = examCatalogRepository.getSubjectsForExamOnce(examId).map { it.name }
+            val newSubjects = if (officialSubjects.isNotEmpty()) officialSubjects else current.subjects
+
+            val updatedProfile = current.copy(
+                examName = finalExamName,
+                examCategory = finalCategory,
+                examDateMillis = finalDate,
+                targetScore = finalScore,
+                subjects = newSubjects
+            )
+
+            authRepository.updateUserProfile(updatedProfile)
+
+            // Update active Exam Objective
+            studyRepository.intelligenceRepository.saveExamObjective(
+                ExamObjective(
+                    examName = finalExamName,
+                    targetScoreOrRank = finalScore,
+                    examDateMillis = finalDate,
+                    category = finalCategory,
+                    prioritySubjects = newSubjects.take(3),
+                    status = "ACTIVE"
+                )
+            )
+
+            if (refreshStudyPlan) {
+                generateAiStudyPlan()
+            }
+            _isAuthLoading.value = false
+            _snackbarMessage.emit("Switched target exam to $finalExamName")
+        }
+    }
+
+    fun createAndSelectCustomExam(
+        name: String,
+        category: String = "Custom",
+        subjects: List<String>,
+        targetDateMillis: Long,
+        targetScore: String
+    ) {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            val customExam = examCatalogRepository.createCustomExam(
+                name = name,
+                category = category,
+                customSubjectsList = subjects,
+                targetDateMillis = targetDateMillis
+            )
+            changeSelectedExam(
+                examId = customExam.id,
+                customName = customExam.name,
+                targetDateMillis = targetDateMillis,
+                targetScore = targetScore,
+                refreshStudyPlan = true
+            )
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         timerJob?.cancel()
@@ -1910,7 +2196,8 @@ class MainViewModelFactory(
                 application = application,
                 authRepository = application.authRepository,
                 geminiRepository = application.geminiRepository,
-                studyRepository = application.studyRepository
+                studyRepository = application.studyRepository,
+                examCatalogRepository = application.examCatalogRepository
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

@@ -298,7 +298,8 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onOpenProfileSettings = { showProfileDialog = true },
                             onSignOut = { viewModel.signOut(context) },
                             onScanQuestion = { onSelectTab(AppNavTab.AI_TUTOR) },
-                            onOpenDocumentSummarizer = { showDocumentSummarizer = true }
+                            onOpenDocumentSummarizer = { showDocumentSummarizer = true },
+                            onUpdateUserProfile = { updatedProfile -> viewModel.updateUserProfile(updatedProfile) }
                         )
 
                         AppNavTab.AI_TUTOR -> {
@@ -322,11 +323,14 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onGenerateAiPlan = { viewModel.generateAiStudyPlan() },
                             onTogglePlanItem = { id, done -> viewModel.togglePlanItem(id, done) },
                             onAddPlanItem = { sub, chap, top, mins, prio -> viewModel.addManualPlanItem(sub, chap, top, mins, prio) },
+                            onUpdatePlanItem = { item -> viewModel.updatePlanItem(item) },
                             onDeletePlanItem = { viewModel.deletePlanItem(it) },
                             onStartFocusSession = { sub, top ->
                                 viewModel.startFocusSession(sub, top, 25)
                                 onSelectTab(AppNavTab.FOCUS)
                             },
+                            onRecoverMissedSessions = { mode -> viewModel.recoverMissedSessions(mode) },
+                            onUpdateDailyAvailableTime = { mins -> viewModel.updateDailyAvailableTime(mins) },
                             onAddFlashcard = { subject, topic, front, back, hint, difficulty, sourceDoc ->
                                 viewModel.addFlashcard(subject, topic, front, back, hint, difficulty, sourceDoc)
                             },

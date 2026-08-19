@@ -305,13 +305,22 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                     _socialMediaNudge.value = null
                 }
 
+                val todayTasksList = planItems.take(5).map { "${it.subject}: ${it.topic} (${it.targetMinutes}m)" }
+                val recentSessionsSummary = sessions.takeLast(5).map { "${it.subject}: ${it.topic} (${it.actualMinutesSpent}m)" }
+                val recentAttemptsSummary = attempts.takeLast(5).map { "${it.examName} (${it.accuracyPercent.toInt()}% - ${it.correctCount}/${it.totalQuestions})" }
+
                 NovaStudyContext(
                     studentName = user.name.ifBlank { "Scholar" },
                     preferredTitle = if (_settings.value.useBossGreeting) "Boss" else user.name,
                     targetExam = user.examName,
+                    selectedSubject = _studyContext.value.selectedSubject.ifBlank { user.subjects.firstOrNull() ?: "All Subjects" },
+                    selectedTopic = _studyContext.value.selectedTopic.ifBlank { "All Topics" },
+                    targetScore = user.targetScore.ifBlank { "Top AIR Rank" },
+                    studyGoal = "Excellence in ${user.examName}",
                     examDaysRemaining = remainingDays,
                     examDateMillis = user.examDateMillis,
                     subjects = user.subjects,
+                    subjectPriorities = user.subjects,
                     weakTopics = if (combinedWeakTopics.isNotEmpty()) combinedWeakTopics else listOf("Core Principles", "Numerical Practice"),
                     strongTopics = user.strongSubjects,
                     dailyTargetMinutes = user.dailyTargetMinutes,
@@ -320,9 +329,12 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                     weeklyConsistencyPercent = 88,
                     pendingPlanCount = pendingPlans.size,
                     completedPlanCount = completedPlans.size,
+                    todayTasks = todayTasksList,
                     pendingTasksSummary = pendingTasksSummary,
                     revisionsDueCount = revisionsDue.size,
                     revisionsDueTopics = revisionsDueTopics,
+                    recentStudySessionsSummary = recentSessionsSummary,
+                    recentTestResultsSummary = recentAttemptsSummary,
                     recentMockAccuracyPercent = recentAccuracy,
                     missedSessionsCount = if (missedCandidate != null) 1 else 0,
                     nextScheduledSession = nextSession,
@@ -504,6 +516,90 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                     )
                     studyRepository.addNovaReminder(reminder)
                     _snackbarMessage.emit("⏰ Reminder saved: $title for $time")
+                }
+                NovaActionType.CREATE_STUDY_TASK -> {
+                    var subject = _studyContext.value.subjects.firstOrNull() ?: "General"
+                    var topic = "Study Session"
+                    var minutes = 30
+                    if (payload != null) {
+                        try {
+                            val json = org.json.JSONObject(payload)
+                            subject = json.optString("subject", subject)
+                            topic = json.optString("topic", topic)
+                            minutes = json.optInt("minutes", minutes)
+                        } catch (e: Exception) {}
+                    }
+                    val item = StudyPlanItem(
+                        subject = subject,
+                        chapter = "Nova Recommendation",
+                        topic = topic,
+                        targetMinutes = minutes,
+                        priority = PlanPriority.HIGH
+                    )
+                    studyRepository.addStudyPlanItem(item)
+                    _snackbarMessage.emit("📅 Added study task: $subject - $topic ($minutes mins)")
+                }
+                NovaActionType.UPDATE_STUDY_TASK -> {
+                    _navigationEvent.emit("NAVIGATE_TO_PLANNER" to emptyMap())
+                }
+                NovaActionType.ADD_REVISION_ITEM -> {
+                    var subject = _studyContext.value.subjects.firstOrNull() ?: "General"
+                    var topic = "Core Concept"
+                    if (payload != null) {
+                        try {
+                            val json = org.json.JSONObject(payload)
+                            subject = json.optString("subject", subject)
+                            topic = json.optString("topic", topic)
+                        } catch (e: Exception) {}
+                    }
+                    val flashcard = FlashcardItem(
+                        subject = subject,
+                        topic = topic,
+                        front = "Key Concept: $topic",
+                        back = "Review and practice active recall for $topic",
+                        status = RevisionCategory.REVISE_NOW
+                    )
+                    studyRepository.insertFlashcard(flashcard)
+                    _snackbarMessage.emit("🗂️ Added revision card for $topic")
+                }
+                NovaActionType.START_STUDY_SESSION -> {
+                    var subject = _studyContext.value.subjects.firstOrNull() ?: "Physics"
+                    var topic = _studyContext.value.weakTopics.firstOrNull() ?: "Core Revision"
+                    var duration = 25
+                    if (payload != null) {
+                        try {
+                            val json = org.json.JSONObject(payload)
+                            subject = json.optString("subject", subject)
+                            topic = json.optString("topic", topic)
+                            duration = json.optInt("minutes", duration)
+                        } catch (e: Exception) {}
+                    }
+                    _navigationEvent.emit("NAVIGATE_TO_FOCUS" to mapOf(
+                        "subject" to subject,
+                        "topic" to topic,
+                        "duration" to duration
+                    ))
+                }
+                NovaActionType.OPEN_MOCK_TEST -> {
+                    _navigationEvent.emit("NAVIGATE_TO_MOCK_TEST" to emptyMap())
+                }
+                NovaActionType.OPEN_SUBJECT -> {
+                    _navigationEvent.emit("NAVIGATE_TO_SUBJECT" to emptyMap())
+                }
+                NovaActionType.OPEN_TOPIC -> {
+                    _navigationEvent.emit("NAVIGATE_TO_TOPIC" to emptyMap())
+                }
+                NovaActionType.OPEN_STUDY_PLAN -> {
+                    _navigationEvent.emit("NAVIGATE_TO_PLANNER" to emptyMap())
+                }
+                NovaActionType.OPEN_FOCUS_MODE -> {
+                    _navigationEvent.emit("NAVIGATE_TO_FOCUS" to emptyMap())
+                }
+                NovaActionType.SHOW_PROGRESS -> {
+                    setTab(NovaScreenTab.ANALYTICS_STRATEGY)
+                }
+                NovaActionType.SHOW_TEST_RESULT -> {
+                    _navigationEvent.emit("NAVIGATE_TO_MOCK_TEST" to emptyMap())
                 }
                 NovaActionType.OPEN_APP_BLOCKING -> {
                     _navigationEvent.emit("NAVIGATE_TO_FOCUS" to emptyMap())

@@ -41,34 +41,48 @@ fun MockTestSetupDialog(
     onStartTest: (MockTestConfig) -> Unit,
     onManageMaterials: () -> Unit
 ) {
-    val defaultExam = userProfile?.examName?.ifBlank { "JEE Main & Advanced" } ?: "JEE Main & Advanced"
-    val defaultSubject = userProfile?.subjects?.firstOrNull() ?: "Physics"
+    val defaultExam = userProfile?.examName?.ifBlank { "RRB NTPC (Railway)" } ?: "RRB NTPC (Railway)"
 
     var selectedExam by remember { mutableStateOf(defaultExam) }
-    var selectedSubject by remember { mutableStateOf(defaultSubject) }
+    var selectedTestType by remember { mutableStateOf(MockTestType.FULL_MOCK) }
+    var selectedSubject by remember { mutableStateOf("All Subjects") }
     var selectedTopic by remember { mutableStateOf("All Topics") }
+    var selectedLanguage by remember { mutableStateOf("English") }
     var selectedDifficulty by remember { mutableStateOf("Medium") }
-    var questionCount by remember { mutableIntStateOf(10) }
-    var timeLimitMinutes by remember { mutableIntStateOf(15) }
+    var questionCount by remember { mutableIntStateOf(25) }
+    var timeLimitMinutes by remember { mutableIntStateOf(30) }
     var selectedSourceFilter by remember { mutableStateOf(QuestionSourceFilter.BALANCED_MIX) }
     var selectedCustomMaterialId by remember { mutableStateOf<Long?>(null) }
 
     val examOptions = listOf(
+        "RRB NTPC (Railway)",
+        "SSC CGL Tier-1",
         "JEE Main & Advanced",
         "NEET-UG",
-        "CBSE Class 12 Boards",
-        "SAT Math",
-        "General Science & Tech"
+        "UPSC CSE Prelims",
+        "CBSE Class 12 Boards"
     )
 
-    val subjectOptions = (userProfile?.subjects ?: listOf("Physics", "Chemistry", "Mathematics", "Biology", "Computer Science")).distinct()
+    val isRailway = selectedExam.contains("Railway", ignoreCase = true) || selectedExam.contains("RRB", ignoreCase = true)
+    val isSsc = selectedExam.contains("SSC", ignoreCase = true) || selectedExam.contains("CGL", ignoreCase = true)
+
+    val subjectOptions = when {
+        isRailway -> listOf("All Subjects", "Mathematics", "General Intelligence & Reasoning", "General Awareness")
+        isSsc -> listOf("All Subjects", "Quantitative Aptitude", "General Intelligence & Reasoning", "English Comprehension", "General Awareness")
+        selectedExam.contains("JEE", ignoreCase = true) -> listOf("All Subjects", "Physics", "Chemistry", "Mathematics")
+        selectedExam.contains("NEET", ignoreCase = true) -> listOf("All Subjects", "Physics", "Chemistry", "Biology")
+        selectedExam.contains("UPSC", ignoreCase = true) -> listOf("All Subjects", "General Studies Paper 1", "CSAT Paper 2")
+        else -> (listOf("All Subjects") + (userProfile?.subjects ?: listOf("Mathematics", "Physics", "General Studies"))).distinct()
+    }
 
     val topicSuggestions = when (selectedSubject) {
-        "Physics" -> listOf("All Topics", "Current Electricity", "Electrostatics", "Mechanics", "Optics", "Thermodynamics")
-        "Chemistry" -> listOf("All Topics", "Chemical Bonding", "Organic Reactions", "Electrochemistry", "Coordination Compounds")
-        "Mathematics" -> listOf("All Topics", "Calculus & Derivatives", "Linear Algebra", "Probability", "Vectors & 3D")
-        "Biology" -> listOf("All Topics", "Genetics & Evolution", "Human Physiology", "Cell Biology", "Ecology")
-        else -> listOf("All Topics", "Core Syllabus", "High Yield Concepts", "Past Exam Questions")
+        "Mathematics" -> listOf("All Topics", "Speed, Distance & Time", "Compound Interest", "Time & Work", "Averages & Percentages")
+        "General Intelligence & Reasoning" -> listOf("All Topics", "Analogies", "Coding-Decoding", "Syllogism", "Blood Relations")
+        "General Awareness" -> listOf("All Topics", "Railway GK & History", "Indian Polity & Governance", "General Science - Physics")
+        "Physics" -> listOf("All Topics", "Electrostatics", "Current Electricity", "Mechanics", "Optics")
+        "Chemistry" -> listOf("All Topics", "Coordination Compounds", "Chemical Bonding", "Organic Reactions")
+        "Biology" -> listOf("All Topics", "Cell Structure & Function", "Genetics & Evolution", "Human Physiology")
+        else -> listOf("All Topics", "High Yield Concepts", "Core Syllabus", "Past Exam Questions")
     }
 
     Dialog(
@@ -449,9 +463,11 @@ fun MockTestSetupDialog(
                         onClick = {
                             val config = MockTestConfig(
                                 exam = selectedExam,
+                                testType = selectedTestType,
                                 subject = selectedSubject,
                                 topic = selectedTopic,
                                 difficulty = selectedDifficulty,
+                                language = selectedLanguage,
                                 questionCount = questionCount,
                                 timeLimitMinutes = timeLimitMinutes,
                                 sourceFilter = selectedSourceFilter,

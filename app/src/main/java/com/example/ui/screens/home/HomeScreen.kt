@@ -9,7 +9,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -19,34 +18,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.data.model.DailyMission
-import com.example.data.model.StudyPlanItem
-import com.example.data.model.UserProfile
+import com.example.data.model.*
 import com.example.ui.components.*
 import com.example.ui.theme.*
-import java.util.Calendar
+import org.json.JSONArray
+import java.text.SimpleDateFormat
+import java.util.*
 
-import com.example.data.model.AiCoachRecommendation
-import com.example.data.model.FlashcardItem
-import com.example.data.model.GoalRadarStatus
-import com.example.data.model.NextBestAction
-import com.example.data.model.NextBestActionType
-import com.example.data.model.RevisionCategory
-import com.example.data.model.StudentMasterContext
-import com.example.data.model.StudyNowRecommendation
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     user: UserProfile?,
     studyPlan: List<StudyPlanItem>,
-    missions: List<DailyMission>,
+    missions: List<DailyMission> = emptyList(),
     flashcards: List<FlashcardItem> = emptyList(),
     studentMasterContext: StudentMasterContext? = null,
     aiCoachRecommendation: AiCoachRecommendation? = null,
@@ -57,34 +48,83 @@ fun HomeScreen(
     onLoadStudyNow: () -> Unit = {},
     onSelectTimeAvailable: (Int?) -> Unit = {},
     onPerformSmartSearch: (String) -> Unit = {},
-    onTogglePlanItem: (Long, Boolean) -> Unit,
+    onTogglePlanItem: (Long, Boolean) -> Unit = { _, _ -> },
     onStartFocusSession: (subject: String, topic: String) -> Unit,
     onNavigateToTab: (AppNavTab) -> Unit,
     onOpenProfileSettings: () -> Unit,
     onSignOut: () -> Unit = {},
-    onScanQuestion: () -> Unit,
+    onScanQuestion: () -> Unit = {},
     onOpenDocumentSummarizer: () -> Unit = {},
+    onUpdateUserProfile: (UserProfile) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-    val greetingTime = when (currentHour) {
-        in 5..11 -> "Good Morning"
-        in 12..16 -> "Good Afternoon"
-        in 17..21 -> "Good Evening"
-        else -> "Good Night"
-    }
-    val studentName = user?.name?.ifBlank { "Student" } ?: "Student"
+    val isDark = isAppInDarkTheme()
 
-    val totalFocusMins = user?.totalFocusMinutes ?: 0
-    val targetMins = user?.dailyTargetMinutes ?: 180
-    val progressFraction = (totalFocusMins.toFloat() / targetMins.toFloat()).coerceIn(0f, 1f)
+    // 1. Time-based Greeting
+    val currentHour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
+    val greetingTime = when (currentHour) {
+        in 5..11 -> "Good morning"
+        in 12..16 -> "Good afternoon"
+        in 17..21 -> "Good evening"
+        else -> "Good night"
+    }
+    val studentName = user?.name?.ifBlank { "Scholar" } ?: "Scholar"
+
+    // 2. Exam Context & Countdown (Strictly from UserProfile / Exam Context)
+    val selectedExamName = user?.examName?.ifBlank { user.examCategory } ?: ""
+    val hasExamSelected = selectedExamName.isNotBlank() && selectedExamName != "Not Selected"
 
     val examDaysRemaining = remember(user?.examDateMillis) {
-        val diff = (user?.examDateMillis ?: (System.currentTimeMillis() + 30L * 86400000)) - System.currentTimeMillis()
-        (diff / (1000 * 60 * 60 * 24)).coerceAtLeast(1).toInt()
+        val targetMillis = user?.examDateMillis ?: 0L
+        if (targetMillis > System.currentTimeMillis()) {
+            val diff = targetMillis - System.currentTimeMillis()
+            (diff / (1000L * 60 * 60 * 24)).coerceAtLeast(1).toInt()
+        } else {
+            0
+        }
     }
 
-    val isDark = isAppInDarkTheme()
+    val formattedExamDate = remember(user?.examDateMillis) {
+        val targetMillis = user?.examDateMillis ?: 0L
+        if (targetMillis > 0) {
+            SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(targetMillis))
+        } else {
+            ""
+        }
+    }
+
+    // 3. Real Study Progress Metrics
+    val totalFocusMins = user?.totalFocusMinutes ?: 0
+    val targetMins = if ((user?.dailyTargetMinutes ?: 0) > 0) user!!.dailyTargetMinutes else ((user?.availableStudyHours ?: 3f) * 60).toInt().coerceAtLeast(60)
+    val progressFraction = (totalFocusMins.toFloat() / targetMins.toFloat()).coerceIn(0f, 1f)
+
+    val completedTasksCount = studyPlan.count { it.isCompleted }
+    val totalTasksCount = studyPlan.size
+    val pendingTasks = studyPlan.filter { !it.isCompleted }
+    val nextBestTask = pendingTasks.firstOrNull()
+
+    // 4. Revision Due Count (Real data from flashcards)
+    val now = remember { System.currentTimeMillis() }
+    val dueRevisionCount = flashcards.count { it.nextReviewDate <= now || it.status == RevisionCategory.REVISE_NOW }
+
+    // 5. Scheduled Study Blocks
+    val scheduledBlocks = remember(user?.customStudyBlocksJson) {
+        parseCustomStudyBlocks(user?.customStudyBlocksJson)
+    }
+
+    // 6. Exam Switcher Dialog State
+    var showExamSwitcherDialog by remember { mutableStateOf(false) }
+
+    val examCatalogOptions = listOf(
+        "RRB NTPC (Railway Non-Technical)",
+        "RRB Group D (Railway Recruitment)",
+        "SSC CGL (Staff Selection Commission)",
+        "JEE Main & Advanced (Engineering)",
+        "NEET UG (Medical Entrance)",
+        "UPSC Civil Services (IAS / IPS)",
+        "IBPS / SBI Banking PO & Clerk",
+        "CBSE Class 12 Board Exam"
+    )
 
     LazyColumn(
         modifier = modifier
@@ -92,110 +132,170 @@ fun HomeScreen(
             .background(appBackgroundGradient(isDark))
             .padding(horizontal = 18.dp)
             .testTag("home_screen"),
-        contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Top Header with User Greeting & Quick Actions
+        // =========================================================================
+        // 1. CLEAN HEADER (Greeting, Exam Pill, Streak & Profile Avatar)
+        // =========================================================================
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    StudyMateBrandLogo(
-                        size = 42.dp,
-                        showTypography = false,
-                        animated = false
-                    )
-
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "$greetingTime, $studentName 👋",
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                             color = if (isDark) Color.White else Color(0xFF0F172A)
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "StudyMate AI • Learn • Focus",
+                            text = "StudyMate AI • Personal Learning Dashboard",
                             style = MaterialTheme.typography.labelSmall,
                             color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
                         )
                     }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        StreakBadge(streakDays = (user?.streakDays ?: 1).coerceAtLeast(1))
+
+                        // Profile Avatar
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(Color(0x3338BDF8))
+                                .border(1.5.dp, NeonCyan, CircleShape)
+                                .springClickable(testTag = "profile_avatar_button", onClick = onOpenProfileSettings),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (!user?.photoUrl.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = user?.photoUrl,
+                                    contentDescription = "Profile Avatar",
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Filled.Person,
+                                    contentDescription = "Profile",
+                                    tint = if (isDark) Color.White else Color(0xFF0F172A),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                    }
                 }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Exam Context Chip & Countdown Banner
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .springClickable(testTag = "exam_switcher_button") {
+                            showExamSwitcherDialog = true
+                        },
+                    color = if (isDark) Color(0x2238BDF8) else Color(0x150284C7),
+                    border = androidx.compose.foundation.BorderStroke(
+                        width = 1.dp,
+                        color = if (isDark) NeonCyan.copy(alpha = 0.4f) else Color(0x400284C7)
+                    ),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
-                    IconButton(
-                        onClick = onOpenProfileSettings,
+                    Row(
                         modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(if (isDark) Color(0x18FFFFFF) else Color(0x10000000))
-                            .testTag("home_notification_button")
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.NotificationsNone,
-                            contentDescription = "Notifications & Reminders",
-                            tint = if (isDark) NeonCyan else Color(0xFF0284C7),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
-                    ThemeToggleButton(testTag = "home_theme_toggle")
-                    StreakBadge(streakDays = user?.streakDays ?: 1)
-
-                    // Profile Avatar Trigger
-                    Box(
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clip(CircleShape)
-                            .background(Color(0x3338BDF8))
-                            .border(1.5.dp, NeonCyan, CircleShape)
-                            .springClickable(testTag = "profile_avatar_button", onClick = onOpenProfileSettings),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (!user?.photoUrl.isNullOrBlank()) {
-                            AsyncImage(
-                                model = user?.photoUrl,
-                                contentDescription = "Profile",
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Icon(
-                                imageVector = Icons.Filled.Person,
-                                contentDescription = "Profile",
-                                tint = if (isDark) Color.White else Color(0xFF0F172A),
-                                modifier = Modifier.size(24.dp)
+                                imageVector = Icons.Filled.School,
+                                contentDescription = null,
+                                tint = NeonCyan,
+                                modifier = Modifier.size(20.dp)
                             )
+
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = if (hasExamSelected) selectedExamName else "Set your exam",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isDark) Color.White else Color(0xFF0F172A),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Filled.ArrowDropDown,
+                                        contentDescription = "Change Exam",
+                                        tint = NeonCyan,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                if (hasExamSelected && formattedExamDate.isNotBlank()) {
+                                    Text(
+                                        text = "Target Date: $formattedExamDate",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                                    )
+                                }
+                            }
+                        }
+
+                        if (hasExamSelected && examDaysRemaining > 0) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = GoldenSpark.copy(alpha = 0.2f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, GoldenSpark.copy(alpha = 0.5f))
+                            ) {
+                                Text(
+                                    text = "⏳ $examDaysRemaining days left",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = GoldenSpark,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        } else if (!hasExamSelected) {
+                            Button(
+                                onClick = { showExamSwitcherDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("Select", color = Color(0xFF070B19), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
             }
         }
 
-        // 2. User Profile & Authentication Status Widget
-        item {
-            UserProfileWidget(
-                user = user,
-                onSignOut = onSignOut,
-                onOpenSettings = onOpenProfileSettings
-            )
-        }
-
-        // 2. Large Glass Card: Today's Progress
+        // =========================================================================
+        // 2. TODAY'S PROGRESS (Prominent Glass Card with Real Data Only)
+        // =========================================================================
         item {
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = 8.dp,
-                fillAlpha = 0.75f
+                fillAlpha = 0.75f,
+                testTag = "todays_progress_card"
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -219,1312 +319,742 @@ fun HomeScreen(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
                         val hours = totalFocusMins / 60
                         val mins = totalFocusMins % 60
                         val targetHours = targetMins / 60
                         val targetRemainingMins = targetMins % 60
 
-                        Text(
-                            text = "${hours}h ${mins}m / ${targetHours}h ${if (targetRemainingMins > 0) "${targetRemainingMins}m" else ""}",
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White
-                        )
+                        if (totalFocusMins > 0 || totalTasksCount > 0) {
+                            Text(
+                                text = "${hours}h ${mins}m / ${targetHours}h ${if (targetRemainingMins > 0) "${targetRemainingMins}m" else ""}",
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isDark) Color.White else Color(0xFF0F172A)
+                            )
 
-                        Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
 
-                        Text(
-                            text = if (progressFraction >= 1f) "🎯 Daily target reached! Outstanding work."
-                            else "${((1f - progressFraction) * targetMins).toInt()} mins left to hit daily goal",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF94A3B8)
-                        )
+                            Text(
+                                text = if (totalTasksCount > 0) {
+                                    "$completedTasksCount / $totalTasksCount tasks completed"
+                                } else {
+                                    if (progressFraction >= 1f) "🎯 Daily study target reached!"
+                                    else "${((1f - progressFraction) * targetMins).toInt()} mins left to hit daily goal"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
+                            )
+                        } else {
+                            // Friendly Empty State for New/Idle User
+                            Text(
+                                text = "Start your first study session today",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) Color.White else Color(0xFF0F172A)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Daily Target: ${targetHours}h ${if (targetRemainingMins > 0) "${targetRemainingMins}m" else ""} • 0m logged",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                            )
+                        }
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
                         XpBadge(xp = user?.xp ?: 0, level = user?.level ?: 1)
                     }
 
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(14.dp))
 
                     LiquidProgressRing(
                         progress = progressFraction,
                         currentText = "${(progressFraction * 100).toInt()}%",
                         targetText = "Goal",
-                        size = 105.dp,
-                        strokeWidth = 10.dp
+                        size = 94.dp,
+                        strokeWidth = 9.dp
                     )
                 }
             }
         }
 
-        // 2b. StudyMate Master Intelligence: Next Best Action Engine
-        studentMasterContext?.nextBestAction?.let { nextAction ->
-            item {
-                StudyMateNextBestActionCard(
-                    action = nextAction,
-                    selectedTime = null,
-                    onSelectTime = onSelectTimeAvailable,
-                    onStartSession = {
-                        when (nextAction.actionType) {
-                            NextBestActionType.SPACED_REVISION -> onNavigateToTab(AppNavTab.STUDY)
-                            NextBestActionType.MISTAKE_REMEDIATION -> onNavigateToTab(AppNavTab.PROGRESS)
-                            NextBestActionType.MOCK_TEST -> onNavigateToTab(AppNavTab.PROGRESS)
-                            NextBestActionType.QUICK_PRACTICE -> onNavigateToTab(AppNavTab.AI_TUTOR)
-                            else -> onStartFocusSession(nextAction.subject, nextAction.topic)
-                        }
-                    },
-                    onOpenNovaChat = { onNavigateToTab(AppNavTab.AI_TUTOR) }
-                )
-            }
-        }
-
-        // 2c. Goal Radar & Exam Pace Status
-        studentMasterContext?.goalRadar?.let { radar ->
-            item {
-                GoalRadarCard(
-                    radar = radar,
-                    targetExam = studentMasterContext.userProfile.examName
-                )
-            }
-        }
-
-        // 2d. AI Study Coach Card
+        // =========================================================================
+        // 3. PRIMARY ACTION (Single, Unambiguous CTA)
+        // =========================================================================
         item {
-            var showWhyDialog by remember { mutableStateOf(false) }
-            var isCoachDismissed by remember { mutableStateOf(false) }
-
-            LaunchedEffect(Unit) {
-                if (aiCoachRecommendation == null && !isAiCoachLoading) {
-                    val defaultSub = user?.subjects?.firstOrNull() ?: "Physics"
-                    onLoadAiCoach(defaultSub)
-                }
+            val primaryActionText = when {
+                nextBestTask != null -> "▶ Continue Study • ${nextBestTask.subject}"
+                totalTasksCount > 0 && completedTasksCount < totalTasksCount -> "Start Today's Plan"
+                totalTasksCount > 0 && completedTasksCount == totalTasksCount -> "✨ Review & Revise Completed Tasks"
+                else -> "Create Study Plan 📚"
             }
 
-            if (!isCoachDismissed) {
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    fillAlpha = 0.8f
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(CircleShape)
-                                        .background(Brush.linearGradient(listOf(GoldenSpark, ElectricViolet))),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Psychology,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    text = "✨ AI Study Coach",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                            }
-
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (isAiCoachLoading) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        color = NeonCyan,
-                                        strokeWidth = 2.dp
-                                    )
-                                } else {
-                                    IconButton(
-                                        onClick = { isCoachDismissed = true },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(Icons.Filled.Close, "Dismiss", tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        val recMessage = aiCoachRecommendation?.message ?: "Your Physics accuracy improved this week. Today, revise Current Electricity for 25 minutes and then attempt 10 questions. 🚀"
-                        val recSubject = aiCoachRecommendation?.subject ?: "Physics"
-                        val recTopic = aiCoachRecommendation?.topic ?: "Current Electricity"
-
-                        Text(
-                            text = recMessage,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFFF1F5F9),
-                            fontWeight = FontWeight.Medium
-                        )
-
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Button(
-                                onClick = { onStartFocusSession(recSubject, recTopic) },
-                                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.weight(1.2f).height(38.dp)
-                            ) {
-                                Text("Start Now", color = Color(0xFF070B19), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            }
-
-                            OutlinedButton(
-                                onClick = { showWhyDialog = true },
-                                shape = RoundedCornerShape(12.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x5038BDF8)),
-                                modifier = Modifier.weight(1f).height(38.dp)
-                            ) {
-                                Text("Why this?", color = NeonCyan, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                            }
-
-                            TextButton(
-                                onClick = { isCoachDismissed = true },
-                                modifier = Modifier.height(38.dp)
-                            ) {
-                                Text("Later", color = Color(0xFF94A3B8), fontSize = 12.sp)
-                            }
-                        }
+            GlassButton(
+                text = primaryActionText,
+                onClick = {
+                    if (nextBestTask != null) {
+                        onStartFocusSession(nextBestTask.subject, nextBestTask.topic)
+                    } else {
+                        onNavigateToTab(AppNavTab.STUDY)
                     }
-                }
-
-                if (showWhyDialog) {
-                    AlertDialog(
-                        onDismissRequest = { showWhyDialog = false },
-                        containerColor = Color(0xFF131C2E),
-                        shape = RoundedCornerShape(20.dp),
-                        title = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.Lightbulb, null, tint = GoldenSpark, modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Why this recommendation?", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                            }
-                        },
-                        text = {
-                            Text(
-                                text = aiCoachRecommendation?.whyThisExplanation ?: "Gemini analyzed your recent test performance, pending study plan tasks, and time since last revision. Focusing on this topic now optimizes your memory retention curve and addresses your weakest accuracy area before your upcoming exam.",
-                                color = Color(0xFFCBD5E1),
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        },
-                        confirmButton = {
-                            Button(
-                                onClick = {
-                                    showWhyDialog = false
-                                    onStartFocusSession(
-                                        aiCoachRecommendation?.subject ?: "Physics",
-                                        aiCoachRecommendation?.topic ?: "Current Electricity"
-                                    )
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
-                            ) {
-                                Text("Got it, Start Focus!", color = Color(0xFF070B19), fontWeight = FontWeight.Bold)
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { showWhyDialog = false }) {
-                                Text("Close", color = Color(0xFF94A3B8))
-                            }
-                        }
-                    )
-                }
-            }
+                },
+                icon = if (nextBestTask != null) Icons.Filled.PlayArrow else Icons.Filled.Addchart,
+                isPrimary = true,
+                testTag = "primary_continue_study_button"
+            )
         }
 
-        // 2c. "What Should I Study Now?" Smart Action Card
+        // =========================================================================
+        // 4. NEXT BEST TASK (Compact, Real-Data-Only Card)
+        // =========================================================================
         item {
-            LaunchedEffect(Unit) {
-                if (studyNowRecommendation == null && !isStudyNowLoading) {
-                    onLoadStudyNow()
-                }
-            }
-
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                fillAlpha = 0.75f
+                elevation = 6.dp,
+                fillAlpha = 0.7f,
+                testTag = "next_best_task_card"
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0x33F43F5E)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.AdsClick,
-                                    contentDescription = null,
-                                    tint = CoralRose,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
+                            Icon(
+                                imageVector = Icons.Filled.Bolt,
+                                contentDescription = null,
+                                tint = GoldenSpark,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "What should I study now? 🎯",
-                                style = MaterialTheme.typography.titleMedium,
+                                text = "NEXT BEST TASK",
+                                style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = GoldenSpark
                             )
                         }
 
-                        if (isStudyNowLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                color = CoralRose,
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            IconButton(
-                                onClick = onLoadStudyNow,
-                                modifier = Modifier.size(28.dp)
+                        if (nextBestTask != null) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = CoralRose.copy(alpha = 0.2f),
+                                border = androidx.compose.foundation.BorderStroke(0.5.dp, CoralRose.copy(alpha = 0.5f))
                             ) {
-                                Icon(Icons.Filled.Refresh, "Refresh", tint = CoralRose, modifier = Modifier.size(18.dp))
+                                Text(
+                                    text = nextBestTask.priority.name,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = CoralRose,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
                             }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    val recSubject = studyNowRecommendation?.subject ?: "Physics"
-                    val recTopic = studyNowRecommendation?.topic ?: "Current Electricity"
-                    val recMins = studyNowRecommendation?.targetMinutes ?: 30
-                    val recReason = studyNowRecommendation?.reasoning ?: "Evaluated current time, exam countdown & revision due."
-
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0x25F43F5E),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x40F43F5E))
-                    ) {
+                    if (nextBestTask != null) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(Icons.Filled.TaskAlt, null, tint = CoralRose, modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Study $recSubject → $recTopic → $recMins min",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = Color.White
+                                    text = nextBestTask.subject,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDark) Color.White else Color(0xFF0F172A)
                                 )
+                                Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = recReason,
+                                    text = nextBestTask.topic,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "${nextBestTask.targetMinutes} min focused session",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFFCBD5E1)
+                                    color = NeonCyan
                                 )
                             }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Button(
+                                onClick = { onStartFocusSession(nextBestTask.subject, nextBestTask.topic) },
+                                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                modifier = Modifier.testTag("start_next_task_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color(0xFF070B19),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Start", color = Color(0xFF070B19), fontWeight = FontWeight.Bold)
+                            }
                         }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Button(
-                            onClick = { onStartFocusSession(recSubject, recTopic) },
-                            colors = ButtonDefaults.buttonColors(containerColor = CoralRose),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1f).height(40.dp)
+                    } else {
+                        // Empty state for Next Best Task
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Start Focus", color = Color.White, fontWeight = FontWeight.Bold)
-                        }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (totalTasksCount > 0) "All tasks completed for today! 🎉" else "No study tasks scheduled yet",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isDark) Color.White else Color(0xFF0F172A)
+                                )
+                                Text(
+                                    text = if (totalTasksCount > 0) "Great progress! Take a break or do a flashcard revision." else "Set up your study plan to get personalized daily topics.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                                )
+                            }
 
-                        OutlinedButton(
-                            onClick = onLoadStudyNow,
-                            shape = RoundedCornerShape(12.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x35FFFFFF)),
-                            modifier = Modifier.weight(1f).height(40.dp)
-                        ) {
-                            Text("Choose Something Else", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 12.sp)
+                            OutlinedButton(
+                                onClick = { onNavigateToTab(AppNavTab.STUDY) },
+                                shape = RoundedCornerShape(10.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f))
+                            ) {
+                                Text("Planner", color = NeonCyan, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
             }
         }
 
-        // 2d. Smart Revision Radar Card
+        // =========================================================================
+        // 5. NOVA CARD (Compact AI Study Assistant Recommendation)
+        // =========================================================================
         item {
+            val novaMessage = remember(user, nextBestTask, completedTasksCount, totalTasksCount, totalFocusMins) {
+                generateContextualNovaMessage(
+                    user = user,
+                    nextTask = nextBestTask,
+                    pendingTasksCount = pendingTasks.size,
+                    completedTasksCount = completedTasksCount,
+                    todayFocusMins = totalFocusMins
+                )
+            }
+
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                fillAlpha = 0.7f
+                elevation = 6.dp,
+                fillAlpha = 0.75f,
+                testTag = "home_nova_card"
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Radar, null, tint = GoldenSpark, modifier = Modifier.size(20.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(Brush.linearGradient(listOf(NeonCyan, ElectricIndigo))),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Revision Radar 🔄",
-                                style = MaterialTheme.typography.titleMedium,
+                                text = "Nova AI",
+                                style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = NeonCyan
                             )
                         }
 
-                        TextButton(onClick = { onNavigateToTab(AppNavTab.STUDY) }) {
-                            Text("Flashcards", color = NeonCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        TextButton(
+                            onClick = { onNavigateToTab(AppNavTab.AI_TUTOR) },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("Ask Nova →", color = NeonCyan, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                         }
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    val now = remember { System.currentTimeMillis() }
-                    val reviseNowCount = if (flashcards.isNotEmpty()) {
-                        flashcards.count { it.status == RevisionCategory.REVISE_NOW || it.nextReviewDate <= now }
-                    } else {
-                        user?.weakSubjects?.size ?: 0
-                    }
+                    Text(
+                        text = "\"$novaMessage\"",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (isDark) Color(0xFFF1F5F9) else Color(0xFF1E293B),
+                        fontWeight = FontWeight.Medium
+                    )
 
-                    val practiceSoonCount = if (flashcards.isNotEmpty()) {
-                        flashcards.count { it.status == RevisionCategory.PRACTICE_SOON && it.nextReviewDate > now }
-                    } else {
-                        user?.subjects?.size?.minus(user?.weakSubjects?.size ?: 0)?.coerceAtLeast(0) ?: 0
-                    }
-
-                    val strongCount = if (flashcards.isNotEmpty()) {
-                        flashcards.count { it.status == RevisionCategory.STRONG }
-                    } else {
-                        user?.strongSubjects?.size ?: 0
-                    }
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        RevisionRadarBadge(
-                            label = "🔴 Revise Now",
-                            count = "$reviseNowCount Cards",
-                            color = CoralRose,
-                            modifier = Modifier.weight(1f)
-                        )
-                        RevisionRadarBadge(
-                            label = "🟡 Practice Soon",
-                            count = "$practiceSoonCount Cards",
-                            color = GoldenSpark,
-                            modifier = Modifier.weight(1f)
-                        )
-                        RevisionRadarBadge(
-                            label = "🟢 Strong",
-                            count = "$strongCount Cards",
-                            color = EmeraldSuccess,
-                            modifier = Modifier.weight(1f)
-                        )
+                        Button(
+                            onClick = { onNavigateToTab(AppNavTab.AI_TUTOR) },
+                            colors = ButtonDefaults.buttonColors(containerColor = ElectricIndigo),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f).height(38.dp)
+                        ) {
+                            Icon(Icons.Filled.ChatBubbleOutline, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Chat with Nova", color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        }
+
+                        if (nextBestTask != null) {
+                            OutlinedButton(
+                                onClick = { onStartFocusSession(nextBestTask.subject, nextBestTask.topic) },
+                                shape = RoundedCornerShape(10.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.4f)),
+                                modifier = Modifier.weight(1f).height(38.dp)
+                            ) {
+                                Text("Start Session", color = NeonCyan, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
                     }
                 }
             }
         }
-        item {
-            val topSubject = studyPlan.firstOrNull { !it.isCompleted }?.subject ?: "Physics"
-            val topTopic = studyPlan.firstOrNull { !it.isCompleted }?.topic ?: "Core Concepts"
 
-            GlassButton(
-                text = "▶ Start Focus Session ($topSubject)",
-                onClick = { onStartFocusSession(topSubject, topTopic) },
-                icon = Icons.Filled.PlayArrow,
-                isPrimary = true,
-                testTag = "start_focus_session_cta"
-            )
-        }
-
-        // 4. Quick Actions Grid
+        // =========================================================================
+        // 6. QUICK PROGRESS SUMMARY (Minimal 3-Column Scannable Metric Row)
+        // =========================================================================
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                QuickActionItem(
-                    title = "Ask Gemini",
-                    icon = Icons.Filled.AutoAwesome,
+                // Metric 1: Study Time
+                val studyHours = totalFocusMins / 60
+                val studyMins = totalFocusMins % 60
+                QuickProgressPill(
+                    title = "Study",
+                    value = "${studyHours}h ${studyMins}m",
+                    subtitle = "Logged today",
+                    icon = Icons.Filled.Timer,
                     color = NeonCyan,
-                    modifier = Modifier.weight(1f),
-                    testTag = "qa_ask_gemini",
-                    onClick = { onNavigateToTab(AppNavTab.AI_TUTOR) }
+                    modifier = Modifier.weight(1f)
                 )
-                QuickActionItem(
-                    title = "Take Test",
-                    icon = Icons.Filled.Quiz,
-                    color = ElectricViolet,
-                    modifier = Modifier.weight(1f),
-                    testTag = "qa_take_test",
-                    onClick = { onNavigateToTab(AppNavTab.PROGRESS) }
+
+                // Metric 2: Tasks / Completion Rate
+                val taskRate = if (totalTasksCount > 0) "${(completedTasksCount * 100) / totalTasksCount}%" else "0%"
+                QuickProgressPill(
+                    title = "Tasks",
+                    value = if (totalTasksCount > 0) "$completedTasksCount/$totalTasksCount" else "0",
+                    subtitle = if (totalTasksCount > 0) "$taskRate done" else "No tasks",
+                    icon = Icons.Filled.CheckCircleOutline,
+                    color = EmeraldSuccess,
+                    modifier = Modifier.weight(1f)
                 )
-                QuickActionItem(
-                    title = "Scan Question",
-                    icon = Icons.Filled.CameraAlt,
-                    color = NebulaPurple,
-                    modifier = Modifier.weight(1f),
-                    testTag = "qa_scan_question",
-                    onClick = onScanQuestion
-                )
-                QuickActionItem(
-                    title = "Revise",
+
+                // Metric 3: Revision Due
+                QuickProgressPill(
+                    title = "Revision",
+                    value = "$dueRevisionCount due",
+                    subtitle = if (dueRevisionCount > 0) "Cards ready" else "All caught up",
                     icon = Icons.Filled.Psychology,
-                    color = GoldenSpark,
+                    color = if (dueRevisionCount > 0) CoralRose else GoldenSpark,
                     modifier = Modifier.weight(1f),
-                    testTag = "qa_revise",
                     onClick = { onNavigateToTab(AppNavTab.STUDY) }
                 )
             }
         }
 
-        // Document Summarizer Feature Banner Card
+        // =========================================================================
+        // 7. UPCOMING / TODAY'S SCHEDULE (Compact Schedule View)
+        // =========================================================================
         item {
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = onOpenDocumentSummarizer,
-                testTag = "home_doc_summarizer_card",
-                shape = RoundedCornerShape(18.dp),
-                fillAlpha = 0.65f
+                elevation = 4.dp,
+                fillAlpha = 0.65f,
+                testTag = "home_schedule_card"
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Brush.linearGradient(listOf(DeepIndigo, NeonCyan))),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Description,
-                            contentDescription = "Document Summarizer",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(14.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Document Summarizer & Qs",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(NeonCyan.copy(alpha = 0.2f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text("AI", color = NeonCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Parse PDF / notes to generate concise bullet summaries & exam study questions",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF94A3B8),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.Filled.ChevronRight,
-                        contentDescription = null,
-                        tint = NeonCyan,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-        }
-
-        // Voice Notes & Lecture Transcriber Feature Banner Card
-        item {
-            GlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = { onNavigateToTab(AppNavTab.AI_TUTOR) },
-                testTag = "home_voice_notes_card",
-                shape = RoundedCornerShape(18.dp),
-                fillAlpha = 0.65f
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Brush.linearGradient(listOf(NeonCyan, DeepIndigo))),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Mic,
-                            contentDescription = "Voice Notes",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(14.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Voice Notes & Transcripts",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(EmeraldGreen.copy(alpha = 0.2f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text("AUDIO AI", color = EmeraldGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Record lectures & quick reminders. AI transcribes and extracts study action items.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF94A3B8),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.Filled.ChevronRight,
-                        contentDescription = null,
-                        tint = NeonCyan,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-        }
-
-        // 5. Exam Countdown Banner
-        item {
-            GlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                fillAlpha = 0.5f
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0x33F43F5E)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Filled.CalendarMonth, null, tint = CoralRose, modifier = Modifier.size(22.dp))
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = user?.examName?.ifBlank { "Major Exam" } ?: "Major Exam",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "Exam Countdown: $examDaysRemaining days remaining",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = CoralRose
-                            )
-                        }
-                    }
-
-                    TextButton(
-                        onClick = { onNavigateToTab(AppNavTab.STUDY) },
-                        modifier = Modifier.testTag("view_roadmap_button")
-                    ) {
-                        Text("Roadmap", color = NeonCyan, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            }
-        }
-
-        // 6. Today's Plan Section Header
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Today's Plan",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-
-                Text(
-                    text = "${studyPlan.count { it.isCompleted }} / ${studyPlan.size} Done",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color(0xFF94A3B8)
-                )
-            }
-        }
-
-        // 7. Today's Plan Items
-        if (studyPlan.isEmpty()) {
-            item {
-                GlassCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    fillAlpha = 0.5f
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(Icons.AutoMirrored.Outlined.MenuBook, null, tint = NeonCyan, modifier = Modifier.size(32.dp))
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "No study tasks for today.",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        TextButton(onClick = { onNavigateToTab(AppNavTab.STUDY) }) {
-                            Text("Generate AI Plan with Gemini ✨", color = NeonCyan)
-                        }
-                    }
-                }
-            }
-        } else {
-            items(studyPlan, key = { it.id }) { item ->
-                PlanItemGlassCard(
-                    item = item,
-                    onToggleComplete = { onTogglePlanItem(item.id, !item.isCompleted) },
-                    onStartFocus = { onStartFocusSession(item.subject, item.topic) }
-                )
-            }
-        }
-
-        // 8. Daily Missions Section
-        item {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = "Daily Missions 🎯",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-        }
-
-        items(missions, key = { it.id }) { mission ->
-            GlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                fillAlpha = 0.5f
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = if (mission.isCompleted) Icons.Filled.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
-                            contentDescription = null,
-                            tint = if (mission.isCompleted) EmeraldSuccess else Color(0xFF94A3B8),
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = mission.title,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color.White,
-                                fontWeight = FontWeight.Medium
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Filled.CalendarToday,
+                                contentDescription = null,
+                                tint = NeonCyan,
+                                modifier = Modifier.size(16.dp)
                             )
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "${mission.current}/${mission.target} ${mission.unit} • +${mission.xpReward} XP",
+                                text = "TODAY'S SCHEDULE",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = GoldenSpark
+                                fontWeight = FontWeight.Bold,
+                                color = NeonCyan
                             )
+                        }
+
+                        TextButton(
+                            onClick = { onNavigateToTab(AppNavTab.STUDY) },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text("Full Timetable", color = NeonCyan, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (scheduledBlocks.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            scheduledBlocks.take(3).forEach { block ->
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isDark) Color(0x14FFFFFF) else Color(0x08000000),
+                                    border = androidx.compose.foundation.BorderStroke(0.5.dp, if (isDark) Color(0x18FFFFFF) else Color(0x10000000))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                text = block.startTime,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = GoldenSpark
+                                            )
+                                            Text(
+                                                text = "•",
+                                                color = Color(0xFF64748B)
+                                            )
+                                            Text(
+                                                text = block.subject,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = if (isDark) Color.White else Color(0xFF0F172A)
+                                            )
+                                        }
+
+                                        Text(
+                                            text = "${block.durationMinutes} min",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = NeonCyan
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else if (studyPlan.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            studyPlan.take(3).forEach { planItem ->
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (planItem.isCompleted) Color(0x1010B981) else if (isDark) Color(0x14FFFFFF) else Color(0x08000000),
+                                    border = androidx.compose.foundation.BorderStroke(0.5.dp, if (planItem.isCompleted) EmeraldSuccess.copy(alpha = 0.4f) else Color(0x18FFFFFF))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (planItem.isCompleted) Icons.Filled.CheckCircle else Icons.Outlined.Circle,
+                                                contentDescription = null,
+                                                tint = if (planItem.isCompleted) EmeraldSuccess else Color(0xFF94A3B8),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Text(
+                                                text = "${planItem.subject} — ${planItem.topic}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (planItem.isCompleted) Color(0xFF94A3B8) else if (isDark) Color.White else Color(0xFF0F172A),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        Text(
+                                            text = "${planItem.targetMinutes}m",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = NeonCyan
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Empty State
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Nothing scheduled yet.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                            )
+
+                            Button(
+                                onClick = { onNavigateToTab(AppNavTab.STUDY) },
+                                colors = ButtonDefaults.buttonColors(containerColor = ElectricIndigo),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text("Plan Study", color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
             }
         }
     }
-}
 
-@Composable
-fun PlanItemGlassCard(
-    item: StudyPlanItem,
-    onToggleComplete: () -> Unit,
-    onStartFocus: () -> Unit
-) {
-    val subjectIcon = when {
-        item.subject.contains("Math", ignoreCase = true) -> "📐"
-        item.subject.contains("Phys", ignoreCase = true) -> "⚡"
-        item.subject.contains("Chem", ignoreCase = true) -> "🧪"
-        item.subject.contains("Bio", ignoreCase = true) -> "🧬"
-        item.subject.contains("Comp", ignoreCase = true) -> "💻"
-        else -> "📚"
-    }
-
-    GlassCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        fillAlpha = if (item.isCompleted) 0.35f else 0.7f
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = subjectIcon,
-                    fontSize = 24.sp,
-                    modifier = Modifier.padding(end = 12.dp)
-                )
-
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = item.subject,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = if (item.isCompleted) Color(0xFF94A3B8) else Color.White
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "• ${item.targetMinutes} min",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = NeonCyan
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(2.dp))
-
-                    Text(
-                        text = "${item.chapter} — ${item.topic}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (item.isCompleted) Color(0xFF64748B) else Color(0xFFCBD5E1),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (!item.isCompleted) {
-                    IconButton(
-                        onClick = onStartFocus,
-                        modifier = Modifier.testTag("plan_focus_btn_${item.id}")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.PlayCircle,
-                            contentDescription = "Focus",
-                            tint = NeonCyan,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                }
-
-                Checkbox(
-                    checked = item.isCompleted,
-                    onCheckedChange = { onToggleComplete() },
-                    colors = CheckboxDefaults.colors(
-                        checkedColor = EmeraldSuccess,
-                        checkmarkColor = Color(0xFF070B19)
-                    ),
-                    modifier = Modifier.testTag("plan_checkbox_${item.id}")
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun QuickActionItem(
-    title: String,
-    icon: ImageVector,
-    color: Color,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    testTag: String
-) {
-    Box(
-        modifier = modifier
-            .glassEffect(shape = RoundedCornerShape(16.dp), fillAlpha = 0.6f)
-            .springClickable(testTag = testTag, onClick = onClick)
-            .padding(vertical = 12.dp, horizontal = 6.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(color.copy(alpha = 0.2f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = title,
-                    tint = color,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                maxLines = 1
-            )
-        }
-    }
-}
-
-@Composable
-fun RevisionRadarBadge(
-    label: String,
-    count: String,
-    color: Color,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
-        color = color.copy(alpha = 0.15f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.35f))
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp, horizontal = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = color,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = count,
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-    }
-}
-
-@Composable
-fun StudyMateNextBestActionCard(
-    action: NextBestAction,
-    selectedTime: Int?,
-    onSelectTime: (Int?) -> Unit,
-    onStartSession: () -> Unit,
-    onOpenNovaChat: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var showWhyDialog by remember { mutableStateOf(false) }
-
-    GlassCard(
-        modifier = modifier.fillMaxWidth(),
-        fillAlpha = 0.85f,
-        elevation = 8.dp
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(Brush.linearGradient(listOf(NeonCyan, ElectricIndigo))),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.AutoAwesome,
-                            contentDescription = null,
-                            tint = Color.Black,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "⚡ NEXT BEST ACTION",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = NeonCyan,
-                            letterSpacing = 1.sp
-                        )
-                        Text(
-                            text = "AI-calculated highest leverage task right now",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF94A3B8)
-                        )
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0x3338BDF8))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = action.urgencyTag,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = NeonCyan
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Time Selector Pills
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                val timeOptions = listOf(null to "All", 15 to "15m", 25 to "25m", 45 to "45m", 60 to "60m")
-                timeOptions.forEach { (mins, label) ->
-                    val isSelected = selectedTime == mins
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (isSelected) NeonCyan.copy(alpha = 0.25f) else Color(0x15FFFFFF))
-                            .border(
-                                width = 1.dp,
-                                color = if (isSelected) NeonCyan else Color(0x22FFFFFF),
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                            .springClickable(
-                                testTag = "time_filter_$label",
-                                onClick = { onSelectTime(mins) }
-                            )
-                            .padding(vertical = 6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = label,
-                            fontSize = 11.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSelected) NeonCyan else Color(0xFFCBD5E1)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Text(
-                text = action.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(Color(0x22000000))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = "${action.subject} • ${action.topic}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = ElectricIndigo,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Text(
-                    text = "⏱️ ${action.durationMinutes} mins",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFF94A3B8)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Text(
-                text = action.reason,
-                style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFFCBD5E1),
-                lineHeight = 18.sp
-            )
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = onStartSession,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = NeonCyan,
-                        contentColor = Color.Black
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .weight(1.3f)
-                        .height(42.dp)
-                        .testTag("start_next_best_action_btn")
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.PlayArrow,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Start Now (${action.durationMinutes}m)",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = { showWhyDialog = true },
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x4438BDF8)),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .weight(0.7f)
-                        .height(42.dp)
-                        .testTag("why_this_action_btn")
-                ) {
-                    Text(
-                        text = "Why this?",
-                        color = NeonCyan,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-        }
-    }
-
-    if (showWhyDialog) {
+    // =========================================================================
+    // EXAM SWITCHER MODAL DIALOG
+    // =========================================================================
+    if (showExamSwitcherDialog) {
         AlertDialog(
-            onDismissRequest = { showWhyDialog = false },
+            onDismissRequest = { showExamSwitcherDialog = false },
+            containerColor = if (isDark) Color(0xFF131C2E) else Color.White,
+            shape = RoundedCornerShape(20.dp),
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Psychology, contentDescription = null, tint = NeonCyan)
+                    Icon(Icons.Filled.School, null, tint = NeonCyan, modifier = Modifier.size(22.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("NOVA Intelligence Rationale", fontWeight = FontWeight.Bold, color = Color.White)
+                    Text(
+                        text = "Change Target Exam",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDark) Color.White else Color(0xFF0F172A)
+                    )
                 }
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     Text(
-                        text = action.reason,
-                        color = Color(0xFFE2E8F0),
-                        style = MaterialTheme.typography.bodyMedium
+                        text = "Select your current target exam. Your study topics, mock tests, and AI context will switch accordingly.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "📈 Expected Impact: ${action.whyThisHelpful}",
-                        color = NeonCyan,
-                        fontWeight = FontWeight.SemiBold,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        text = "🧠 Learning Science: Prioritizes active recall and weakness remediation based on your forgetting curve analysis.",
-                        color = Color(0xFF94A3B8),
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    examCatalogOptions.forEach { examOption ->
+                        val isSelected = selectedExamName.contains(examOption.take(10), ignoreCase = true)
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .springClickable {
+                                    if (user != null) {
+                                        val updated = user.copy(
+                                            examName = examOption,
+                                            examCategory = examOption,
+                                            goal = examOption
+                                        )
+                                        onUpdateUserProfile(updated)
+                                    }
+                                    showExamSwitcherDialog = false
+                                },
+                            color = if (isSelected) NeonCyan.copy(alpha = 0.2f) else if (isDark) Color(0x14FFFFFF) else Color(0x08000000),
+                            border = androidx.compose.foundation.BorderStroke(
+                                width = if (isSelected) 1.5.dp else 0.5.dp,
+                                color = if (isSelected) NeonCyan else Color(0x20FFFFFF)
+                            ),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = examOption,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) NeonCyan else if (isDark) Color.White else Color(0xFF0F172A)
+                                )
+                                if (isSelected) {
+                                    Icon(Icons.Filled.CheckCircle, null, tint = NeonCyan, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = { showWhyDialog = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black)
-                ) {
-                    Text("Got it")
+                TextButton(onClick = { showExamSwitcherDialog = false }) {
+                    Text("Close", color = NeonCyan, fontWeight = FontWeight.Bold)
                 }
-            },
-            containerColor = Color(0xFF131C2E)
+            }
         )
     }
 }
 
+// =========================================================================
+// HELPER COMPOSABLE: QUICK PROGRESS PILL
+// =========================================================================
 @Composable
-fun GoalRadarCard(
-    radar: GoalRadarStatus,
-    targetExam: String,
-    modifier: Modifier = Modifier
+private fun QuickProgressPill(
+    title: String,
+    value: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    color: Color,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
-    val paceColor = when {
-        radar.studyPaceStatus.contains("Ahead", ignoreCase = true) -> Color(0xFF4ADE80)
-        radar.studyPaceStatus.contains("Behind", ignoreCase = true) -> Color(0xFFF87171)
-        else -> NeonCyan
+    val isDark = isAppInDarkTheme()
+    var surfaceModifier = modifier.clip(RoundedCornerShape(14.dp))
+    if (onClick != null) {
+        surfaceModifier = surfaceModifier.springClickable(onClick = onClick)
     }
 
-    GlassCard(
-        modifier = modifier.fillMaxWidth(),
-        fillAlpha = 0.8f
+    Surface(
+        modifier = surfaceModifier,
+        shape = RoundedCornerShape(14.dp),
+        color = if (isDark) Color(0x18FFFFFF) else Color(0x0A000000),
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, color.copy(alpha = 0.4f))
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Filled.Radar,
-                        contentDescription = null,
-                        tint = paceColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "GOAL RADAR: ${targetExam.uppercase()}",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(paceColor.copy(alpha = 0.2f))
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                ) {
-                    Text(
-                        text = radar.studyPaceStatus.uppercase(),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = paceColor
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text("Days Left", style = MaterialTheme.typography.labelSmall, color = Color(0xFF94A3B8))
-                    Text("${radar.daysRemaining} days", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
-                }
-
-                Column {
-                    Text("Syllabus Done", style = MaterialTheme.typography.labelSmall, color = Color(0xFF94A3B8))
-                    Text("${radar.syllabusCoveredPercent}%", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = NeonCyan)
-                }
-
-                Column {
-                    Text("Study Velocity", style = MaterialTheme.typography.labelSmall, color = Color(0xFF94A3B8))
-                    Text("${radar.weeklyHoursCompleted} hrs/wk", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0x22000000))
-                    .padding(8.dp)
-            ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = color,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "💡 ${radar.calmAdvice}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFE2E8F0)
+                    text = title,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = color,
+                    fontWeight = FontWeight.Bold
                 )
             }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.ExtraBold,
+                color = if (isDark) Color.White else Color(0xFF0F172A)
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
 
+// =========================================================================
+// HELPER: CONTEXTUAL NOVA MESSAGE GENERATOR
+// =========================================================================
+private fun generateContextualNovaMessage(
+    user: UserProfile?,
+    nextTask: StudyPlanItem?,
+    pendingTasksCount: Int,
+    completedTasksCount: Int,
+    todayFocusMins: Int
+): String {
+    val lang = user?.languagePreference ?: "English"
+    val isHindi = lang.equals("Hindi", ignoreCase = true) || lang.equals("Hinglish", ignoreCase = true)
+    val exam = user?.examName?.ifBlank { "Exam" } ?: "Exam"
+    val student = user?.name?.ifBlank { "Scholar" } ?: "Scholar"
+
+    if (nextTask != null) {
+        return if (isHindi) {
+            "Boss, aaj ${nextTask.subject} me '${nextTask.topic}' ka ${nextTask.targetMinutes}-minute session pending hai. Chalo ise complete kar lete hain!"
+        } else {
+            "Hey $student! You have a ${nextTask.targetMinutes}-minute session for ${nextTask.subject} (${nextTask.topic}) pending. Let's conquer it!"
+        }
+    }
+
+    if (completedTasksCount > 0 && pendingTasksCount == 0) {
+        return if (isHindi) {
+            "Shabash! Aaj ke saare planned tasks complete ho chuke hain. Chahe toh ek quick 10-minute quiz revise kar lo!"
+        } else {
+            "Great job! You've completed all scheduled tasks for today. Feel free to do a quick revision or ask me anything!"
+        }
+    }
+
+    if (todayFocusMins > 0) {
+        val h = todayFocusMins / 60
+        val m = todayFocusMins % 60
+        return if (isHindi) {
+            "Aaj aapne ${if (h > 0) "${h}h " else ""}${m}m study complete ki hai $exam ke liye. Consistency hi success ki key hai!"
+        } else {
+            "You've logged ${if (h > 0) "${h}h " else ""}${m}m of focused study today for $exam. Keep this great momentum going!"
+        }
+    }
+
+    return if (isHindi) {
+        "Namaste! $exam ki taiyari ke liye aaj ka study session shuru karte hain. Jo bhi doubt ho, bina jhijhak puchho."
+    } else {
+        "Welcome back! Ready to accelerate your $exam preparation today? Ask me any doubts or start your first session."
+    }
+}
+
+// =========================================================================
+// HELPER: PARSE STUDY TIME BLOCKS JSON
+// =========================================================================
+private fun parseCustomStudyBlocks(json: String?): List<StudyTimeBlock> {
+    if (json.isNullOrBlank()) return emptyList()
+    return try {
+        val arr = JSONArray(json)
+        val list = mutableListOf<StudyTimeBlock>()
+        for (i in 0 until arr.length()) {
+            val obj = arr.getJSONObject(i)
+            list.add(
+                StudyTimeBlock(
+                    id = obj.optString("id", UUID.randomUUID().toString()),
+                    startTime = obj.optString("startTime", "06:00 PM"),
+                    subject = obj.optString("subject", "General"),
+                    durationMinutes = obj.optInt("durationMinutes", 45),
+                    topic = obj.optString("topic", "Core Practice")
+                )
+            )
+        }
+        list
+    } catch (e: Exception) {
+        emptyList()
+    }
+}

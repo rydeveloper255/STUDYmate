@@ -32,10 +32,15 @@ data class UserProfile(
     // Step 4 - Study Schedule, Times & Breaks
     val dailyTargetMinutes: Int = 180, // 3 hours
     val availableStudyHours: Float = 4.0f,
+    val subjectTimeAllocationJson: String = "{}",
     val preferredStudyStartTime: String = "06:00 PM",
     val preferredStudyEndTime: String = "10:00 PM",
     val preferredStudyDays: List<String> = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat"),
     val breakDurationMinutes: Int = 15,
+    val preferredSessionDurationMinutes: Int = 25,
+    val customStudyBlocksJson: String = "[]",
+    val mockTestLanguage: String = "English",
+    val defaultMockTestQuestionCount: Int = 25,
     val preferredStudyTime: String = "Evening",
     val morningNightPreference: String = "Balanced",
     val revisionFrequency: String = "Spaced Repetition",
@@ -57,6 +62,14 @@ data class UserProfile(
     val totalFocusMinutes: Int = 135,
     val totalQuestionsSolved: Int = 48,
     val createdAt: Long = System.currentTimeMillis()
+)
+
+data class StudyTimeBlock(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val startTime: String = "06:30 AM",
+    val subject: String = "Mathematics",
+    val durationMinutes: Int = 60,
+    val topic: String = ""
 )
 
 @Entity(tableName = "study_plan_items")
@@ -104,13 +117,24 @@ enum class QuestionSourceFilter {
     PRACTICE_ONLY
 }
 
+enum class MockTestType(val displayName: String, val description: String, val iconName: String) {
+    FULL_MOCK("Full Mock Test", "Comprehensive multi-subject test following official exam pattern", "Assignment"),
+    SUBJECT_TEST("Subject Test", "Deep dive into a specific subject of the selected exam", "MenuBook"),
+    TOPIC_TEST("Topic Test", "Focused mastery on a specific chapter and topic", "Topic"),
+    QUICK_PRACTICE("Quick Practice", "Rapid 10-15 speed questions with instant insights", "Bolt")
+}
+
 data class MockTestConfig(
-    val exam: String = "JEE Main & Advanced",
-    val subject: String = "Physics",
+    val examId: String = "railway_rrb_ntpc",
+    val exam: String = "RRB NTPC (Railway)",
+    val testType: MockTestType = MockTestType.FULL_MOCK,
+    val subject: String = "All Subjects",
+    val chapter: String = "All Chapters",
     val topic: String = "All Topics",
     val difficulty: String = "Medium",
-    val questionCount: Int = 10,
-    val timeLimitMinutes: Int = 15,
+    val language: String = "English",
+    val questionCount: Int = 25,
+    val timeLimitMinutes: Int = 30,
     val sourceFilter: QuestionSourceFilter = QuestionSourceFilter.BALANCED_MIX,
     val customMaterialId: Long? = null
 )
@@ -484,7 +508,19 @@ enum class NovaActionType {
     OPEN_DOCUMENT_SUMMARIZER,
     RECOVER_MISSED_SESSION,
     SHOW_DAILY_BRIEF,
-    SHOW_DAILY_REVIEW
+    SHOW_DAILY_REVIEW,
+    // Step 6 Required Nova Actions
+    CREATE_STUDY_TASK,
+    UPDATE_STUDY_TASK,
+    ADD_REVISION_ITEM,
+    START_STUDY_SESSION,
+    OPEN_MOCK_TEST,
+    OPEN_SUBJECT,
+    OPEN_TOPIC,
+    OPEN_STUDY_PLAN,
+    OPEN_FOCUS_MODE,
+    SHOW_PROGRESS,
+    SHOW_TEST_RESULT
 }
 
 data class NovaChatMessage(
@@ -548,9 +584,14 @@ data class NovaStudyContext(
     val studentName: String = "Scholar",
     val preferredTitle: String = "Boss",
     val targetExam: String = "JEE / NEET / Board Exam",
+    val selectedSubject: String = "All Subjects",
+    val selectedTopic: String = "All Topics",
+    val targetScore: String = "Top 500 AIR",
+    val studyGoal: String = "Excellence in Target Exam",
     val examDaysRemaining: Int = 30,
     val examDateMillis: Long = System.currentTimeMillis() + 30L * 24 * 3600 * 1000,
     val subjects: List<String> = listOf("Physics", "Mathematics", "Chemistry"),
+    val subjectPriorities: List<String> = listOf("Physics", "Mathematics"),
     val weakTopics: List<String> = listOf("Rotational Dynamics", "Organic Reactions"),
     val strongTopics: List<String> = emptyList(),
     val dailyTargetMinutes: Int = 180,
@@ -559,9 +600,12 @@ data class NovaStudyContext(
     val weeklyConsistencyPercent: Int = 85,
     val pendingPlanCount: Int = 2,
     val completedPlanCount: Int = 1,
+    val todayTasks: List<String> = emptyList(),
     val pendingTasksSummary: List<String> = emptyList(),
     val revisionsDueCount: Int = 0,
     val revisionsDueTopics: List<String> = emptyList(),
+    val recentStudySessionsSummary: List<String> = emptyList(),
+    val recentTestResultsSummary: List<String> = emptyList(),
     val recentMockAccuracyPercent: Float = 0f,
     val recentMockScoreSummary: String? = null,
     val missedSessionsCount: Int = 0,

@@ -230,6 +230,11 @@ class StudyRepository(
         id
     }
 
+    suspend fun updateStudyPlanItem(item: StudyPlanItem) = withContext(Dispatchers.IO) {
+        database.studyPlanDao().insertPlanItem(item)
+        syncService?.syncStudyPlanItem(item)
+    }
+
     suspend fun replaceStudyPlan(items: List<StudyPlanItem>) = withContext(Dispatchers.IO) {
         database.studyPlanDao().clearAllPlanItems()
         database.studyPlanDao().insertPlanItems(items)

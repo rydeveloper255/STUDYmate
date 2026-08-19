@@ -1,6 +1,7 @@
 package com.example.ui.screens.planner
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -38,8 +39,11 @@ fun StudyPlannerScreen(
     onGenerateAiPlan: () -> Unit,
     onTogglePlanItem: (Long, Boolean) -> Unit,
     onAddPlanItem: (subject: String, chapter: String, topic: String, minutes: Int, priority: PlanPriority) -> Unit,
+    onUpdatePlanItem: (StudyPlanItem) -> Unit = {},
     onDeletePlanItem: (Long) -> Unit,
     onStartFocusSession: (subject: String, topic: String) -> Unit,
+    onRecoverMissedSessions: (mode: String) -> Unit = {},
+    onUpdateDailyAvailableTime: (Int) -> Unit = {},
     onAddFlashcard: (subject: String, topic: String, front: String, back: String, hint: String, difficulty: String, sourceDoc: String) -> Unit = { _, _, _, _, _, _, _ -> },
     onUpdateFlashcard: (FlashcardItem) -> Unit = {},
     onDeleteFlashcard: (Long) -> Unit = {},
@@ -56,12 +60,22 @@ fun StudyPlannerScreen(
     val isDark = isAppInDarkTheme()
     var selectedSection by remember { mutableIntStateOf(0) } // 0: Study Plan, 1: Digital Flashcards, 2: Exam Roadmap
     var showAddDialog by remember { mutableStateOf(false) }
+    var editingPlanItem by remember { mutableStateOf<StudyPlanItem?>(null) }
+    var previewingPlanItems by remember { mutableStateOf<List<StudyPlanItem>?>(null) }
+    var selectedTodayMinutes by remember { mutableIntStateOf(user?.dailyTargetMinutes ?: 180) }
 
-    var newSubject by remember { mutableStateOf("Physics") }
+    var newSubject by remember { mutableStateOf(user?.subjects?.firstOrNull() ?: "Physics") }
     var newChapter by remember { mutableStateOf("") }
     var newTopic by remember { mutableStateOf("") }
     var newMinutes by remember { mutableIntStateOf(45) }
     var newPriority by remember { mutableStateOf(PlanPriority.HIGH) }
+
+    val totalPendingMinutes = remember(planItems) {
+        planItems.filter { !it.isCompleted }.sumOf { it.targetMinutes }
+    }
+    val missedCount = remember(planItems) {
+        planItems.count { !it.isCompleted && it.priority == PlanPriority.HIGH }
+    }
 
     if (selectedSection == 1) {
         Column(
@@ -214,6 +228,161 @@ fun StudyPlannerScreen(
         when (selectedSection) {
             0 -> {
                 // --- SECTION 0: STUDY PLAN TIMETABLE ---
+
+                // Daily Availability Check-In
+                item {
+                    GlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        fillAlpha = 0.75f,
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.AccessTime, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Today's Study Availability",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                                Text(
+                                    text = "${selectedTodayMinutes / 60}h ${selectedTodayMinutes % 60}m limit",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeonCyan
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf(30 to "30m", 60 to "1h", 120 to "2h", 180 to "3h", 240 to "4h").forEach { (mins, label) ->
+                                    val isSel = selectedTodayMinutes == mins
+                                    FilterChip(
+                                        selected = isSel,
+                                        onClick = {
+                                            selectedTodayMinutes = mins
+                                            onUpdateDailyAvailableTime(mins)
+                                        },
+                                        label = { Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = NeonCyan,
+                                            selectedLabelColor = Color(0xFF070B19),
+                                            containerColor = Color(0x301E293B),
+                                            labelColor = Color.White
+                                        ),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Plan Transparency Warning if work > available time
+                if (totalPendingMinutes > selectedTodayMinutes) {
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = CoralRose.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, CoralRose.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Info, contentDescription = null, tint = CoralRose, modifier = Modifier.size(24.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Schedule Transparency Notice",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = CoralRose
+                                    )
+                                    Text(
+                                        text = "Your pending tasks (${totalPendingMinutes}m) exceed today's target (${selectedTodayMinutes}m). Nova will spread remaining sessions smoothly across upcoming days without overloading tomorrow.",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFFE2E8F0)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Missed Session Recovery Bar
+                if (missedCount > 0) {
+                    item {
+                        GlassCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            fillAlpha = 0.85f,
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.ScheduleSend, contentDescription = null, tint = GoldenSpark, modifier = Modifier.size(20.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Missed / Overdue Session Recovery",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                    }
+                                    Text(
+                                        text = "$missedCount High Priority",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = GoldenSpark,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        onClick = { onRecoverMissedSessions("LATER_TODAY") },
+                                        colors = ButtonDefaults.buttonColors(containerColor = GoldenSpark, contentColor = Color(0xFF070B19)),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.weight(1f),
+                                        contentPadding = PaddingValues(vertical = 6.dp)
+                                    ) {
+                                        Text("Move Later Today", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Button(
+                                        onClick = { onRecoverMissedSessions("SPREAD_WEEK") },
+                                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color(0xFF070B19)),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.weight(1f),
+                                        contentPadding = PaddingValues(vertical = 6.dp)
+                                    ) {
+                                        Text("Spread Across Week", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 item {
                     GlassButton(
                         text = "⚡ Regenerate AI Plan with Gemini",
@@ -317,6 +486,13 @@ fun StudyPlannerScreen(
                                             modifier = Modifier.size(32.dp)
                                         ) {
                                             Icon(Icons.Filled.PlayCircle, "Focus", tint = NeonCyan)
+                                        }
+
+                                        IconButton(
+                                            onClick = { editingPlanItem = item },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(Icons.Outlined.Edit, "Edit", tint = Color(0xFFCBD5E1), modifier = Modifier.size(18.dp))
                                         }
 
                                         Checkbox(
@@ -463,6 +639,123 @@ fun StudyPlannerScreen(
                 }
             }
         }
+    }
+
+    // Edit Plan Item Dialog
+    editingPlanItem?.let { itemToEdit ->
+        var editSubject by remember { mutableStateOf(itemToEdit.subject) }
+        var editChapter by remember { mutableStateOf(itemToEdit.chapter) }
+        var editTopic by remember { mutableStateOf(itemToEdit.topic) }
+        var editMinutes by remember { mutableIntStateOf(itemToEdit.targetMinutes) }
+        var editNotes by remember { mutableStateOf(itemToEdit.notes) }
+
+        AlertDialog(
+            onDismissRequest = { editingPlanItem = null },
+            containerColor = Color(0xFF131C2E),
+            shape = RoundedCornerShape(24.dp),
+            title = {
+                Text("Edit Study Session", color = Color.White, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedTextField(
+                        value = editSubject,
+                        onValueChange = { editSubject = it },
+                        label = { Text("Subject") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = NeonCyan
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    OutlinedTextField(
+                        value = editChapter,
+                        onValueChange = { editChapter = it },
+                        label = { Text("Chapter") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = NeonCyan
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    OutlinedTextField(
+                        value = editTopic,
+                        onValueChange = { editTopic = it },
+                        label = { Text("Topic") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = NeonCyan
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Duration: ${editMinutes} min", color = Color.White, fontSize = 14.sp)
+                        Row {
+                            IconButton(onClick = { if (editMinutes > 15) editMinutes -= 15 }) {
+                                Icon(Icons.Default.RemoveCircleOutline, null, tint = NeonCyan)
+                            }
+                            IconButton(onClick = { editMinutes += 15 }) {
+                                Icon(Icons.Default.AddCircleOutline, null, tint = NeonCyan)
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = editNotes,
+                        onValueChange = { editNotes = it },
+                        label = { Text("Notes / Strategy") },
+                        singleLine = false,
+                        maxLines = 2,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = NeonCyan
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onUpdatePlanItem(
+                            itemToEdit.copy(
+                                subject = editSubject,
+                                chapter = editChapter,
+                                topic = editTopic,
+                                targetMinutes = editMinutes,
+                                notes = editNotes
+                            )
+                        )
+                        editingPlanItem = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color(0xFF070B19))
+                ) {
+                    Text("Save Changes", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingPlanItem = null }) {
+                    Text("Cancel", color = Color(0xFF94A3B8))
+                }
+            }
+        )
     }
 
     // Add Custom Plan Item Dialog

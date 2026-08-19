@@ -385,25 +385,114 @@ private fun ActionTriggerButton(
     payload: String?,
     onClick: () -> Unit
 ) {
+    var isConfirmed by remember { mutableStateOf(false) }
+    var isCancelled by remember { mutableStateOf(false) }
+
+    if (isCancelled) {
+        Text(
+            text = "Action cancelled",
+            fontSize = 11.sp,
+            color = TextSecondary,
+            modifier = Modifier.padding(vertical = 4.dp)
+        )
+        return
+    }
+
+    if (isConfirmed) {
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = EmeraldGreen.copy(alpha = 0.2f),
+            border = BorderStroke(1.dp, EmeraldGreen.copy(alpha = 0.5f)),
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Check, contentDescription = null, tint = EmeraldGreen, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Action Completed", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
+            }
+        }
+        return
+    }
+
     val (label, icon, color) = when (actionType) {
-        NovaActionType.START_FOCUS -> Triple("Start Focus Session", Icons.Default.PlayArrow, NeonCyan)
+        NovaActionType.START_FOCUS, NovaActionType.START_STUDY_SESSION -> Triple("Start Focus Session", Icons.Default.PlayArrow, NeonCyan)
         NovaActionType.START_QUIZ -> Triple("Start Interactive Quiz", Icons.Default.Psychology, AmberGold)
-        NovaActionType.CREATE_PLAN -> Triple("Generate Study Plan", Icons.Default.CalendarMonth, EmeraldGreen)
+        NovaActionType.CREATE_PLAN, NovaActionType.CREATE_STUDY_TASK -> Triple("Add to Today's Study Plan", Icons.Default.CalendarMonth, EmeraldGreen)
+        NovaActionType.UPDATE_STUDY_TASK -> Triple("Update Study Plan", Icons.Default.Edit, NeonCyan)
+        NovaActionType.ADD_REVISION_ITEM -> Triple("Add Revision Card", Icons.Default.Style, AmberGold)
         NovaActionType.CREATE_REMINDER -> Triple("Save Study Reminder", Icons.Default.Alarm, CoralPink)
+        NovaActionType.OPEN_MOCK_TEST -> Triple("Open Exam Mock Test", Icons.Default.Quiz, NeonCyan)
+        NovaActionType.OPEN_SUBJECT -> Triple("View Selected Subject", Icons.Default.Book, ElectricIndigo)
+        NovaActionType.OPEN_TOPIC -> Triple("View Selected Topic", Icons.Default.Topic, NeonCyan)
+        NovaActionType.OPEN_STUDY_PLAN -> Triple("Open Study Planner", Icons.Default.CalendarToday, EmeraldGreen)
+        NovaActionType.OPEN_FOCUS_MODE -> Triple("Open Focus Timer", Icons.Default.Timer, NeonCyan)
+        NovaActionType.SHOW_PROGRESS -> Triple("View Progress Analytics", Icons.Default.BarChart, AmberGold)
+        NovaActionType.SHOW_TEST_RESULT -> Triple("View Test Results", Icons.Default.Analytics, NeonCyan)
         NovaActionType.OPEN_APP_BLOCKING -> Triple("Open Focus Shield", Icons.Default.Shield, NeonCyan)
         NovaActionType.OPEN_MEMORY -> Triple("View NOVA Memory", Icons.Default.Memory, ElectricIndigo)
         NovaActionType.RECOVER_MISSED_SESSION -> Triple("Start 20m Recovery", Icons.Default.Refresh, CoralPink)
-        else -> Triple("Open Action", Icons.Default.Check, NeonCyan)
+        else -> Triple("Perform Action", Icons.Default.Check, NeonCyan)
     }
 
-    Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(containerColor = color),
+    val isModifyingAction = when (actionType) {
+        NovaActionType.CREATE_STUDY_TASK, NovaActionType.UPDATE_STUDY_TASK,
+        NovaActionType.CREATE_PLAN, NovaActionType.CREATE_REMINDER,
+        NovaActionType.ADD_REVISION_ITEM -> true
+        else -> false
+    }
+
+    Surface(
         shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth()
+        color = DarkSurfaceElevated,
+        border = BorderStroke(1.dp, color.copy(alpha = 0.4f)),
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
     ) {
-        Icon(icon, contentDescription = null, tint = DarkCanvas, modifier = Modifier.size(16.dp))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = DarkCanvas)
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (isModifyingAction) "Nova Recommendation: $label" else label,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (isModifyingAction) {
+                    TextButton(
+                        onClick = { isCancelled = true },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Text("Cancel", fontSize = 12.sp, color = TextSecondary)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Button(
+                    onClick = {
+                        isConfirmed = true
+                        onClick()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = color),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = if (isModifyingAction) "Confirm / Add" else "Open",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = DarkCanvas
+                    )
+                }
+            }
+        }
     }
 }

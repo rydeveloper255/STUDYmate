@@ -40,6 +40,9 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
     lateinit var studyRepository: StudyRepository
         private set
 
+    lateinit var examCatalogRepository: com.example.data.repository.ExamCatalogRepository
+        private set
+
     private var imageLoaderInstance: ImageLoader? = null
 
     override fun newImageLoader(): ImageLoader {
@@ -100,6 +103,7 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
         authRepository = AuthRepository(this, database.userDao(), supabaseAuthManager, supabaseClient, supabaseSyncService)
         geminiRepository = GeminiRepository()
         studyRepository = StudyRepository(database, supabaseSyncService)
+        examCatalogRepository = com.example.data.repository.ExamCatalogRepository(database.examCatalogDao())
 
         // Initialize Focus Shield & Offline Notification System
         com.example.service.FocusShieldManager.init(this)
@@ -107,6 +111,7 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
         com.example.notification.StudyNotificationManager.scheduleAllReminders(this)
 
         CoroutineScope(Dispatchers.IO).launch {
+            examCatalogRepository.seedDefaultCatalogIfEmpty()
             studyRepository.populateInitialDataIfEmpty()
         }
     }

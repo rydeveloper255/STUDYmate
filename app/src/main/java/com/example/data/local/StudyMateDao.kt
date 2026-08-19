@@ -423,5 +423,69 @@ interface IntelligenceSnapshotDao {
     suspend fun clearAll()
 }
 
+@Dao
+interface ExamCatalogDao {
+    @Query("SELECT * FROM exams ORDER BY isPopular DESC, name ASC")
+    fun getAllExams(): Flow<List<ExamEntity>>
+
+    @Query("SELECT * FROM exams WHERE category = :category ORDER BY name ASC")
+    fun getExamsByCategory(category: String): Flow<List<ExamEntity>>
+
+    @Query("SELECT * FROM exams WHERE id = :examId LIMIT 1")
+    suspend fun getExamById(examId: String): ExamEntity?
+
+    @Query("SELECT * FROM exams WHERE id = :examId LIMIT 1")
+    fun getExamByIdFlow(examId: String): Flow<ExamEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertExams(exams: List<ExamEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertExam(exam: ExamEntity)
+
+    // Subjects
+    @Query("SELECT * FROM exam_subjects WHERE examId = :examId ORDER BY isOfficial DESC, name ASC")
+    fun getSubjectsForExam(examId: String): Flow<List<ExamSubjectEntity>>
+
+    @Query("SELECT * FROM exam_subjects WHERE examId = :examId ORDER BY isOfficial DESC, name ASC")
+    suspend fun getSubjectsForExamOnce(examId: String): List<ExamSubjectEntity>
+
+    @Query("SELECT * FROM exam_subjects WHERE id = :subjectId LIMIT 1")
+    suspend fun getSubjectById(subjectId: String): ExamSubjectEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSubjects(subjects: List<ExamSubjectEntity>)
+
+    // Chapters
+    @Query("SELECT * FROM chapters WHERE subjectId = :subjectId ORDER BY orderIndex ASC")
+    fun getChaptersForSubject(subjectId: String): Flow<List<ChapterEntity>>
+
+    @Query("SELECT * FROM chapters WHERE examId = :examId ORDER BY orderIndex ASC")
+    fun getChaptersForExam(examId: String): Flow<List<ChapterEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertChapters(chapters: List<ChapterEntity>)
+
+    // Topics
+    @Query("SELECT * FROM topics WHERE chapterId = :chapterId ORDER BY orderIndex ASC")
+    fun getTopicsForChapter(chapterId: String): Flow<List<TopicEntity>>
+
+    @Query("SELECT * FROM topics WHERE subjectId = :subjectId ORDER BY orderIndex ASC")
+    fun getTopicsForSubject(subjectId: String): Flow<List<TopicEntity>>
+
+    @Query("SELECT * FROM topics WHERE examId = :examId ORDER BY isHighYield DESC, orderIndex ASC")
+    fun getTopicsForExam(examId: String): Flow<List<TopicEntity>>
+
+    @Query("SELECT * FROM topics WHERE examId = :examId AND isHighYield = 1")
+    fun getHighYieldTopicsForExam(examId: String): Flow<List<TopicEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTopics(topics: List<TopicEntity>)
+
+    @Query("SELECT COUNT(*) FROM exams")
+    suspend fun getExamsCount(): Int
+}
+
+
 
 

@@ -25,9 +25,13 @@ import com.example.data.model.*
         ExamObjective::class,
         TopicMastery::class,
         StudentSessionHistory::class,
-        IntelligenceSnapshot::class
+        IntelligenceSnapshot::class,
+        ExamEntity::class,
+        ExamSubjectEntity::class,
+        ChapterEntity::class,
+        TopicEntity::class
     ],
-    version = 5,
+    version = 7,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -49,6 +53,7 @@ abstract class StudyMateDatabase : RoomDatabase() {
     abstract fun topicMasteryDao(): TopicMasteryDao
     abstract fun studentSessionHistoryDao(): StudentSessionHistoryDao
     abstract fun intelligenceSnapshotDao(): IntelligenceSnapshotDao
+    abstract fun examCatalogDao(): ExamCatalogDao
 
     companion object {
         @Volatile
