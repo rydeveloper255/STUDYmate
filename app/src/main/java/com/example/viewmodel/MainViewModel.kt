@@ -12,6 +12,7 @@ import com.example.data.model.*
 import com.example.data.remote.AuthRepository
 import com.example.data.remote.GeminiRepository
 import com.example.data.repository.StudyRepository
+import com.example.service.intelligence.StudyMateIntelligenceEngine
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -185,6 +186,92 @@ class MainViewModel(
     val isStudyKitGenerating: StateFlow<Boolean> = _isStudyKitGenerating.asStateFlow()
     private val _studyKitMessage = MutableStateFlow<String?>(null)
     val studyKitMessage: StateFlow<String?> = _studyKitMessage.asStateFlow()
+
+    private val _snackbarMessage = MutableSharedFlow<String>()
+    val snackbarMessage: SharedFlow<String> = _snackbarMessage.asSharedFlow()
+
+    // --- Master Intelligence Engine State ---
+    val allFocusSessions: StateFlow<List<FocusSession>> = studyRepository.allFocusSessions
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allSmartNotes: StateFlow<List<SmartNoteItem>> = studyRepository.allSmartNotes
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val bookmarkedSmartNotes: StateFlow<List<SmartNoteItem>> = studyRepository.bookmarkedSmartNotes
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allCurrentAffairs: StateFlow<List<CurrentAffairsItem>> = studyRepository.allCurrentAffairs
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val savedCurrentAffairs: StateFlow<List<CurrentAffairsItem>> = studyRepository.savedCurrentAffairs
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allExamUpdates: StateFlow<List<ExamUpdateItem>> = studyRepository.allExamUpdates
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // --- Room-based Intelligence Engine State Flows ---
+    val allExamObjectives: StateFlow<List<ExamObjective>> = studyRepository.allExamObjectives
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val activeExamObjective: StateFlow<ExamObjective?> = studyRepository.activeExamObjective
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val allTopicMasteries: StateFlow<List<TopicMastery>> = studyRepository.allTopicMasteries
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val weakTopicMasteries: StateFlow<List<TopicMastery>> = studyRepository.weakTopicMasteries
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val studentSessionHistory: StateFlow<List<StudentSessionHistory>> = studyRepository.studentSessionHistory
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val latestIntelligenceSnapshot: StateFlow<IntelligenceSnapshot?> = studyRepository.latestIntelligenceSnapshot
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    private val _selectedAvailableTimeMinutes = MutableStateFlow<Int?>(null)
+    val selectedAvailableTimeMinutes: StateFlow<Int?> = _selectedAvailableTimeMinutes.asStateFlow()
+
+    // --- Smart Search State ---
+    private val _smartSearchResult = MutableStateFlow<SmartSearchResult?>(null)
+    val smartSearchResult: StateFlow<SmartSearchResult?> = _smartSearchResult.asStateFlow()
+
+    private val _isSmartSearching = MutableStateFlow(false)
+    val isSmartSearching: StateFlow<Boolean> = _isSmartSearching.asStateFlow()
+
+    private val _smartSearchError = MutableStateFlow<String?>(null)
+    val smartSearchError: StateFlow<String?> = _smartSearchError.asStateFlow()
+
+    val studentMasterContext: StateFlow<StudentMasterContext?> = combine(
+        userProfile,
+        studyPlanItems,
+        studyRepository.allFocusSessions,
+        mockTestAttempts,
+        mistakes,
+        flashcards,
+        _selectedAvailableTimeMinutes
+    ) { args: Array<Any?> ->
+        val user = args[0] as? UserProfile
+        val plans = (args[1] as? List<*>)?.filterIsInstance<StudyPlanItem>() ?: emptyList()
+        val focus = (args[2] as? List<*>)?.filterIsInstance<FocusSession>() ?: emptyList()
+        val mockAttempts = (args[3] as? List<*>)?.filterIsInstance<MockTestAttempt>() ?: emptyList()
+        val mistakeList = (args[4] as? List<*>)?.filterIsInstance<MistakeItem>() ?: emptyList()
+        val cards = (args[5] as? List<*>)?.filterIsInstance<FlashcardItem>() ?: emptyList()
+        val timeAvailable = args[6] as? Int
+
+        if (user != null) {
+            StudyMateIntelligenceEngine.buildMasterContext(
+                profile = user,
+                plans = plans,
+                focusSessions = focus,
+                mockAttempts = mockAttempts,
+                mistakes = mistakeList,
+                flashcards = cards,
+                availableTimeMinutes = timeAvailable
+            )
+        } else {
+            null
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     // --- Theme & Settings ---
     private val _isDarkTheme = MutableStateFlow(true)
@@ -1589,6 +1676,219 @@ class MainViewModel(
                 _studyKitMessage.value = "Error: ${e.localizedMessage}"
             }
             _isStudyKitGenerating.value = false
+        }
+    }
+
+    // =========================================================================
+    // MASTER INTELLIGENCE & SMART SEARCH METHODS
+    // =========================================================================
+
+    fun setSelectedAvailableTime(minutes: Int?) {
+        _selectedAvailableTimeMinutes.value = minutes
+    }
+
+    fun performSmartSearch(
+        query: String,
+        examName: String? = null,
+        subject: String = "General"
+    ) {
+        if (query.isBlank()) return
+        viewModelScope.launch {
+            _isSmartSearching.value = true
+            _smartSearchError.value = null
+            val exam = examName ?: userProfile.value?.examName ?: "Competitive Exam"
+            val result = geminiRepository.performSmartSearch(query.trim(), exam, subject)
+            result.onSuccess {
+                _smartSearchResult.value = it
+            }
+            result.onFailure {
+                _smartSearchError.value = "Search analysis error: ${it.localizedMessage}"
+            }
+            _isSmartSearching.value = false
+        }
+    }
+
+    fun clearSmartSearch() {
+        _smartSearchResult.value = null
+        _smartSearchError.value = null
+    }
+
+    fun saveSearchResultAsSmartNote(
+        result: SmartSearchResult,
+        subject: String = "General",
+        topic: String? = null
+    ) {
+        viewModelScope.launch {
+            val note = SmartNoteItem(
+                title = result.query.replaceFirstChar { it.uppercase() },
+                subject = subject,
+                topic = topic ?: result.query.take(30),
+                contentMarkdown = result.studentFriendlyAnswer,
+                keyPoints = result.keyPoints,
+                formulas = result.formulasAndDefinitions,
+                importantFacts = result.keyPoints.take(2),
+                sourceTitle = result.sources.firstOrNull()?.title ?: "Smart Search",
+                sourceUrl = result.sources.firstOrNull()?.url ?: "",
+                isBookmarked = true,
+                createdAt = System.currentTimeMillis()
+            )
+            studyRepository.saveSmartNote(note)
+        }
+    }
+
+    fun saveSearchResultAsFlashcards(result: SmartSearchResult, subject: String = "General") {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val cards = result.generatedPracticeQuestions.mapIndexed { idx, q ->
+                FlashcardItem(
+                    subject = subject,
+                    topic = result.query.take(30),
+                    front = q.questionText,
+                    back = "Answer: ${q.options.getOrElse(q.correctOptionIndex) { "" }}\n\nExplanation: ${q.explanation}",
+                    hint = q.options.firstOrNull() ?: "",
+                    difficulty = "Medium",
+                    status = RevisionCategory.REVISE_NOW,
+                    confidence = 2,
+                    intervalDays = 1,
+                    easeFactor = 2.5f,
+                    repetitions = 0,
+                    nextReviewDate = now,
+                    sourceDocTitle = "Smart Search: ${result.query}",
+                    createdAt = now
+                )
+            }
+            if (cards.isNotEmpty()) {
+                studyRepository.insertFlashcardList(cards)
+            }
+        }
+    }
+
+    fun saveSearchResultAsPlanTask(result: SmartSearchResult, subject: String = "General", durationMinutes: Int = 30) {
+        viewModelScope.launch {
+            val plan = StudyPlanItem(
+                subject = subject,
+                chapter = "Smart Search",
+                topic = result.query,
+                targetMinutes = durationMinutes,
+                isCompleted = false,
+                priority = PlanPriority.HIGH,
+                notes = "Generated from Smart Search: ${result.query}"
+            )
+            studyRepository.addStudyPlanItem(plan)
+        }
+    }
+
+    fun saveSmartNote(note: SmartNoteItem) {
+        viewModelScope.launch {
+            studyRepository.saveSmartNote(note)
+        }
+    }
+
+    fun toggleSmartNoteBookmark(id: Long, isBookmarked: Boolean) {
+        viewModelScope.launch {
+            studyRepository.toggleSmartNoteBookmark(id, isBookmarked)
+        }
+    }
+
+    fun toggleSmartNoteRevised(id: Long, isRevised: Boolean) {
+        viewModelScope.launch {
+            studyRepository.toggleSmartNoteRevised(id, isRevised)
+        }
+    }
+
+    fun deleteSmartNote(id: Long) {
+        viewModelScope.launch {
+            studyRepository.deleteSmartNote(id)
+        }
+    }
+
+    fun toggleCurrentAffairsSaved(id: Long, isSaved: Boolean) {
+        viewModelScope.launch {
+            studyRepository.toggleCurrentAffairsSaved(id, isSaved)
+        }
+    }
+
+    fun markExamUpdateRead(id: Long) {
+        viewModelScope.launch {
+            studyRepository.markExamUpdateRead(id)
+        }
+    }
+
+    // --- Intelligence Engine Actions ---
+
+    fun saveExamObjective(objective: ExamObjective) {
+        viewModelScope.launch {
+            studyRepository.saveExamObjective(objective)
+            _snackbarMessage.emit("🎯 Exam Objective Updated!")
+        }
+    }
+
+    fun updateExamObjective(objective: ExamObjective) {
+        viewModelScope.launch {
+            studyRepository.updateExamObjective(objective)
+        }
+    }
+
+    fun setActiveExamObjective(id: Long) {
+        viewModelScope.launch {
+            studyRepository.setActiveExamObjective(id)
+            _snackbarMessage.emit("🎯 Active Exam Objective Set")
+        }
+    }
+
+    fun recordTopicMasteryPerformance(
+        subject: String,
+        topic: String,
+        questionsAttempted: Int,
+        correctCount: Int,
+        difficulty: String = "Medium",
+        weakSpots: List<String> = emptyList()
+    ) {
+        viewModelScope.launch {
+            val updated = studyRepository.recordTopicPerformance(
+                subject = subject,
+                topic = topic,
+                questionsAttempted = questionsAttempted,
+                correctCount = correctCount,
+                difficulty = difficulty,
+                weakSpots = weakSpots
+            )
+            // If topic is mastered or developing, generate a fresh snapshot
+            studyRepository.generateIntelligenceSnapshot()
+        }
+    }
+
+    fun recordStudentSessionHistory(
+        sessionType: String,
+        subject: String,
+        topic: String,
+        durationMinutes: Int,
+        actualMinutesSpent: Int,
+        xpEarned: Int,
+        accuracyPercent: Float? = null,
+        questionsAttempted: Int = 0,
+        productivityRating: Int = 4,
+        notesSummary: String = ""
+    ) {
+        viewModelScope.launch {
+            studyRepository.recordStudentSessionHistory(
+                sessionType = sessionType,
+                subject = subject,
+                topic = topic,
+                durationMinutes = durationMinutes,
+                actualMinutesSpent = actualMinutesSpent,
+                xpEarned = xpEarned,
+                accuracyPercent = accuracyPercent,
+                questionsAttempted = questionsAttempted,
+                productivityRating = productivityRating,
+                notesSummary = notesSummary
+            )
+        }
+    }
+
+    fun refreshIntelligenceSnapshot() {
+        viewModelScope.launch {
+            studyRepository.generateIntelligenceSnapshot()
         }
     }
 

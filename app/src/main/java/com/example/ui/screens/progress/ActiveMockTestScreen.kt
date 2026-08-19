@@ -487,6 +487,21 @@ fun QuestionSourceBadge(
             Icons.Filled.AutoAwesome,
             "AI Generated"
         )
+        QuestionSource.VERIFIED_PREVIOUS_YEAR -> Triple(
+            GoldenSpark,
+            Icons.Filled.Verified,
+            if (yearOrTag.isNotBlank()) "Verified PYQ • $yearOrTag" else "Verified PYQ"
+        )
+        QuestionSource.USER_PROVIDED -> Triple(
+            NeonCyan,
+            Icons.Filled.Description,
+            label.ifBlank { "User Material" }
+        )
+        QuestionSource.CURRENT_AFFAIRS -> Triple(
+            Color(0xFF38BDF8),
+            Icons.Filled.Article,
+            "Current Affairs"
+        )
     }
 
     Surface(

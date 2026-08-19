@@ -88,10 +88,13 @@ data class FocusSession(
     val isCompleted: Boolean = true
 )
 
-enum class QuestionSource {
-    PREVIOUS_YEAR,
-    PRACTICE,
-    AI_GENERATED
+enum class QuestionSource(val displayName: String, val badgeIcon: String) {
+    PREVIOUS_YEAR("Verified Previous-Year Question", "🏷️"),
+    VERIFIED_PREVIOUS_YEAR("Verified Previous-Year Question", "🏷️"),
+    USER_PROVIDED("User-Provided Question", "👤"),
+    AI_GENERATED("AI-Generated Concept Question", "✨"),
+    CURRENT_AFFAIRS("Current Affairs Question", "📰"),
+    PRACTICE("Practice Bank Question", "📚")
 }
 
 enum class QuestionSourceFilter {
@@ -549,17 +552,25 @@ data class NovaStudyContext(
     val examDateMillis: Long = System.currentTimeMillis() + 30L * 24 * 3600 * 1000,
     val subjects: List<String> = listOf("Physics", "Mathematics", "Chemistry"),
     val weakTopics: List<String> = listOf("Rotational Dynamics", "Organic Reactions"),
+    val strongTopics: List<String> = emptyList(),
     val dailyTargetMinutes: Int = 180,
     val todayFocusMinutes: Int = 45,
     val currentStreak: Int = 4,
     val weeklyConsistencyPercent: Int = 85,
     val pendingPlanCount: Int = 2,
     val completedPlanCount: Int = 1,
+    val pendingTasksSummary: List<String> = emptyList(),
+    val revisionsDueCount: Int = 0,
+    val revisionsDueTopics: List<String> = emptyList(),
+    val recentMockAccuracyPercent: Float = 0f,
+    val recentMockScoreSummary: String? = null,
     val missedSessionsCount: Int = 0,
     val nextScheduledSession: String? = "Physics (7:00 PM)",
     val topDistractingAppUsageMins: Int = 0,
     val topDistractingAppName: String? = null,
     val isFocusModeActive: Boolean = false,
+    val preferredLanguage: String = "English",
+    val preferredStudyDurationMins: Int = 25,
     val memories: List<NovaMemoryItem> = emptyList()
 )
 
@@ -613,6 +624,214 @@ data class VoiceNoteFlashcard(
     val question: String,
     val answer: String
 )
+
+// =========================================================================
+// SMART SEARCH, SMART NOTES & EXAM INTELLIGENCE MODELS
+// =========================================================================
+
+enum class WebSourceType {
+    OFFICIAL_GOVERNMENT,
+    OFFICIAL_EXAM_BOARD,
+    REPUTABLE_EDUCATIONAL,
+    GENERAL_WEB
+}
+
+data class WebSearchSource(
+    val title: String,
+    val snippet: String,
+    val url: String,
+    val domain: String,
+    val sourceType: WebSourceType = WebSourceType.GENERAL_WEB,
+    val isOfficial: Boolean = false,
+    val publishedDate: String = ""
+)
+
+data class SmartSearchResult(
+    val query: String,
+    val studentFriendlyAnswer: String,
+    val keyPoints: List<String> = emptyList(),
+    val formulasAndDefinitions: List<String> = emptyList(),
+    val sources: List<WebSearchSource> = emptyList(),
+    val sourcesDisagree: Boolean = false,
+    val disagreementDetails: String = "",
+    val suggestedQuestions: List<String> = emptyList(),
+    val generatedPracticeQuestions: List<Question> = emptyList(),
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "smart_notes")
+data class SmartNoteItem(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val title: String,
+    val subject: String = "General",
+    val topic: String = "General",
+    val contentMarkdown: String,
+    val keyPoints: List<String> = emptyList(),
+    val formulas: List<String> = emptyList(),
+    val importantFacts: List<String> = emptyList(),
+    val sourceUrl: String = "",
+    val sourceTitle: String = "",
+    val isRevised: Boolean = false,
+    val isBookmarked: Boolean = false,
+    val revisionCategory: RevisionCategory = RevisionCategory.PRACTICE_SOON,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "current_affairs")
+data class CurrentAffairsItem(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val title: String,
+    val summary: String,
+    val examRelevance: String,
+    val category: String, // "National", "International", "Science & Tech", "Economy", "Environment", "Polity"
+    val targetExams: List<String> = listOf("UPSC", "SSC", "State PSC", "General"),
+    val subject: String = "Current Affairs",
+    val sourceName: String,
+    val sourceUrl: String,
+    val publishedDate: String,
+    val mcqs: List<Question> = emptyList(),
+    val isSavedForRevision: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "exam_updates")
+data class ExamUpdateItem(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val examName: String,
+    val title: String,
+    val noticeType: String, // "Official Notice", "Admit Card", "Exam Date", "Syllabus Update", "Results"
+    val summary: String,
+    val officialLink: String,
+    val publishDate: String,
+    val isVerifiedOfficial: Boolean = true,
+    val isRead: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+// --- Next Best Action & Goal Radar Engine Models ---
+
+enum class NextBestActionType(val icon: String, val label: String) {
+    FOCUS_SESSION("🎯", "Focus Session"),
+    SPACED_REVISION("🔄", "Spaced Recall"),
+    MISTAKE_REMEDIATION("📝", "Review Mistakes"),
+    MOCK_TEST("🧪", "Adaptive Mock Test"),
+    QUICK_PRACTICE("✍️", "Concept Practice"),
+    VOICE_LECTURE("🎙️", "Audio Lecture"),
+    DAILY_PLAN_TASK("📅", "Scheduled Goal")
+}
+
+data class NextBestAction(
+    val title: String,
+    val subject: String,
+    val topic: String,
+    val durationMinutes: Int,
+    val priority: PlanPriority = PlanPriority.HIGH,
+    val actionType: NextBestActionType = NextBestActionType.FOCUS_SESSION,
+    val reason: String,
+    val whyThisHelpful: String,
+    val questionsCount: Int? = null,
+    val urgencyTag: String = "HIGH PRIORITY",
+    val isAvailableTimeAdjusted: Boolean = false
+)
+
+data class GoalRadarStatus(
+    val examName: String,
+    val daysRemaining: Int,
+    val syllabusCoveredPercent: Int,
+    val studyPaceStatus: String, // "On Track 🚀", "Slightly Behind ⚠️", "Needs Focus 🎯"
+    val weeklyHoursCompleted: Float,
+    val weeklyHoursTarget: Float,
+    val calmAdvice: String,
+    val prioritySubject: String,
+    val weakTopicNeedCare: String
+)
+
+data class StudentMasterContext(
+    val userProfile: UserProfile,
+    val pendingPlansCount: Int,
+    val completedPlansCount: Int,
+    val dueFlashcardsCount: Int,
+    val unmasteredMistakesCount: Int,
+    val avgTestAccuracy: Float,
+    val totalFocusMinutes: Int,
+    val streakDays: Int,
+    val examDaysRemaining: Int,
+    val nextBestAction: NextBestAction,
+    val goalRadar: GoalRadarStatus
+)
+
+// --- 6. Room-Based Intelligence Entities for Student Context ---
+
+@Entity(tableName = "exam_objectives")
+data class ExamObjective(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val examName: String,
+    val targetScoreOrRank: String = "Top 500 AIR",
+    val examDateMillis: Long = System.currentTimeMillis() + 60L * 24 * 60 * 60 * 1000,
+    val category: String = "Competitive",
+    val targetWeeklyStudyHours: Float = 25f,
+    val totalSyllabusTopicsCount: Int = 100,
+    val completedSyllabusTopicsCount: Int = 30,
+    val prioritySubjects: List<String> = listOf("Physics", "Mathematics", "Chemistry"),
+    val status: String = "ACTIVE", // ACTIVE, PAUSED, COMPLETED
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "topic_masteries")
+data class TopicMastery(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val subject: String,
+    val topic: String,
+    val masteryScore: Int = 50, // 0 - 100
+    val accuracyPercent: Float = 60f,
+    val totalQuestionsAttempted: Int = 0,
+    val correctQuestionsCount: Int = 0,
+    val incorrectQuestionsCount: Int = 0,
+    val easySolved: Int = 0,
+    val medSolved: Int = 0,
+    val hardSolved: Int = 0,
+    val retentionDecayRate: Float = 1.0f,
+    val lastTestedMillis: Long = System.currentTimeMillis(),
+    val recommendedReviewDateMillis: Long = System.currentTimeMillis() + 24L * 60 * 60 * 1000,
+    val masteryLevel: String = "DEVELOPING", // NOVICE, DEVELOPING, PROFICIENT, MASTERED
+    val weakSpots: List<String> = emptyList(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "student_session_history")
+data class StudentSessionHistory(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val sessionType: String, // FOCUS, MOCK_TEST, SPACED_REVISION, SMART_SEARCH, VOICE_TUTOR, ADAPTIVE_QUIZ
+    val subject: String,
+    val topic: String,
+    val durationMinutes: Int,
+    val actualMinutesSpent: Int,
+    val xpEarned: Int = 30,
+    val accuracyPercent: Float? = null,
+    val questionsAttempted: Int = 0,
+    val productivityRating: Int = 4, // 1 to 5
+    val notesSummary: String = "",
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "intelligence_snapshots")
+data class IntelligenceSnapshot(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val timestamp: Long = System.currentTimeMillis(),
+    val examDaysRemaining: Int = 60,
+    val overallMasteryScore: Int = 65,
+    val syllabusCompletionPercent: Int = 40,
+    val readinessIndex: Float = 72f,
+    val topRecommendedActionTitle: String = "",
+    val topRecommendedSubject: String = "",
+    val topRecommendedTopic: String = "",
+    val pacingStatus: String = "On Track 🚀",
+    val insightsSummary: String = "",
+    val weakTopicsCount: Int = 0,
+    val masteredTopicsCount: Int = 0
+)
+
 
 
 

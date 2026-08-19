@@ -42,8 +42,108 @@ class GeminiRepository(
         imageBitmap: Bitmap? = null,
         useThinkingMode: Boolean = false
     ): Result<NovaAssistantResponse> = withContext(Dispatchers.IO) {
+        // 1. Try Supabase Edge Function first (Secure server-side API keys)
+        val supabaseClient = com.example.data.remote.supabase.SupabaseClient.instance
+        if (supabaseClient.isReady() && imageBitmap == null) {
+            try {
+                val payloadObj = JSONObject().apply {
+                    put("userPrompt", userPrompt)
+                    val historyArr = JSONArray()
+                    conversationHistory.takeLast(6).forEach { (role, txt) ->
+                        historyArr.put(JSONObject().apply {
+                            put("role", role)
+                            put("text", txt)
+                        })
+                    }
+                    put("conversationHistory", historyArr)
+                    put("studyContext", JSONObject().apply {
+                        put("studentName", studyContext.studentName)
+                        put("targetExam", studyContext.targetExam)
+                        put("examDaysRemaining", studyContext.examDaysRemaining)
+                        put("subjects", JSONArray(studyContext.subjects))
+                        put("weakTopics", JSONArray(studyContext.weakTopics))
+                        put("strongTopics", JSONArray(studyContext.strongTopics))
+                        put("dailyTargetMinutes", studyContext.dailyTargetMinutes)
+                        put("todayFocusMinutes", studyContext.todayFocusMinutes)
+                        put("currentStreak", studyContext.currentStreak)
+                        put("pendingPlanCount", studyContext.pendingPlanCount)
+                        put("pendingTasksSummary", JSONArray(studyContext.pendingTasksSummary))
+                        put("revisionsDueCount", studyContext.revisionsDueCount)
+                        put("revisionsDueTopics", JSONArray(studyContext.revisionsDueTopics))
+                        put("recentMockAccuracyPercent", studyContext.recentMockAccuracyPercent)
+                        if (studyContext.nextScheduledSession != null) put("nextScheduledSession", studyContext.nextScheduledSession)
+                        if (studyContext.topDistractingAppName != null) put("topDistractingAppName", studyContext.topDistractingAppName)
+                        put("topDistractingAppUsageMins", studyContext.topDistractingAppUsageMins)
+                        put("preferredLanguage", studyContext.preferredLanguage)
+                        put("preferredStudyDurationMins", studyContext.preferredStudyDurationMins)
+                        val memArr = JSONArray()
+                        studyContext.memories.take(8).forEach { m ->
+                            memArr.put(JSONObject().apply {
+                                put("category", m.category.name)
+                                put("key", m.key)
+                                put("value", m.value)
+                            })
+                        }
+                        put("memories", memArr)
+                    })
+                    put("settings", JSONObject().apply {
+                        put("useBossGreeting", settings.useBossGreeting)
+                        put("memoryEnabled", settings.memoryEnabled)
+                        put("voiceEnabled", settings.voiceEnabled)
+                    })
+                    put("requireWebSearch", false)
+                }
+
+                val edgeRes = supabaseClient.invokeEdgeFunction("nova-chat", payloadObj.toString())
+                if (edgeRes is com.example.data.remote.supabase.SupabaseResult.Success<*>) {
+                    val rawStr = edgeRes.data.toString()
+                    val resJson = JSONObject(rawStr)
+                    val replyMarkdown = resJson.optString("replyMarkdown", "")
+                    if (replyMarkdown.isNotBlank()) {
+                        val actTypeStr = resJson.optString("actionType", "NONE")
+                        val actType = when (actTypeStr) {
+                            "START_FOCUS" -> NovaActionType.START_FOCUS
+                            "START_QUIZ" -> NovaActionType.START_QUIZ
+                            "CREATE_PLAN" -> NovaActionType.CREATE_PLAN
+                            "CREATE_REMINDER" -> NovaActionType.CREATE_REMINDER
+                            "OPEN_APP_BLOCKING" -> NovaActionType.OPEN_APP_BLOCKING
+                            "OPEN_MEMORY" -> NovaActionType.OPEN_MEMORY
+                            else -> NovaActionType.NONE
+                        }
+                        val actPayload = if (resJson.has("actionPayload") && !resJson.isNull("actionPayload")) resJson.optString("actionPayload") else null
+                        var memToSave: NovaMemoryItem? = null
+                        if (resJson.has("memoryToSave") && !resJson.isNull("memoryToSave")) {
+                            val mObj = resJson.getJSONObject("memoryToSave")
+                            val catStr = mObj.optString("category", "STUDY_PREFERENCES")
+                            val cat = try { NovaMemoryCategory.valueOf(catStr) } catch(e: Exception) { NovaMemoryCategory.STUDY_PREFERENCES }
+                            val key = mObj.optString("key", "")
+                            val value = mObj.optString("value", "")
+                            if (key.isNotBlank() && value.isNotBlank()) {
+                                memToSave = NovaMemoryItem(
+                                    category = cat,
+                                    key = key,
+                                    value = value,
+                                    source = "Nova Assistant Conversation"
+                                )
+                            }
+                        }
+                        return@withContext Result.success(
+                            NovaAssistantResponse(
+                                replyMarkdown = replyMarkdown,
+                                actionType = actType,
+                                actionPayload = actPayload,
+                                memoryToSave = memToSave
+                            )
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                // Fallback to client Gemini API
+            }
+        }
+
         try {
-            val model = if (useThinkingMode) "gemini-3.1-pro-preview" else "gemini-3.5-flash"
+            val model = if (useThinkingMode) "gemini-3.1-pro-preview" else "gemini-2.5-flash"
             val contents = mutableListOf<Content>()
 
             // Append history
@@ -65,52 +165,61 @@ class GeminiRepository(
             contents.add(Content(role = "user", parts = userParts))
 
             val systemNovaPrompt = buildString {
-                append("You are NOVA, a personal AI study assistant and companion living inside the student's Android phone.\n")
-                append("ROLE: Personal AI Study Assistant + Personal Productivity Companion.\n\n")
-                append("IDENTITY & PERSONALITY:\n")
-                append("- Intelligent, friendly, proactive, respectful, motivating, and naturally conversational.\n")
-                append("- Communicate naturally in Hindi, Hinglish, or English based on user query.\n")
+                append("You are NOVA, the intelligent personal study companion living inside StudyMate for ${studyContext.studentName}.\n")
+                append("ROLE: Personal AI Study Assistant + Productive Academic Mentor.\n\n")
+                append("IDENTITY & BEHAVIOR:\n")
+                append("- Intelligent, motivating, practical, concise, and respectful.\n")
+                append("- Communicate naturally in Hindi, Hinglish, or English based on user style.\n")
                 if (settings.useBossGreeting) {
-                    append("- Casually address the user as 'Boss' naturally and occasionally (not in every single sentence).\n")
+                    append("- Casually address the user as 'Boss' naturally and occasionally.\n")
                 }
-                append("- NEVER be insulting, manipulative, threatening, or annoying.\n")
-                append("- Provide practical, structured study assistance, formula breakdowns, quiz questions, and motivation.\n\n")
-                append("STUDENT ALLOWED PHONE CONTEXT:\n")
+                append("- NEVER shame, threaten, manipulate, or pressure the user.\n\n")
+                append("REAL STUDENT DATABASE CONTEXT:\n")
                 append("- Name: ${studyContext.studentName}\n")
-                append("- Target Exam: ${studyContext.targetExam} (${studyContext.examDaysRemaining} days left)\n")
+                append("- Target Exam: ${studyContext.targetExam} (${studyContext.examDaysRemaining} days remaining)\n")
                 append("- Subjects: ${studyContext.subjects.joinToString(", ")}\n")
                 if (studyContext.weakTopics.isNotEmpty()) {
-                    append("- Identified Weak Topics: ${studyContext.weakTopics.joinToString(", ")}\n")
+                    append("- Weak Topics flagged: ${studyContext.weakTopics.joinToString(", ")}\n")
                 }
-                append("- Daily Target: ${studyContext.dailyTargetMinutes} mins (Completed today: ${studyContext.todayFocusMinutes} mins)\n")
-                append("- Current Streak: ${studyContext.currentStreak} days\n")
-                if (studyContext.nextScheduledSession != null) {
-                    append("- Next Scheduled Session: ${studyContext.nextScheduledSession}\n")
+                if (studyContext.strongTopics.isNotEmpty()) {
+                    append("- Strong Topics: ${studyContext.strongTopics.joinToString(", ")}\n")
+                }
+                append("- Daily Target: ${studyContext.dailyTargetMinutes} mins | Completed today: ${studyContext.todayFocusMinutes} mins\n")
+                append("- Study Streak: ${studyContext.currentStreak} days\n")
+                append("- Pending Tasks: ${studyContext.pendingPlanCount} tasks (${studyContext.pendingTasksSummary.take(3).joinToString("; ")})\n")
+                append("- Revisions Due (Spaced Recall): ${studyContext.revisionsDueCount} items (${studyContext.revisionsDueTopics.take(3).joinToString(", ")})\n")
+                if (studyContext.recentMockAccuracyPercent > 0) {
+                    append("- Recent Quiz/Mock Accuracy: ${studyContext.recentMockAccuracyPercent}%\n")
                 }
                 if (studyContext.topDistractingAppName != null && studyContext.topDistractingAppUsageMins > 0) {
-                    append("- App Usage Context: ${studyContext.topDistractingAppName} used for ${studyContext.topDistractingAppUsageMins} mins today.\n")
+                    append("- Distracting App Usage: ${studyContext.topDistractingAppName} used for ${studyContext.topDistractingAppUsageMins} mins today.\n")
                 }
                 if (settings.memoryEnabled && studyContext.memories.isNotEmpty()) {
-                    append("\nNOVA PERSONAL MEMORY (Privacy-First):\n")
+                    append("\nNOVA MEMORY PREFERENCES:\n")
                     studyContext.memories.take(8).forEach { mem ->
                         append("- [${mem.category.displayName}] ${mem.key}: ${mem.value}\n")
                     }
                 }
-                append("\nCONTROLLED TOOL ACTION PROTOCOL:\n")
-                append("If user wants to start a focus timer, start a quiz, make a study plan, set a reminder, or open app blocking, append a single tool tag at the very end of your answer:\n")
+                append("\nCORE QUERY INSTRUCTIONS:\n")
+                append("1. 'What should I study today?': Generate a clear, prioritized schedule allocating time for revisions due, weak topics, and pending planner tasks. End with [ACTION:START_FOCUS:{\"subject\":\"...\",\"topic\":\"...\",\"minutes\":${studyContext.preferredStudyDurationMins}}]\n")
+                append("2. 'How am I doing?': Explain real progress objectively using actual focus hours, streak, accuracy, and weak vs strong topics with actionable encouragement.\n")
+                append("3. Falling Behind/Missed Sessions: Politely suggest a realistic, low-friction recovery sprint.\n")
+                append("4. Distracting App Intervention: If user mentions distraction, friendly reminder: 'Boss, kaafi time ho gaya. Chalo 20 minute ka focused session complete kar lete hain.'\n\n")
+                append("TOOL ACTION PROTOCOL:\n")
+                append("Append a single tool tag at the very end when recommending action:\n")
                 append("- [ACTION:START_FOCUS:{\"subject\":\"Physics\",\"topic\":\"Current Electricity\",\"minutes\":25}]\n")
                 append("- [ACTION:START_QUIZ:{\"subject\":\"Physics\",\"topic\":\"Mechanics\"}]\n")
                 append("- [ACTION:CREATE_PLAN:{\"days\":7}]\n")
                 append("- [ACTION:CREATE_REMINDER:{\"title\":\"Physics Session\",\"time\":\"7:00 PM\"}]\n")
                 append("- [ACTION:OPEN_APP_BLOCKING:{}]\n")
                 append("- [ACTION:OPEN_MEMORY:{}]\n")
-                append("If user asks you to remember a key preference/weakness, also append:\n")
-                append("- [MEMORY:{\"category\":\"WEAK_AREAS\",\"key\":\"Ray Optics\",\"value\":\"Formula revision required\"}]\n")
+                append("If user asks to remember a personal preference/note, append:\n")
+                append("- [MEMORY:{\"category\":\"PREFERENCE\",\"key\":\"Study Style\",\"value\":\"Visual mind maps\"}]\n")
             }
 
             val request = GenerateContentRequest(
                 contents = contents,
-                generationConfig = GenerationConfig(temperature = 0.5f),
+                generationConfig = GenerationConfig(temperature = 0.4f),
                 systemInstruction = Content(parts = listOf(Part(text = systemNovaPrompt)))
             )
 
@@ -177,31 +286,59 @@ class GeminiRepository(
             val lower = userPrompt.lowercase()
             val (fallbackText, action, payload) = when {
                 lower.contains("focus") || lower.contains("padh") || lower.contains("study now") || lower.contains("start session") -> {
+                    val sub = studyContext.subjects.firstOrNull() ?: "Physics"
+                    val top = studyContext.weakTopics.firstOrNull() ?: "Core Concepts"
                     Triple(
-                        "Done Boss 🎯 25 minute ka focused session start karte hain! Main distracting apps ko Focus Shield se block kar raha hoon. Let's conquer this topic! 📚",
+                        "Done Boss 🎯 25 minute ka focused session start karte hain on **$sub ($top)**! Focus Shield activate ho raha hai. Let's make this session count! 📚",
                         NovaActionType.START_FOCUS,
-                        """{"subject":"${studyContext.subjects.firstOrNull() ?: "Physics"}","topic":"${studyContext.weakTopics.firstOrNull() ?: "Core Concepts"}","minutes":25}"""
+                        """{"subject":"$sub","topic":"$top","minutes":${studyContext.preferredStudyDurationMins}}"""
+                    )
+                }
+                lower.contains("kya padhna") || lower.contains("what should i study") -> {
+                    val weak = studyContext.weakTopics.firstOrNull() ?: "High-Yield Topics"
+                    val rev = if (studyContext.revisionsDueCount > 0) "${studyContext.revisionsDueCount} flashcards due for revision" else "Formula review"
+                    val pending = if (studyContext.pendingTasksSummary.isNotEmpty()) studyContext.pendingTasksSummary.first() else "Scheduled topic"
+                    Triple(
+                        "Boss 😄 aaj ka intelligent study plan ready hai:\n\n1. **Active Revision:** $rev (15 mins)\n2. **High-Yield Weak Topic:** **$weak** (25 mins)\n3. **Pending Goal:** $pending\n\nTarget: ${studyContext.dailyTargetMinutes} mins daily goal.\n\nChalo 25-minute focused sprint start karein? 🚀",
+                        NovaActionType.START_FOCUS,
+                        """{"subject":"${studyContext.subjects.firstOrNull() ?: "Physics"}","topic":"$weak","minutes":${studyContext.preferredStudyDurationMins}}"""
+                    )
+                }
+                lower.contains("how am i doing") || lower.contains("kaisa chal raha") || lower.contains("performance") || lower.contains("progress") -> {
+                    val streak = studyContext.currentStreak
+                    val focusToday = studyContext.todayFocusMinutes
+                    val target = studyContext.dailyTargetMinutes
+                    val completed = studyContext.completedPlanCount
+                    val pending = studyContext.pendingPlanCount
+                    val acc = if (studyContext.recentMockAccuracyPercent > 0) "${studyContext.recentMockAccuracyPercent.toInt()}% accuracy" else "consistent practice"
+                    Triple(
+                        "Boss, ye raha aapka **Real Progress Snapshot** 📊:\n\n- **Study Streak:** 🔥 $streak Days\n- **Focus Time Today:** $focusToday / $target mins\n- **Tasks Completed:** $completed ($pending pending)\n- **Quiz Performance:** $acc\n- **Exam Countdown:** ${studyContext.examDaysRemaining} days remaining for ${studyContext.targetExam}\n\n**NOVA Feedback:** Aapka consistency curve positive hai! Weak topics (${studyContext.weakTopics.take(2).joinToString(", ")}) par 1 extra sprint lagayein to performance peak par hogi. 🚀",
+                        NovaActionType.NONE,
+                        null
+                    )
+                }
+                lower.contains("distract") || lower.contains("time waste") || lower.contains("youtube") || lower.contains("instagram") -> {
+                    val sub = studyContext.subjects.firstOrNull() ?: "Physics"
+                    val top = studyContext.weakTopics.firstOrNull() ?: "Key Chapters"
+                    Triple(
+                        "Boss, kaafi time ho gaya. Chalo 20 minute ka focused session complete kar lete hain bina kisi distraction ke. Main ready hoon! 🛡️",
+                        NovaActionType.START_FOCUS,
+                        """{"subject":"$sub","topic":"$top","minutes":20}"""
                     )
                 }
                 lower.contains("quiz") || lower.contains("test") -> {
+                    val sub = studyContext.subjects.firstOrNull() ?: "Physics"
                     Triple(
-                        "Bilkul Boss! 🧠 ${studyContext.subjects.firstOrNull() ?: "Physics"} ka quick 5-question conceptual quiz taiyaar hai. Let's test your understanding!",
+                        "Bilkul Boss! 🧠 $sub ka quick conceptual quiz start karte hain. Let's check your understanding!",
                         NovaActionType.START_QUIZ,
-                        """{"subject":"${studyContext.subjects.firstOrNull() ?: "Physics"}","topic":"All Topics"}"""
+                        """{"subject":"$sub","topic":"All Topics"}"""
                     )
                 }
                 lower.contains("plan") || lower.contains("schedule") -> {
                     Triple(
-                        "Boss, aapke target exam (${studyContext.targetExam}) ke liye balanced schedule generate kar diya hai. Weak topics ko priority slot diya hai! 📝",
+                        "Boss, aapke target exam (${studyContext.targetExam}) ke liye balanced schedule open kar diya hai. Weak topics ko priority slot diya hai! 📝",
                         NovaActionType.CREATE_PLAN,
                         """{"days":7}"""
-                    )
-                }
-                lower.contains("kya padhna") || lower.contains("what should i study") -> {
-                    Triple(
-                        "Boss 😄 aaj ka analysis kehti hai:\n\n1. **${studyContext.weakTopics.firstOrNull() ?: "Physics: Current Electricity"}** (Weak Topic - High Priority)\n2. 25-minute Pomodoro session target\n3. 15 practice MCQs solve karne hain.\n\nChalo start karein? 🚀",
-                        NovaActionType.START_FOCUS,
-                        """{"subject":"${studyContext.subjects.firstOrNull() ?: "Physics"}","topic":"${studyContext.weakTopics.firstOrNull() ?: "High-Yield Concepts"}","minutes":25}"""
                     )
                 }
                 imageBitmap != null -> {
@@ -213,7 +350,7 @@ class GeminiRepository(
                 }
                 else -> {
                     Triple(
-                        "Got it Boss! Main tumhare study goals aur preparation ke saath continuously sync mein hoon. Kuch bhi doubt ho, numericals explain karane ho ya quiz lena ho — bas batao! ⚡",
+                        "Got it Boss! Main tumhare study goals (${studyContext.targetExam}) aur preparation ke saath continuously sync mein hoon. Kuch bhi doubt ho, numericals explain karane ho ya quiz lena ho — bas batao! ⚡",
                         NovaActionType.NONE,
                         null
                     )
@@ -2449,5 +2586,290 @@ class GeminiRepository(
             Result.failure(e)
         }
     }
+
+    // =========================================================================
+    // SMART SEARCH & ACADEMIC WEB INTELLIGENCE ENGINE
+    // =========================================================================
+
+    suspend fun performSmartSearch(
+        query: String,
+        examName: String = "Competitive Exam",
+        subject: String = "General"
+    ): Result<SmartSearchResult> = withContext(Dispatchers.IO) {
+        try {
+            if (apiKey.isNotBlank()) {
+                val prompt = """
+                You are StudyMate Smart Search, an intelligent academic search and concept synthesis engine for students preparing for $examName.
+                
+                Search Query: "$query"
+                Subject: $subject
+                Target Exam: $examName
+                
+                Please provide a structured, student-friendly academic breakdown with:
+                1. Clear, pedagogical explanation with step-by-step intuition.
+                2. 3-5 high-yield key takeaways.
+                3. Key formulas, equations, or exact definitions.
+                4. Real verified sources / educational authorities (e.g. NCERT, NTA, ISRO, PIB, Standard Academic Texts).
+                5. Check if sources or theories have differing conventions or disagreements.
+                6. 3-4 follow-up questions for deeper understanding.
+                7. 3 high-yield Multiple Choice Practice Questions (MCQs) with options, correct answer index (0-3), and detailed explanation.
+                
+                Respond in STRICT JSON format matching this schema:
+                {
+                  "studentFriendlyAnswer": "Clear, markdown-formatted student explanation with intuitive analogy and steps...",
+                  "keyPoints": [
+                    "Point 1...",
+                    "Point 2...",
+                    "Point 3..."
+                  ],
+                  "formulasAndDefinitions": [
+                    "Formula or definition 1",
+                    "Formula or definition 2"
+                  ],
+                  "sources": [
+                    {
+                      "title": "NCERT Official Textbook / Authority",
+                      "snippet": "Concise excerpt...",
+                      "url": "https://ncert.nic.in",
+                      "domain": "ncert.nic.in",
+                      "isOfficial": true
+                    },
+                    {
+                      "title": "Standard Academic Reference",
+                      "snippet": "Reference snippet...",
+                      "url": "https://en.wikipedia.org",
+                      "domain": "wikipedia.org",
+                      "isOfficial": false
+                    }
+                  ],
+                  "sourcesDisagree": false,
+                  "disagreementDetails": "",
+                  "suggestedQuestions": [
+                    "How does this apply to numerical problems?",
+                    "What are the boundary conditions?",
+                    "What is a common trap in competitive exams for this topic?"
+                  ],
+                  "practiceQuestions": [
+                    {
+                      "questionText": "Question 1 text...",
+                      "options": ["Option A", "Option B", "Option C", "Option D"],
+                      "correctOptionIndex": 0,
+                      "explanation": "Detailed explanation..."
+                    },
+                    {
+                      "questionText": "Question 2 text...",
+                      "options": ["Option A", "Option B", "Option C", "Option D"],
+                      "correctOptionIndex": 1,
+                      "explanation": "Detailed explanation..."
+                    },
+                    {
+                      "questionText": "Question 3 text...",
+                      "options": ["Option A", "Option B", "Option C", "Option D"],
+                      "correctOptionIndex": 2,
+                      "explanation": "Detailed explanation..."
+                    }
+                  ]
+                }
+                """.trimIndent()
+
+                val request = GenerateContentRequest(
+                    contents = listOf(
+                        Content(role = "user", parts = listOf(Part(text = prompt)))
+                    ),
+                    generationConfig = GenerationConfig(temperature = 0.2f)
+                )
+
+                val response = apiService.generateContent(
+                    model = "gemini-2.5-flash",
+                    apiKey = apiKey,
+                    request = request
+                )
+
+                val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                if (!responseText.isNullOrBlank()) {
+                    try {
+                        val cleaned = responseText.replace("```json", "").replace("```", "").trim()
+                        val json = JSONObject(cleaned)
+
+                        val answer = json.optString("studentFriendlyAnswer", "Concept breakdown synthesized.")
+                        val keyPointsJson = json.optJSONArray("keyPoints")
+                        val keyPoints = mutableListOf<String>()
+                        if (keyPointsJson != null) {
+                            for (i in 0 until keyPointsJson.length()) {
+                                keyPoints.add(keyPointsJson.getString(i))
+                            }
+                        }
+
+                        val formulasJson = json.optJSONArray("formulasAndDefinitions")
+                        val formulas = mutableListOf<String>()
+                        if (formulasJson != null) {
+                            for (i in 0 until formulasJson.length()) {
+                                formulas.add(formulasJson.getString(i))
+                            }
+                        }
+
+                        val sourcesJson = json.optJSONArray("sources")
+                        val sources = mutableListOf<WebSearchSource>()
+                        if (sourcesJson != null) {
+                            for (i in 0 until sourcesJson.length()) {
+                                val sObj = sourcesJson.getJSONObject(i)
+                                sources.add(
+                                    WebSearchSource(
+                                        title = sObj.optString("title", "Educational Resource"),
+                                        snippet = sObj.optString("snippet", ""),
+                                        url = sObj.optString("url", "https://ncert.nic.in"),
+                                        domain = sObj.optString("domain", "ncert.nic.in"),
+                                        isOfficial = sObj.optBoolean("isOfficial", false),
+                                        publishedDate = sObj.optString("publishedDate", "Standard Curriculum")
+                                    )
+                                )
+                            }
+                        }
+
+                        val sourcesDisagree = json.optBoolean("sourcesDisagree", false)
+                        val disagreementDetails = json.optString("disagreementDetails", "")
+
+                        val suggestedQuestionsJson = json.optJSONArray("suggestedQuestions")
+                        val suggestedQuestions = mutableListOf<String>()
+                        if (suggestedQuestionsJson != null) {
+                            for (i in 0 until suggestedQuestionsJson.length()) {
+                                suggestedQuestions.add(suggestedQuestionsJson.getString(i))
+                            }
+                        }
+
+                        val practiceQuestionsJson = json.optJSONArray("practiceQuestions")
+                        val practiceQuestions = mutableListOf<Question>()
+                        if (practiceQuestionsJson != null) {
+                            for (i in 0 until practiceQuestionsJson.length()) {
+                                val qObj = practiceQuestionsJson.getJSONObject(i)
+                                val optsJson = qObj.optJSONArray("options")
+                                val opts = mutableListOf<String>()
+                                if (optsJson != null) {
+                                    for (j in 0 until optsJson.length()) {
+                                        opts.add(optsJson.getString(j))
+                                    }
+                                }
+                                practiceQuestions.add(
+                                    Question(
+                                        id = "search_q_${System.currentTimeMillis()}_$i",
+                                        questionText = qObj.optString("questionText", "Practice question"),
+                                        options = if (opts.isNotEmpty()) opts else listOf("Option A", "Option B", "Option C", "Option D"),
+                                        correctOptionIndex = qObj.optInt("correctOptionIndex", 0),
+                                        explanation = qObj.optString("explanation", "Concept explanation."),
+                                        subject = subject,
+                                        topic = query.take(30),
+                                        difficulty = "Medium",
+                                        source = QuestionSource.AI_GENERATED,
+                                        sourceLabel = "Smart Search Generated",
+                                        yearOrTag = "Search Learn"
+                                    )
+                                )
+                            }
+                        }
+
+                        return@withContext Result.success(
+                            SmartSearchResult(
+                                query = query,
+                                studentFriendlyAnswer = answer,
+                                keyPoints = keyPoints,
+                                formulasAndDefinitions = formulas,
+                                sources = if (sources.isNotEmpty()) sources else listOf(
+                                    WebSearchSource(
+                                        title = "NCERT & Standard Academic Curricula",
+                                        snippet = "Official learning materials and national standard curriculum guidelines.",
+                                        url = "https://ncert.nic.in",
+                                        domain = "ncert.nic.in",
+                                        isOfficial = true
+                                    )
+                                ),
+                                sourcesDisagree = sourcesDisagree,
+                                disagreementDetails = disagreementDetails,
+                                suggestedQuestions = suggestedQuestions,
+                                generatedPracticeQuestions = practiceQuestions
+                            )
+                        )
+                    } catch (e: Exception) {
+                        // Fallback below
+                    }
+                }
+            }
+
+            // High-yield offline fallback
+            val fallbackAnswer = "## Concept Overview: $query\n\n" +
+                    "**$query** is a foundational topic in **$subject** frequently tested in **$examName**.\n\n" +
+                    "### Key Principles:\n" +
+                    "- Understand the underlying physical / mathematical mechanisms before memorizing equations.\n" +
+                    "- Pay close attention to boundary conditions, standard SI units, and sign conventions.\n" +
+                    "- Connect the theoretical formulation with typical numerical application patterns."
+
+            val fallbackKeyPoints = listOf(
+                "Essential definition and underlying mechanisms of $query.",
+                "High exam weightage in $examName $subject syllabus.",
+                "Frequently combined with multi-concept problems in recent exams."
+            )
+
+            val fallbackFormulas = listOf(
+                "Standard Formula: Formulated according to standard NCERT / Curriculum reference."
+            )
+
+            val fallbackSources = listOf(
+                WebSearchSource(
+                    title = "NCERT National Curriculum Reference",
+                    snippet = "Standard curriculum framework and textbook formulation for $subject.",
+                    url = "https://ncert.nic.in",
+                    domain = "ncert.nic.in",
+                    isOfficial = true
+                ),
+                WebSearchSource(
+                    title = "Official National Examination Authority",
+                    snippet = "Syllabus benchmarks and recommended study references for $examName.",
+                    url = "https://nta.ac.in",
+                    domain = "nta.ac.in",
+                    isOfficial = true
+                )
+            )
+
+            val fallbackQuestions = listOf(
+                Question(
+                    id = "fb_q_1",
+                    questionText = "Which of the following best characterizes the primary principle of $query?",
+                    options = listOf(
+                        "It strictly obeys conservation laws under standard conditions.",
+                        "It is completely independent of initial boundary states.",
+                        "It operates only in idealized non-dissipative systems.",
+                        "It contradicts classical thermodynamic formulations."
+                    ),
+                    correctOptionIndex = 0,
+                    explanation = "Under standard conditions, foundational scientific and mathematical theorems conform directly to underlying conservation laws.",
+                    subject = subject,
+                    topic = query,
+                    difficulty = "Medium",
+                    source = QuestionSource.AI_GENERATED,
+                    sourceLabel = "Smart Search Generated",
+                    yearOrTag = "Concept Check"
+                )
+            )
+
+            Result.success(
+                SmartSearchResult(
+                    query = query,
+                    studentFriendlyAnswer = fallbackAnswer,
+                    keyPoints = fallbackKeyPoints,
+                    formulasAndDefinitions = fallbackFormulas,
+                    sources = fallbackSources,
+                    sourcesDisagree = false,
+                    disagreementDetails = "",
+                    suggestedQuestions = listOf(
+                        "What is a standard numerical example for $query?",
+                        "What are the most common student mistakes in this topic?"
+                    ),
+                    generatedPracticeQuestions = fallbackQuestions
+                )
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }
+
 

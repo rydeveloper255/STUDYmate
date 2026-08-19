@@ -141,6 +141,22 @@ fun NovaScreen(
                         onRequestMicPermission = { startListeningWithPermission() }
                     )
                 }
+                NovaScreenTab.SMART_SEARCH -> {
+                    NovaSmartSearchTab(
+                        viewModel = viewModel,
+                        onNavigateToFocus = onNavigateToFocus
+                    )
+                }
+                NovaScreenTab.SMART_NOTES -> {
+                    NovaSmartNotesTab(
+                        viewModel = viewModel
+                    )
+                }
+                NovaScreenTab.CURRENT_AFFAIRS -> {
+                    NovaCurrentAffairsTab(
+                        viewModel = viewModel
+                    )
+                }
                 NovaScreenTab.VOICE_NOTES -> {
                     VoiceNotesTab(
                         viewModel = voiceNotesViewModel

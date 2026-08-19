@@ -34,6 +34,10 @@ fun ProgressDashboardScreen(
     attempts: List<MockTestAttempt>,
     mistakes: List<MistakeItem>,
     userMaterials: List<UserQuestionMaterial> = emptyList(),
+    examObjective: ExamObjective? = null,
+    topicMasteries: List<TopicMastery> = emptyList(),
+    sessionHistory: List<StudentSessionHistory> = emptyList(),
+    snapshot: IntelligenceSnapshot? = null,
     activeTestState: ActiveTestState,
     isTestGenerating: Boolean,
     mistakeDiagnosis: String?,
@@ -54,9 +58,11 @@ fun ProgressDashboardScreen(
     onDeleteUserMaterial: (Long) -> Unit,
     onDiagnoseMistakes: (subject: String) -> Unit,
     onMarkMistakeMastered: (Long, Boolean) -> Unit,
+    onSaveExamObjective: (ExamObjective) -> Unit = {},
+    onStartFocusOnTopic: (subject: String, topic: String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Analytics & Mocks, 1: Mistake Book
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Analytics & Mocks, 1: Topic Mastery, 2: Mistake Book
     var showSetupDialog by remember { mutableStateOf(false) }
     var showMaterialManager by remember { mutableStateOf(false) }
 
@@ -98,13 +104,13 @@ fun ProgressDashboardScreen(
             ) {
                 Column {
                     Text(
-                        text = "📊 Progress & Mock Tests",
+                        text = "📊 Progress & Intelligence",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
                     Text(
-                        text = "Timed exam simulations, PYQs & analytics",
+                        text = "Exam mastery, timed mocks & session history",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF94A3B8)
                     )
@@ -124,7 +130,11 @@ fun ProgressDashboardScreen(
                     .padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                listOf("Analytics & Mocks (${attempts.size})", "Mistake Book (${mistakes.size})").forEachIndexed { idx, label ->
+                listOf(
+                    "Mocks (${attempts.size})",
+                    "Mastery & Goals",
+                    "Mistakes (${mistakes.size})"
+                ).forEachIndexed { idx, label ->
                     val isSelected = selectedTab == idx
                     Box(
                         modifier = Modifier
@@ -142,7 +152,7 @@ fun ProgressDashboardScreen(
                     ) {
                         Text(
                             text = label,
-                            style = MaterialTheme.typography.labelMedium,
+                            style = MaterialTheme.typography.labelSmall,
                             color = if (isSelected) Color(0xFF070B19) else Color(0xFFCBD5E1),
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                         )
@@ -166,8 +176,21 @@ fun ProgressDashboardScreen(
                     onManageMaterials = { showMaterialManager = true }
                 )
             }
+        } else if (selectedTab == 1) {
+            // --- SECTION 1: TOPIC MASTERY & OBJECTIVES ---
+            item {
+                TopicMasteryAndObjectivesView(
+                    user = user,
+                    examObjective = examObjective,
+                    topicMasteries = topicMasteries,
+                    sessionHistory = sessionHistory,
+                    snapshot = snapshot,
+                    onSaveExamObjective = onSaveExamObjective,
+                    onStartFocusOnTopic = onStartFocusOnTopic
+                )
+            }
         } else {
-            // --- SECTION 1: MISTAKE BOOK ---
+            // --- SECTION 2: MISTAKE BOOK ---
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),

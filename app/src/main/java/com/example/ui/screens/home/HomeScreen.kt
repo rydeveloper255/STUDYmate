@@ -35,7 +35,11 @@ import java.util.Calendar
 
 import com.example.data.model.AiCoachRecommendation
 import com.example.data.model.FlashcardItem
+import com.example.data.model.GoalRadarStatus
+import com.example.data.model.NextBestAction
+import com.example.data.model.NextBestActionType
 import com.example.data.model.RevisionCategory
+import com.example.data.model.StudentMasterContext
 import com.example.data.model.StudyNowRecommendation
 
 @Composable
@@ -44,12 +48,15 @@ fun HomeScreen(
     studyPlan: List<StudyPlanItem>,
     missions: List<DailyMission>,
     flashcards: List<FlashcardItem> = emptyList(),
+    studentMasterContext: StudentMasterContext? = null,
     aiCoachRecommendation: AiCoachRecommendation? = null,
     studyNowRecommendation: StudyNowRecommendation? = null,
     isAiCoachLoading: Boolean = false,
     isStudyNowLoading: Boolean = false,
     onLoadAiCoach: (String) -> Unit = {},
     onLoadStudyNow: () -> Unit = {},
+    onSelectTimeAvailable: (Int?) -> Unit = {},
+    onPerformSmartSearch: (String) -> Unit = {},
     onTogglePlanItem: (Long, Boolean) -> Unit,
     onStartFocusSession: (subject: String, topic: String) -> Unit,
     onNavigateToTab: (AppNavTab) -> Unit,
@@ -253,7 +260,38 @@ fun HomeScreen(
             }
         }
 
-        // 2b. AI Study Coach Card
+        // 2b. StudyMate Master Intelligence: Next Best Action Engine
+        studentMasterContext?.nextBestAction?.let { nextAction ->
+            item {
+                StudyMateNextBestActionCard(
+                    action = nextAction,
+                    selectedTime = null,
+                    onSelectTime = onSelectTimeAvailable,
+                    onStartSession = {
+                        when (nextAction.actionType) {
+                            NextBestActionType.SPACED_REVISION -> onNavigateToTab(AppNavTab.STUDY)
+                            NextBestActionType.MISTAKE_REMEDIATION -> onNavigateToTab(AppNavTab.PROGRESS)
+                            NextBestActionType.MOCK_TEST -> onNavigateToTab(AppNavTab.PROGRESS)
+                            NextBestActionType.QUICK_PRACTICE -> onNavigateToTab(AppNavTab.AI_TUTOR)
+                            else -> onStartFocusSession(nextAction.subject, nextAction.topic)
+                        }
+                    },
+                    onOpenNovaChat = { onNavigateToTab(AppNavTab.AI_TUTOR) }
+                )
+            }
+        }
+
+        // 2c. Goal Radar & Exam Pace Status
+        studentMasterContext?.goalRadar?.let { radar ->
+            item {
+                GoalRadarCard(
+                    radar = radar,
+                    targetExam = studentMasterContext.userProfile.examName
+                )
+            }
+        }
+
+        // 2d. AI Study Coach Card
         item {
             var showWhyDialog by remember { mutableStateOf(false) }
             var isCoachDismissed by remember { mutableStateOf(false) }
@@ -1150,3 +1188,343 @@ fun RevisionRadarBadge(
         }
     }
 }
+
+@Composable
+fun StudyMateNextBestActionCard(
+    action: NextBestAction,
+    selectedTime: Int?,
+    onSelectTime: (Int?) -> Unit,
+    onStartSession: () -> Unit,
+    onOpenNovaChat: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var showWhyDialog by remember { mutableStateOf(false) }
+
+    GlassCard(
+        modifier = modifier.fillMaxWidth(),
+        fillAlpha = 0.85f,
+        elevation = 8.dp
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(Brush.linearGradient(listOf(NeonCyan, ElectricIndigo))),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.AutoAwesome,
+                            contentDescription = null,
+                            tint = Color.Black,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "⚡ NEXT BEST ACTION",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = NeonCyan,
+                            letterSpacing = 1.sp
+                        )
+                        Text(
+                            text = "AI-calculated highest leverage task right now",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF94A3B8)
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0x3338BDF8))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = action.urgencyTag,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = NeonCyan
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Time Selector Pills
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                val timeOptions = listOf(null to "All", 15 to "15m", 25 to "25m", 45 to "45m", 60 to "60m")
+                timeOptions.forEach { (mins, label) ->
+                    val isSelected = selectedTime == mins
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isSelected) NeonCyan.copy(alpha = 0.25f) else Color(0x15FFFFFF))
+                            .border(
+                                width = 1.dp,
+                                color = if (isSelected) NeonCyan else Color(0x22FFFFFF),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .springClickable(
+                                testTag = "time_filter_$label",
+                                onClick = { onSelectTime(mins) }
+                            )
+                            .padding(vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = label,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) NeonCyan else Color(0xFFCBD5E1)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+                text = action.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color(0x22000000))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "${action.subject} • ${action.topic}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ElectricIndigo,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Text(
+                    text = "⏱️ ${action.durationMinutes} mins",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF94A3B8)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = action.reason,
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFCBD5E1),
+                lineHeight = 18.sp
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onStartSession,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = NeonCyan,
+                        contentColor = Color.Black
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .weight(1.3f)
+                        .height(42.dp)
+                        .testTag("start_next_best_action_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Start Now (${action.durationMinutes}m)",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = { showWhyDialog = true },
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x4438BDF8)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .weight(0.7f)
+                        .height(42.dp)
+                        .testTag("why_this_action_btn")
+                ) {
+                    Text(
+                        text = "Why this?",
+                        color = NeonCyan,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+
+    if (showWhyDialog) {
+        AlertDialog(
+            onDismissRequest = { showWhyDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Psychology, contentDescription = null, tint = NeonCyan)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("NOVA Intelligence Rationale", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = action.reason,
+                        color = Color(0xFFE2E8F0),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "📈 Expected Impact: ${action.whyThisHelpful}",
+                        color = NeonCyan,
+                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        text = "🧠 Learning Science: Prioritizes active recall and weakness remediation based on your forgetting curve analysis.",
+                        color = Color(0xFF94A3B8),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showWhyDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black)
+                ) {
+                    Text("Got it")
+                }
+            },
+            containerColor = Color(0xFF131C2E)
+        )
+    }
+}
+
+@Composable
+fun GoalRadarCard(
+    radar: GoalRadarStatus,
+    targetExam: String,
+    modifier: Modifier = Modifier
+) {
+    val paceColor = when {
+        radar.studyPaceStatus.contains("Ahead", ignoreCase = true) -> Color(0xFF4ADE80)
+        radar.studyPaceStatus.contains("Behind", ignoreCase = true) -> Color(0xFFF87171)
+        else -> NeonCyan
+    }
+
+    GlassCard(
+        modifier = modifier.fillMaxWidth(),
+        fillAlpha = 0.8f
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Filled.Radar,
+                        contentDescription = null,
+                        tint = paceColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "GOAL RADAR: ${targetExam.uppercase()}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(paceColor.copy(alpha = 0.2f))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = radar.studyPaceStatus.uppercase(),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = paceColor
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("Days Left", style = MaterialTheme.typography.labelSmall, color = Color(0xFF94A3B8))
+                    Text("${radar.daysRemaining} days", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+
+                Column {
+                    Text("Syllabus Done", style = MaterialTheme.typography.labelSmall, color = Color(0xFF94A3B8))
+                    Text("${radar.syllabusCoveredPercent}%", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = NeonCyan)
+                }
+
+                Column {
+                    Text("Study Velocity", style = MaterialTheme.typography.labelSmall, color = Color(0xFF94A3B8))
+                    Text("${radar.weeklyHoursCompleted} hrs/wk", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0x22000000))
+                    .padding(8.dp)
+            ) {
+                Text(
+                    text = "💡 ${radar.calmAdvice}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFE2E8F0)
+                )
+            }
+        }
+    }
+}
+

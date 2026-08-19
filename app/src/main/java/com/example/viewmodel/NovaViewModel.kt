@@ -15,6 +15,7 @@ import com.example.notification.StudyNotificationManager
 import com.example.service.NovaUsageStatsHelper
 import com.example.service.NovaVoiceManager
 import com.example.service.coach.NovaStudyCoach
+import com.example.service.intelligence.StudyMateIntelligenceEngine
 import com.example.service.voice.NovaVoiceEmotion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
@@ -25,6 +26,9 @@ import java.util.Calendar
 enum class NovaScreenTab(val title: String, val icon: String) {
     DASHBOARD("Dashboard", "⚡"),
     ASSISTANT_CHAT("NOVA Voice & Chat", "🤖"),
+    SMART_SEARCH("Smart Search", "🔍"),
+    SMART_NOTES("Smart Notes", "📝"),
+    CURRENT_AFFAIRS("Current Affairs & Exams", "📰"),
     VOICE_NOTES("Voice Notes & Lectures", "🎙️"),
     INTERACTIVE_STUDY_QUIZ("Quiz Intelligence", "🎯"),
     MEMORY_CENTER("Memory Center", "🧠"),
@@ -103,6 +107,48 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
 
     val allSessions: StateFlow<List<FocusSession>> = studyRepository.allFocusSessions
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allSmartNotes: StateFlow<List<SmartNoteItem>> = studyRepository.allSmartNotes
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allCurrentAffairs: StateFlow<List<CurrentAffairsItem>> = studyRepository.allCurrentAffairs
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allExamUpdates: StateFlow<List<ExamUpdateItem>> = studyRepository.allExamUpdates
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _smartSearchResult = MutableStateFlow<SmartSearchResult?>(null)
+    val smartSearchResult: StateFlow<SmartSearchResult?> = _smartSearchResult.asStateFlow()
+
+    private val _isSmartSearching = MutableStateFlow(false)
+    val isSmartSearching: StateFlow<Boolean> = _isSmartSearching.asStateFlow()
+
+    val studentMasterContext: StateFlow<StudentMasterContext?> = combine(
+        studyRepository.userProfile,
+        allPlanItems,
+        allSessions,
+        allAttempts,
+        allMistakes,
+        studyRepository.allFlashcards
+    ) { args: Array<Any?> ->
+        val user = args[0] as? UserProfile
+        val plans = (args[1] as? List<*>)?.filterIsInstance<StudyPlanItem>() ?: emptyList()
+        val sessions = (args[2] as? List<*>)?.filterIsInstance<FocusSession>() ?: emptyList()
+        val attempts = (args[3] as? List<*>)?.filterIsInstance<MockTestAttempt>() ?: emptyList()
+        val mistakes = (args[4] as? List<*>)?.filterIsInstance<MistakeItem>() ?: emptyList()
+        val cards = (args[5] as? List<*>)?.filterIsInstance<FlashcardItem>() ?: emptyList()
+
+        if (user != null) {
+            StudyMateIntelligenceEngine.buildMasterContext(
+                profile = user,
+                plans = plans,
+                focusSessions = sessions,
+                mockAttempts = attempts,
+                mistakes = mistakes,
+                flashcards = cards
+            )
+        } else null
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     private val _quizState = MutableStateFlow(InteractiveQuizState())
     val quizState: StateFlow<InteractiveQuizState> = _quizState.asStateFlow()
@@ -195,7 +241,8 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                 studyRepository.allFocusSessions,
                 studyRepository.activeNovaMemories,
                 studyRepository.allMistakes,
-                studyRepository.allMockTestAttempts
+                studyRepository.allMockTestAttempts,
+                studyRepository.allFlashcards
             ) { args: Array<Any?> ->
                 val profile = args[0] as? UserProfile
                 @Suppress("UNCHECKED_CAST")
@@ -208,11 +255,26 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                 val mistakes = (args[4] as? List<MistakeItem>) ?: emptyList()
                 @Suppress("UNCHECKED_CAST")
                 val attempts = (args[5] as? List<MockTestAttempt>) ?: emptyList()
+                @Suppress("UNCHECKED_CAST")
+                val flashcards = (args[6] as? List<FlashcardItem>) ?: emptyList()
 
                 val user = profile ?: UserProfile()
                 val pendingPlans = planItems.filter { !it.isCompleted }
                 val completedPlans = planItems.filter { it.isCompleted }
                 val nextSession = pendingPlans.firstOrNull()?.let { "${it.subject}: ${it.topic}" }
+
+                val pendingTasksSummary = pendingPlans.take(5).map { "${it.subject}: ${it.topic} (${it.targetMinutes}m)" }
+
+                val currentTime = System.currentTimeMillis()
+                val revisionsDue = flashcards.filter { it.nextReviewDate <= currentTime || it.status == RevisionCategory.REVISE_NOW }
+                val revisionsDueTopics = revisionsDue.map { it.topic }.distinct().take(5)
+
+                val mistakeTopics = mistakes.filter { !it.isMastered }.map { it.topic }.distinct()
+                val combinedWeakTopics = (user.weakTopics + mistakeTopics).distinct().filter { it.isNotBlank() }
+
+                val recentAccuracy = if (attempts.isNotEmpty()) {
+                    attempts.takeLast(5).map { it.accuracyPercent }.average().toFloat()
+                } else 0f
 
                 val appUsage = try {
                     NovaUsageStatsHelper.getTodayDistractingAppUsage(getApplication())
@@ -250,17 +312,24 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                     examDaysRemaining = remainingDays,
                     examDateMillis = user.examDateMillis,
                     subjects = user.subjects,
-                    weakTopics = if (user.weakTopics.isNotEmpty()) user.weakTopics else listOf("Core Principles", "Numerical Practice"),
+                    weakTopics = if (combinedWeakTopics.isNotEmpty()) combinedWeakTopics else listOf("Core Principles", "Numerical Practice"),
+                    strongTopics = user.strongSubjects,
                     dailyTargetMinutes = user.dailyTargetMinutes,
                     todayFocusMinutes = sessions.filter { it.timestamp > System.currentTimeMillis() - 24 * 3600 * 1000 }.sumOf { it.actualMinutesSpent },
                     currentStreak = user.streakDays,
                     weeklyConsistencyPercent = 88,
                     pendingPlanCount = pendingPlans.size,
                     completedPlanCount = completedPlans.size,
+                    pendingTasksSummary = pendingTasksSummary,
+                    revisionsDueCount = revisionsDue.size,
+                    revisionsDueTopics = revisionsDueTopics,
+                    recentMockAccuracyPercent = recentAccuracy,
                     missedSessionsCount = if (missedCandidate != null) 1 else 0,
                     nextScheduledSession = nextSession,
                     topDistractingAppName = appUsage?.topDistractingAppName,
                     topDistractingAppUsageMins = appUsage?.topDistractingAppMinutes ?: 0,
+                    preferredLanguage = user.languagePreference.ifBlank { "English" },
+                    preferredStudyDurationMins = 25,
                     memories = activeMemories
                 )
             }.collectLatest { context ->
@@ -688,6 +757,132 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
     fun askPromptFromDashboard(prompt: String) {
         _currentTab.value = NovaScreenTab.ASSISTANT_CHAT
         sendMessage(prompt)
+    }
+
+    // =========================================================================
+    // SMART SEARCH & ACADEMIC INTELLIGENCE METHODS
+    // =========================================================================
+
+    fun performSmartSearch(query: String, subject: String = "General") {
+        if (query.isBlank()) return
+        viewModelScope.launch {
+            _isSmartSearching.value = true
+            val exam = _studyContext.value.targetExam.ifBlank { "Competitive Exam" }
+            val result = geminiRepository.performSmartSearch(query.trim(), exam, subject)
+            result.onSuccess {
+                _smartSearchResult.value = it
+            }
+            result.onFailure {
+                _snackbarMessage.emit("Search error: ${it.localizedMessage}")
+            }
+            _isSmartSearching.value = false
+        }
+    }
+
+    fun clearSmartSearch() {
+        _smartSearchResult.value = null
+    }
+
+    fun saveSearchResultAsSmartNote(result: SmartSearchResult, subject: String = "General") {
+        viewModelScope.launch {
+            val note = SmartNoteItem(
+                title = result.query.replaceFirstChar { it.uppercase() },
+                subject = subject,
+                topic = result.query.take(30),
+                contentMarkdown = result.studentFriendlyAnswer,
+                keyPoints = result.keyPoints,
+                formulas = result.formulasAndDefinitions,
+                importantFacts = result.keyPoints.take(2),
+                sourceTitle = result.sources.firstOrNull()?.title ?: "Smart Search",
+                sourceUrl = result.sources.firstOrNull()?.url ?: "",
+                isBookmarked = true,
+                createdAt = System.currentTimeMillis()
+            )
+            studyRepository.saveSmartNote(note)
+            _snackbarMessage.emit("💾 Saved to Smart Notes!")
+        }
+    }
+
+    fun saveSearchResultAsFlashcards(result: SmartSearchResult, subject: String = "General") {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val cards = result.generatedPracticeQuestions.mapIndexed { idx, q ->
+                FlashcardItem(
+                    subject = subject,
+                    topic = result.query.take(30),
+                    front = q.questionText,
+                    back = "Answer: ${q.options.getOrElse(q.correctOptionIndex) { "" }}\n\nExplanation: ${q.explanation}",
+                    hint = q.options.firstOrNull() ?: "",
+                    difficulty = "Medium",
+                    status = RevisionCategory.REVISE_NOW,
+                    confidence = 2,
+                    intervalDays = 1,
+                    easeFactor = 2.5f,
+                    repetitions = 0,
+                    nextReviewDate = now,
+                    sourceDocTitle = "Smart Search: ${result.query}",
+                    createdAt = now
+                )
+            }
+            if (cards.isNotEmpty()) {
+                studyRepository.insertFlashcardList(cards)
+                _snackbarMessage.emit("🗂️ Added ${cards.size} Flashcards for Spaced Recall!")
+            }
+        }
+    }
+
+    fun saveSearchResultAsPlanTask(result: SmartSearchResult, subject: String = "General") {
+        viewModelScope.launch {
+            val plan = StudyPlanItem(
+                subject = subject,
+                chapter = "Smart Search",
+                topic = result.query,
+                targetMinutes = 30,
+                isCompleted = false,
+                priority = PlanPriority.HIGH,
+                notes = "Generated from Smart Search: ${result.query}"
+            )
+            studyRepository.addStudyPlanItem(plan)
+            _snackbarMessage.emit("📅 Added to Today's Study Plan!")
+        }
+    }
+
+    fun saveSmartNote(note: SmartNoteItem) {
+        viewModelScope.launch {
+            studyRepository.saveSmartNote(note)
+            _snackbarMessage.emit("📝 Smart Note Saved!")
+        }
+    }
+
+    fun toggleSmartNoteBookmark(id: Long, isBookmarked: Boolean) {
+        viewModelScope.launch {
+            studyRepository.toggleSmartNoteBookmark(id, isBookmarked)
+        }
+    }
+
+    fun toggleSmartNoteRevised(id: Long, isRevised: Boolean) {
+        viewModelScope.launch {
+            studyRepository.toggleSmartNoteRevised(id, isRevised)
+        }
+    }
+
+    fun deleteSmartNote(id: Long) {
+        viewModelScope.launch {
+            studyRepository.deleteSmartNote(id)
+            _snackbarMessage.emit("Deleted smart note")
+        }
+    }
+
+    fun toggleCurrentAffairsSaved(id: Long, isSaved: Boolean) {
+        viewModelScope.launch {
+            studyRepository.toggleCurrentAffairsSaved(id, isSaved)
+        }
+    }
+
+    fun markExamUpdateRead(id: Long) {
+        viewModelScope.launch {
+            studyRepository.markExamUpdateRead(id)
+        }
     }
 
     override fun onCleared() {

@@ -18,9 +18,16 @@ import com.example.data.model.*
         UserQuestionMaterial::class,
         NovaMemoryItem::class,
         NovaReminderItem::class,
-        VoiceNoteItem::class
+        VoiceNoteItem::class,
+        SmartNoteItem::class,
+        CurrentAffairsItem::class,
+        ExamUpdateItem::class,
+        ExamObjective::class,
+        TopicMastery::class,
+        StudentSessionHistory::class,
+        IntelligenceSnapshot::class
     ],
-    version = 3,
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -35,6 +42,13 @@ abstract class StudyMateDatabase : RoomDatabase() {
     abstract fun novaMemoryDao(): NovaMemoryDao
     abstract fun novaReminderDao(): NovaReminderDao
     abstract fun voiceNoteDao(): VoiceNoteDao
+    abstract fun smartNoteDao(): SmartNoteDao
+    abstract fun currentAffairsDao(): CurrentAffairsDao
+    abstract fun examUpdateDao(): ExamUpdateDao
+    abstract fun examObjectiveDao(): ExamObjectiveDao
+    abstract fun topicMasteryDao(): TopicMasteryDao
+    abstract fun studentSessionHistoryDao(): StudentSessionHistoryDao
+    abstract fun intelligenceSnapshotDao(): IntelligenceSnapshotDao
 
     companion object {
         @Volatile

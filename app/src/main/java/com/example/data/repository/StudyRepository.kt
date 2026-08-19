@@ -2,14 +2,18 @@ package com.example.data.repository
 
 import com.example.data.local.*
 import com.example.data.model.*
+import com.example.data.remote.supabase.SupabaseSyncService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 class StudyRepository(
-    private val database: StudyMateDatabase
+    private val database: StudyMateDatabase,
+    val syncService: SupabaseSyncService? = null
 ) {
+    val intelligenceRepository = StudyMateIntelligenceRepository(database, syncService)
+
     val userProfile: Flow<UserProfile?> = database.userDao().getUserProfile()
     val allPlanItems: Flow<List<StudyPlanItem>> = database.studyPlanDao().getAllPlanItems()
     val allFocusSessions: Flow<List<FocusSession>> = database.focusDao().getAllFocusSessions()
@@ -23,6 +27,62 @@ class StudyRepository(
     val pendingNovaReminders: Flow<List<NovaReminderItem>> = database.novaReminderDao().getPendingReminders()
     val allVoiceNotes: Flow<List<VoiceNoteItem>> = database.voiceNoteDao().getAllVoiceNotes()
     val bookmarkedVoiceNotes: Flow<List<VoiceNoteItem>> = database.voiceNoteDao().getBookmarkedVoiceNotes()
+    val allSmartNotes: Flow<List<SmartNoteItem>> = database.smartNoteDao().getAllSmartNotes()
+    val bookmarkedSmartNotes: Flow<List<SmartNoteItem>> = database.smartNoteDao().getBookmarkedNotes()
+    val allCurrentAffairs: Flow<List<CurrentAffairsItem>> = database.currentAffairsDao().getAllCurrentAffairs()
+    val savedCurrentAffairs: Flow<List<CurrentAffairsItem>> = database.currentAffairsDao().getSavedForRevision()
+    val allExamUpdates: Flow<List<ExamUpdateItem>> = database.examUpdateDao().getAllExamUpdates()
+
+    // Intelligence flows
+    val allExamObjectives: Flow<List<ExamObjective>> = intelligenceRepository.allExamObjectives
+    val activeExamObjective: Flow<ExamObjective?> = intelligenceRepository.activeExamObjective
+    val allTopicMasteries: Flow<List<TopicMastery>> = intelligenceRepository.allTopicMasteries
+    val weakTopicMasteries: Flow<List<TopicMastery>> = intelligenceRepository.weakTopics
+    val studentSessionHistory: Flow<List<StudentSessionHistory>> = intelligenceRepository.allSessionHistory
+    val latestIntelligenceSnapshot: Flow<IntelligenceSnapshot?> = intelligenceRepository.latestSnapshot
+
+    suspend fun saveSmartNote(note: SmartNoteItem): Long = withContext(Dispatchers.IO) {
+        val id = database.smartNoteDao().insertSmartNote(note)
+        val user = database.userDao().getUserProfileOnce()
+        if (user != null) {
+            val newXp = user.xp + 25
+            val newLevel = (newXp / 250) + 1
+            val updatedUser = user.copy(xp = newXp, level = newLevel)
+            database.userDao().insertOrUpdateUserProfile(updatedUser)
+            syncService?.syncUserProfile(updatedUser)
+        }
+        syncService?.syncSmartNote(note.copy(id = id))
+        id
+    }
+
+    suspend fun toggleSmartNoteBookmark(id: Long, isBookmarked: Boolean) = withContext(Dispatchers.IO) {
+        database.smartNoteDao().toggleBookmark(id, isBookmarked)
+    }
+
+    suspend fun toggleSmartNoteRevised(id: Long, isRevised: Boolean) = withContext(Dispatchers.IO) {
+        database.smartNoteDao().toggleRevised(id, isRevised)
+    }
+
+    suspend fun deleteSmartNote(id: Long) = withContext(Dispatchers.IO) {
+        database.smartNoteDao().deleteSmartNote(id)
+        syncService?.deleteSmartNote(id)
+    }
+
+    suspend fun saveCurrentAffairsList(items: List<CurrentAffairsItem>) = withContext(Dispatchers.IO) {
+        database.currentAffairsDao().insertCurrentAffairs(items)
+    }
+
+    suspend fun toggleCurrentAffairsSaved(id: Long, isSaved: Boolean) = withContext(Dispatchers.IO) {
+        database.currentAffairsDao().toggleSavedForRevision(id, isSaved)
+    }
+
+    suspend fun saveExamUpdatesList(items: List<ExamUpdateItem>) = withContext(Dispatchers.IO) {
+        database.examUpdateDao().insertExamUpdates(items)
+    }
+
+    suspend fun markExamUpdateRead(id: Long) = withContext(Dispatchers.IO) {
+        database.examUpdateDao().markAsRead(id)
+    }
 
     suspend fun saveVoiceNote(note: VoiceNoteItem): Long = withContext(Dispatchers.IO) {
         database.voiceNoteDao().insertVoiceNote(note)
@@ -65,15 +125,19 @@ class StudyRepository(
     }
 
     suspend fun saveNovaMemory(memory: NovaMemoryItem): Long = withContext(Dispatchers.IO) {
-        database.novaMemoryDao().insertMemory(memory)
+        val id = database.novaMemoryDao().insertMemory(memory)
+        syncService?.syncNovaMemory(memory.copy(id = id))
+        id
     }
 
     suspend fun saveNovaMemories(memories: List<NovaMemoryItem>) = withContext(Dispatchers.IO) {
         database.novaMemoryDao().insertMemories(memories)
+        memories.forEach { syncService?.syncNovaMemory(it) }
     }
 
     suspend fun updateNovaMemory(memory: NovaMemoryItem) = withContext(Dispatchers.IO) {
         database.novaMemoryDao().updateMemory(memory)
+        syncService?.syncNovaMemory(memory)
     }
 
     suspend fun toggleNovaMemory(id: Long, isEnabled: Boolean) = withContext(Dispatchers.IO) {
@@ -82,6 +146,7 @@ class StudyRepository(
 
     suspend fun deleteNovaMemory(id: Long) = withContext(Dispatchers.IO) {
         database.novaMemoryDao().deleteMemory(id)
+        syncService?.deleteNovaMemory(id)
     }
 
     suspend fun clearAllNovaMemories() = withContext(Dispatchers.IO) {
@@ -155,15 +220,20 @@ class StudyRepository(
 
     suspend fun saveUserProfile(profile: UserProfile) = withContext(Dispatchers.IO) {
         database.userDao().insertOrUpdateUserProfile(profile)
+        syncService?.syncUserProfile(profile)
     }
 
     suspend fun addStudyPlanItem(item: StudyPlanItem): Long = withContext(Dispatchers.IO) {
-        database.studyPlanDao().insertPlanItem(item)
+        val id = database.studyPlanDao().insertPlanItem(item)
+        val saved = item.copy(id = id)
+        syncService?.syncStudyPlanItem(saved)
+        id
     }
 
     suspend fun replaceStudyPlan(items: List<StudyPlanItem>) = withContext(Dispatchers.IO) {
         database.studyPlanDao().clearAllPlanItems()
         database.studyPlanDao().insertPlanItems(items)
+        items.forEach { syncService?.syncStudyPlanItem(it) }
     }
 
     suspend fun togglePlanItemCompletion(id: Long, completed: Boolean, xpReward: Int = 30) = withContext(Dispatchers.IO) {
@@ -173,13 +243,16 @@ class StudyRepository(
             if (user != null) {
                 val newXp = user.xp + xpReward
                 val newLevel = (newXp / 250) + 1
-                database.userDao().insertOrUpdateUserProfile(user.copy(xp = newXp, level = newLevel))
+                val updatedUser = user.copy(xp = newXp, level = newLevel)
+                database.userDao().insertOrUpdateUserProfile(updatedUser)
+                syncService?.syncUserProfile(updatedUser)
             }
         }
     }
 
     suspend fun deletePlanItem(id: Long) = withContext(Dispatchers.IO) {
         database.studyPlanDao().deletePlanItem(id)
+        syncService?.deleteStudyPlanItem(id)
     }
 
     suspend fun recordFocusSession(
@@ -196,22 +269,24 @@ class StudyRepository(
             actualMinutesSpent = actualMinutesSpent,
             xpEarned = earnedXp
         )
-        database.focusDao().insertFocusSession(session)
+        val id = database.focusDao().insertFocusSession(session)
+        val savedSession = session.copy(id = id)
+        syncService?.syncFocusSession(savedSession)
 
         val user = database.userDao().getUserProfileOnce()
         if (user != null) {
             val newFocusMins = user.totalFocusMinutes + actualMinutesSpent
             val newXp = user.xp + earnedXp
             val newLevel = (newXp / 250) + 1
-            database.userDao().insertOrUpdateUserProfile(
-                user.copy(
-                    totalFocusMinutes = newFocusMins,
-                    xp = newXp,
-                    level = newLevel
-                )
+            val updatedUser = user.copy(
+                totalFocusMinutes = newFocusMins,
+                xp = newXp,
+                level = newLevel
             )
+            database.userDao().insertOrUpdateUserProfile(updatedUser)
+            syncService?.syncUserProfile(updatedUser)
         }
-        session
+        savedSession
     }
 
     suspend fun recordMockTestAttempt(
@@ -255,6 +330,8 @@ class StudyRepository(
             totalTimeAllowedSeconds = totalTimeAllowedSeconds
         )
         val id = database.mockTestDao().insertAttempt(attempt)
+        val savedAttempt = attempt.copy(id = id)
+        syncService?.syncMockTestAttempt(savedAttempt)
 
         val user = database.userDao().getUserProfileOnce()
         if (user != null) {
@@ -262,19 +339,20 @@ class StudyRepository(
             val earnedXp = (correctCount * 15 + 20).coerceAtLeast(10)
             val newXp = user.xp + earnedXp
             val newLevel = (newXp / 250) + 1
-            database.userDao().insertOrUpdateUserProfile(
-                user.copy(
-                    totalQuestionsSolved = newQuestions,
-                    xp = newXp,
-                    level = newLevel
-                )
+            val updatedUser = user.copy(
+                totalQuestionsSolved = newQuestions,
+                xp = newXp,
+                level = newLevel
             )
+            database.userDao().insertOrUpdateUserProfile(updatedUser)
+            syncService?.syncUserProfile(updatedUser)
         }
-        attempt.copy(id = id)
+        savedAttempt
     }
 
-    suspend fun deleteMockTestAttempt(id: Long) = withContext(Dispatchers.IO) {
+    suspend fun deleteMockTestAttempt(id: Long): Unit = withContext(Dispatchers.IO) {
         database.mockTestDao().deleteAttempt(id)
+        syncService?.deleteMockTestAttempt(id)
     }
 
     suspend fun saveUserQuestionMaterial(
@@ -298,12 +376,14 @@ class StudyRepository(
         val id = database.userQuestionMaterialDao().insertMaterial(material)
         val user = database.userDao().getUserProfileOnce()
         if (user != null) {
-            database.userDao().insertOrUpdateUserProfile(user.copy(xp = user.xp + 25))
+            val updatedUser = user.copy(xp = user.xp + 25)
+            database.userDao().insertOrUpdateUserProfile(updatedUser)
+            syncService?.syncUserProfile(updatedUser)
         }
         id
     }
 
-    suspend fun deleteUserQuestionMaterial(id: Long) = withContext(Dispatchers.IO) {
+    suspend fun deleteUserQuestionMaterial(id: Long): Unit = withContext(Dispatchers.IO) {
         database.userQuestionMaterialDao().deleteMaterial(id)
     }
 
@@ -314,7 +394,7 @@ class StudyRepository(
         subject: String,
         topic: String,
         explanation: String
-    ) = withContext(Dispatchers.IO) {
+    ): Unit = withContext(Dispatchers.IO) {
         val item = MistakeItem(
             questionText = questionText,
             studentAnswer = studentAnswer,
@@ -323,15 +403,18 @@ class StudyRepository(
             topic = topic,
             explanation = explanation
         )
-        database.mistakeDao().insertMistake(item)
+        val id = database.mistakeDao().insertMistake(item)
+        syncService?.syncMistake(item.copy(id = id))
     }
 
-    suspend fun markMistakeMastered(id: Long, mastered: Boolean) = withContext(Dispatchers.IO) {
+    suspend fun markMistakeMastered(id: Long, mastered: Boolean): Unit = withContext(Dispatchers.IO) {
         database.mistakeDao().updateMastered(id, mastered)
         if (mastered) {
             val user = database.userDao().getUserProfileOnce()
             if (user != null) {
-                database.userDao().insertOrUpdateUserProfile(user.copy(xp = user.xp + 25))
+                val updatedUser = user.copy(xp = user.xp + 25)
+                database.userDao().insertOrUpdateUserProfile(updatedUser)
+                syncService?.syncUserProfile(updatedUser)
             }
         }
     }
@@ -365,38 +448,53 @@ class StudyRepository(
             createdAt = now
         )
         val id = database.flashcardDao().insertFlashcard(card)
+        val savedCard = card.copy(id = id)
+        syncService?.syncFlashcard(savedCard)
+
         val user = database.userDao().getUserProfileOnce()
         if (user != null) {
-            database.userDao().insertOrUpdateUserProfile(user.copy(xp = user.xp + 20))
+            val updatedUser = user.copy(xp = user.xp + 20)
+            database.userDao().insertOrUpdateUserProfile(updatedUser)
+            syncService?.syncUserProfile(updatedUser)
         }
         id
     }
 
     suspend fun insertFlashcard(card: FlashcardItem): Long = withContext(Dispatchers.IO) {
         val id = database.flashcardDao().insertFlashcard(card)
+        val savedCard = card.copy(id = id)
+        syncService?.syncFlashcard(savedCard)
+
         val user = database.userDao().getUserProfileOnce()
         if (user != null) {
-            database.userDao().insertOrUpdateUserProfile(user.copy(xp = user.xp + 20))
+            val updatedUser = user.copy(xp = user.xp + 20)
+            database.userDao().insertOrUpdateUserProfile(updatedUser)
+            syncService?.syncUserProfile(updatedUser)
         }
         id
     }
 
     suspend fun insertFlashcards(cards: List<FlashcardItem>) = withContext(Dispatchers.IO) {
         cards.forEach { card ->
-            database.flashcardDao().insertFlashcard(card)
+            val id = database.flashcardDao().insertFlashcard(card)
+            syncService?.syncFlashcard(card.copy(id = id))
         }
         val user = database.userDao().getUserProfileOnce()
         if (user != null) {
-            database.userDao().insertOrUpdateUserProfile(user.copy(xp = user.xp + (cards.size * 15)))
+            val updatedUser = user.copy(xp = user.xp + (cards.size * 15))
+            database.userDao().insertOrUpdateUserProfile(updatedUser)
+            syncService?.syncUserProfile(updatedUser)
         }
     }
 
     suspend fun updateFlashcard(card: FlashcardItem) = withContext(Dispatchers.IO) {
         database.flashcardDao().updateFlashcard(card)
+        syncService?.syncFlashcard(card)
     }
 
     suspend fun deleteFlashcard(id: Long) = withContext(Dispatchers.IO) {
         database.flashcardDao().deleteFlashcard(id)
+        syncService?.deleteFlashcard(id)
     }
 
     /**
@@ -466,6 +564,17 @@ class StudyRepository(
             lastReviewed = now
         )
 
+        val updatedCard = card.copy(
+            status = newStatus,
+            confidence = newConfidence,
+            intervalDays = newIntervalDays,
+            easeFactor = newEaseFactor,
+            repetitions = newReps,
+            nextReviewDate = nextReview,
+            lastReviewed = now
+        )
+        syncService?.syncFlashcard(updatedCard)
+
         val user = database.userDao().getUserProfileOnce()
         if (user != null) {
             val xpGain = when (ratingQuality) {
@@ -476,7 +585,9 @@ class StudyRepository(
             }
             val newXp = user.xp + xpGain
             val newLevel = (newXp / 250) + 1
-            database.userDao().insertOrUpdateUserProfile(user.copy(xp = newXp, level = newLevel))
+            val updatedUser = user.copy(xp = newXp, level = newLevel)
+            database.userDao().insertOrUpdateUserProfile(updatedUser)
+            syncService?.syncUserProfile(updatedUser)
         }
     }
 
@@ -490,13 +601,18 @@ class StudyRepository(
     }
 
     suspend fun insertFlashcardList(cards: List<FlashcardItem>) = withContext(Dispatchers.IO) {
-        database.flashcardDao().insertFlashcards(cards)
+        cards.forEach { card ->
+            val id = database.flashcardDao().insertFlashcard(card)
+            syncService?.syncFlashcard(card.copy(id = id))
+        }
         val user = database.userDao().getUserProfileOnce()
         if (user != null && cards.isNotEmpty()) {
             val earnedXp = cards.size * 15
             val newXp = user.xp + earnedXp
             val newLevel = (newXp / 250) + 1
-            database.userDao().insertOrUpdateUserProfile(user.copy(xp = newXp, level = newLevel))
+            val updatedUser = user.copy(xp = newXp, level = newLevel)
+            database.userDao().insertOrUpdateUserProfile(updatedUser)
+            syncService?.syncUserProfile(updatedUser)
         }
     }
 
@@ -571,5 +687,159 @@ class StudyRepository(
                 )
             )
         )
+
+        // Seed initial Smart Notes
+        database.smartNoteDao().insertSmartNote(
+            SmartNoteItem(
+                title = "Thermodynamics Core Formulas & Laws",
+                subject = "Physics / Chemistry",
+                topic = "Thermodynamics",
+                contentMarkdown = "## Key Thermodynamic Laws\n\n1. **First Law:** $\\Delta U = Q - W$\n2. **Second Law:** Heat cannot spontaneously flow from colder to hotter body without work.\n3. **Carnot Engine Efficiency:** $\\eta = 1 - \\frac{T_C}{T_H}$",
+                keyPoints = listOf(
+                    "ΔU is a state function; Q and W are path dependent.",
+                    "For isothermal process of ideal gas, ΔU = 0, so Q = W.",
+                    "For adiabatic process, Q = 0, so ΔU = -W."
+                ),
+                formulas = listOf(
+                    "\\Delta U = n C_v \\Delta T",
+                    "W_{iso} = n R T \\ln(V_f / V_i)",
+                    "P V^\\gamma = \\text{constant}"
+                ),
+                importantFacts = listOf(
+                    "Carnot cycle consists of two reversible isotherms and two reversible adiabatics.",
+                    "Entropy of an isolated system always increases in an irreversible process."
+                ),
+                sourceTitle = "NCERT Physics & Chemistry",
+                sourceUrl = "https://ncert.nic.in",
+                isBookmarked = true,
+                createdAt = now
+            )
+        )
+
+        // Seed initial Current Affairs
+        database.currentAffairsDao().insertCurrentAffairs(
+            listOf(
+                CurrentAffairsItem(
+                    title = "ISRO Gaganyaan Mission: Key Milestones & Test Vehicle Abort Flight",
+                    summary = "ISRO completed critical crew escape and parachute deployment tests for the Gaganyaan mission. The mission aims to demonstrate human spaceflight capability to Low Earth Orbit with a crew of 3 members.",
+                    examRelevance = "High Yield for UPSC CSE (Science & Tech GS-3) and SSC CGL General Awareness.",
+                    category = "Science & Tech",
+                    targetExams = listOf("UPSC", "SSC", "State PSC", "General"),
+                    sourceName = "ISRO Official / PIB India",
+                    sourceUrl = "https://isro.gov.in",
+                    publishedDate = "Recent Update",
+                    isSavedForRevision = true,
+                    createdAt = now
+                ),
+                CurrentAffairsItem(
+                    title = "RBI Monetary Policy Committee (MPC) Review & Inflation Targeting",
+                    summary = "The Reserve Bank of India maintained repo rate stances focusing on aligning headline CPI inflation with the 4% target on a durable basis while supporting sustainable economic growth.",
+                    examRelevance = "Important for Economy (GS-3), Banking Exams, and Current Affairs.",
+                    category = "Economy",
+                    targetExams = listOf("UPSC", "SSC", "Banking", "General"),
+                    sourceName = "Reserve Bank of India",
+                    sourceUrl = "https://rbi.org.in",
+                    publishedDate = "Current Fiscal",
+                    isSavedForRevision = false,
+                    createdAt = now
+                )
+            )
+        )
+
+        // Seed initial Exam Updates
+        database.examUpdateDao().insertExamUpdates(
+            listOf(
+                ExamUpdateItem(
+                    examName = "JEE Main & Advanced",
+                    title = "NTA Exam Calendar & Candidate Information Bulletin",
+                    noticeType = "Official Notice",
+                    summary = "National Testing Agency (NTA) released notification regarding session eligibility, application windows, and revised exam centers.",
+                    officialLink = "https://jeemain.nta.ac.in",
+                    publishDate = "Official Release",
+                    isVerifiedOfficial = true,
+                    createdAt = now
+                ),
+                ExamUpdateItem(
+                    examName = "NEET UG",
+                    title = "NTA NEET UG Syllabus Clarifications & Tie-Breaking Rules",
+                    noticeType = "Syllabus Update",
+                    summary = "NMC and NTA confirmed the standardized syllabus matching NCERT rationalized content for Physics, Chemistry, and Biology.",
+                    officialLink = "https://neet.nta.online",
+                    publishDate = "Official Release",
+                    isVerifiedOfficial = true,
+                    createdAt = now
+                ),
+                ExamUpdateItem(
+                    examName = "UPSC CSE",
+                    title = "UPSC Annual Examination Schedule & Notification",
+                    noticeType = "Exam Date",
+                    summary = "Union Public Service Commission announced Civil Services Preliminary & Mains examination calendar.",
+                    officialLink = "https://upsc.gov.in",
+                    publishDate = "Official Release",
+                    isVerifiedOfficial = true,
+                    createdAt = now
+                )
+            )
+        )
+
+        // Seed initial intelligence engine masteries & exam objectives
+        val user = database.userDao().getUserProfileOnce()
+        if (user != null) {
+            intelligenceRepository.seedInitialIntelligenceIfEmpty(user)
+        }
     }
+
+    // --- Intelligence Engine Access & Delegation Methods ---
+
+    suspend fun saveExamObjective(objective: ExamObjective): Long =
+        intelligenceRepository.saveExamObjective(objective)
+
+    suspend fun updateExamObjective(objective: ExamObjective) =
+        intelligenceRepository.updateExamObjective(objective)
+
+    suspend fun setActiveExamObjective(id: Long) =
+        intelligenceRepository.setActiveExamObjective(id)
+
+    suspend fun recordTopicPerformance(
+        subject: String,
+        topic: String,
+        questionsAttempted: Int,
+        correctCount: Int,
+        difficulty: String = "Medium",
+        weakSpots: List<String> = emptyList()
+    ): TopicMastery = intelligenceRepository.recordTopicPerformance(
+        subject = subject,
+        topic = topic,
+        questionsAttempted = questionsAttempted,
+        correctCount = correctCount,
+        difficulty = difficulty,
+        weakSpots = weakSpots
+    )
+
+    suspend fun recordStudentSessionHistory(
+        sessionType: String,
+        subject: String,
+        topic: String,
+        durationMinutes: Int,
+        actualMinutesSpent: Int,
+        xpEarned: Int,
+        accuracyPercent: Float? = null,
+        questionsAttempted: Int = 0,
+        productivityRating: Int = 4,
+        notesSummary: String = ""
+    ): StudentSessionHistory = intelligenceRepository.recordStudySession(
+        sessionType = sessionType,
+        subject = subject,
+        topic = topic,
+        durationMinutes = durationMinutes,
+        actualMinutesSpent = actualMinutesSpent,
+        xpEarned = xpEarned,
+        accuracyPercent = accuracyPercent,
+        questionsAttempted = questionsAttempted,
+        productivityRating = productivityRating,
+        notesSummary = notesSummary
+    )
+
+    suspend fun generateIntelligenceSnapshot(): IntelligenceSnapshot =
+        intelligenceRepository.generateAndPersistSnapshot()
 }

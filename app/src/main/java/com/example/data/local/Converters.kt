@@ -2,9 +2,39 @@ package com.example.data.local
 
 import androidx.room.TypeConverter
 import com.example.data.model.PlanPriority
+import com.example.data.model.Question
 import com.example.data.model.RevisionCategory
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
 class Converters {
+    private val moshi = Moshi.Builder()
+        .add(KotlinJsonAdapterFactory())
+        .build()
+    private val questionListType = Types.newParameterizedType(List::class.java, Question::class.java)
+    private val questionListAdapter = moshi.adapter<List<Question>>(questionListType)
+
+    @TypeConverter
+    fun fromQuestionList(value: List<Question>?): String {
+        if (value == null) return ""
+        return try {
+            questionListAdapter.toJson(value)
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    @TypeConverter
+    fun toQuestionList(value: String?): List<Question> {
+        if (value.isNullOrBlank()) return emptyList()
+        return try {
+            questionListAdapter.fromJson(value) ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     @TypeConverter
     fun fromStringList(value: List<String>?): String {
         return value?.joinToString(";;;") ?: ""

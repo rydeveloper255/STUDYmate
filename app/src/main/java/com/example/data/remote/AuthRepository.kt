@@ -14,6 +14,10 @@ import androidx.credentials.exceptions.GetCredentialProviderConfigurationExcepti
 import androidx.credentials.exceptions.NoCredentialException
 import com.example.data.local.UserDao
 import com.example.data.model.UserProfile
+import com.example.data.remote.supabase.SupabaseAuthManager
+import com.example.data.remote.supabase.SupabaseClient
+import com.example.data.remote.supabase.SupabaseResult
+import com.example.data.remote.supabase.SupabaseSyncService
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -35,7 +39,10 @@ sealed class AuthState {
 
 class AuthRepository(
     private val context: Context,
-    private val userDao: UserDao
+    private val userDao: UserDao,
+    val supabaseAuthManager: SupabaseAuthManager? = null,
+    val supabaseClient: SupabaseClient? = null,
+    val supabaseSyncService: SupabaseSyncService? = null
 ) {
     private val TAG = "AuthRepository"
 
@@ -81,7 +88,9 @@ class AuthRepository(
                                 isOnboardingCompleted = true
                             )
                             userDao.insertOrUpdateUserProfile(profile)
-                            Log.d(TAG, "FirebaseAuth listener synced user profile into Room: ${profile.email}")
+                            supabaseAuthManager?.associateFirebaseOrLocalUser(profile.uid, profile.email)
+                            supabaseSyncService?.syncUserProfile(profile)
+                            Log.d(TAG, "FirebaseAuth listener synced user profile into Room and Supabase: ${profile.email}")
                         }
                     }
                 }
@@ -289,6 +298,9 @@ class AuthRepository(
                 }
 
                 userDao.insertOrUpdateUserProfile(userProfile)
+                supabaseAuthManager?.associateFirebaseOrLocalUser(userProfile.uid, userProfile.email)
+                supabaseSyncService?.syncUserProfile(userProfile)
+                supabaseSyncService?.fullCloudRestore()
                 userProfile
             }
 
@@ -331,6 +343,43 @@ class AuthRepository(
             if (email.isBlank() || pass.length < 6) {
                 return@withContext Result.failure(IllegalArgumentException("Please enter a valid email and at least 6 characters password."))
             }
+
+            var supabaseUid = ""
+            if (supabaseClient?.isReady() == true) {
+                when (val signInRes = supabaseClient.signInWithPassword(email, pass)) {
+                    is SupabaseResult.Success -> {
+                        val session = signInRes.data
+                        if (!session.accessToken.isNullOrBlank() && session.user != null) {
+                            supabaseUid = session.user.id
+                            supabaseAuthManager?.saveSession(
+                                accessToken = session.accessToken,
+                                refreshToken = session.refreshToken,
+                                userId = session.user.id,
+                                email = session.user.email ?: email,
+                                expiresInSeconds = session.expiresIn ?: 3600L
+                            )
+                        }
+                    }
+                    is SupabaseResult.Error -> {
+                        // Attempt sign up if user not found
+                        val signUpRes = supabaseClient.signUp(email, pass)
+                        if (signUpRes is SupabaseResult.Success) {
+                            val session = signUpRes.data
+                            if (!session.accessToken.isNullOrBlank() && session.user != null) {
+                                supabaseUid = session.user.id
+                                supabaseAuthManager?.saveSession(
+                                    accessToken = session.accessToken,
+                                    refreshToken = session.refreshToken,
+                                    userId = session.user.id,
+                                    email = session.user.email ?: email,
+                                    expiresInSeconds = session.expiresIn ?: 3600L
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             val auth = firebaseAuth
             if (auth != null) {
                 try {
@@ -339,13 +388,16 @@ class AuthRepository(
                     val existing = userDao.getUserProfileOnce()
                     val profile = UserProfile(
                         id = "current_user",
-                        uid = user?.uid ?: "",
+                        uid = if (supabaseUid.isNotBlank()) supabaseUid else (user?.uid ?: ""),
                         name = user?.displayName ?: email.substringBefore("@").replaceFirstChar { it.uppercase() },
                         email = email,
                         isGuest = false,
                         isOnboardingCompleted = existing?.isOnboardingCompleted == true
                     )
                     userDao.insertOrUpdateUserProfile(profile)
+                    supabaseAuthManager?.associateFirebaseOrLocalUser(profile.uid, profile.email)
+                    supabaseSyncService?.syncUserProfile(profile)
+                    supabaseSyncService?.fullCloudRestore()
                     return@withContext Result.success(profile)
                 } catch (e: Exception) {
                     try {
@@ -353,27 +405,34 @@ class AuthRepository(
                         val user = createResult.user
                         val profile = UserProfile(
                             id = "current_user",
-                            uid = user?.uid ?: "",
+                            uid = if (supabaseUid.isNotBlank()) supabaseUid else (user?.uid ?: ""),
                             name = email.substringBefore("@").replaceFirstChar { it.uppercase() },
                             email = email,
                             isGuest = false,
                             isOnboardingCompleted = false
                         )
                         userDao.insertOrUpdateUserProfile(profile)
+                        supabaseAuthManager?.associateFirebaseOrLocalUser(profile.uid, profile.email)
+                        supabaseSyncService?.syncUserProfile(profile)
                         return@withContext Result.success(profile)
                     } catch (ce: Exception) {
                         return@withContext Result.failure(Exception("Authentication failed: ${ce.localizedMessage ?: ce.message}"))
                     }
                 }
             } else {
+                val existing = userDao.getUserProfileOnce()
                 val profile = UserProfile(
                     id = "current_user",
+                    uid = if (supabaseUid.isNotBlank()) supabaseUid else (existing?.uid ?: "user_${email.hashCode()}"),
                     name = email.substringBefore("@").replaceFirstChar { it.uppercase() },
                     email = email,
                     isGuest = false,
-                    isOnboardingCompleted = false
+                    isOnboardingCompleted = existing?.isOnboardingCompleted ?: false
                 )
                 userDao.insertOrUpdateUserProfile(profile)
+                supabaseAuthManager?.associateFirebaseOrLocalUser(profile.uid, profile.email)
+                supabaseSyncService?.syncUserProfile(profile)
+                supabaseSyncService?.fullCloudRestore()
                 Result.success(profile)
             }
         } catch (e: Exception) {
@@ -404,6 +463,8 @@ class AuthRepository(
                 totalQuestionsSolved = 48
             )
             userDao.insertOrUpdateUserProfile(guestProfile)
+            supabaseAuthManager?.associateFirebaseOrLocalUser(guestProfile.uid, guestProfile.email)
+            supabaseSyncService?.syncUserProfile(guestProfile)
             Result.success(guestProfile)
         } catch (e: Exception) {
             Result.failure(e)
@@ -421,6 +482,7 @@ class AuthRepository(
                 isOnboardingCompleted = true
             )
             userDao.insertOrUpdateUserProfile(finalProfile)
+            supabaseSyncService?.syncUserProfile(finalProfile)
             Result.success(finalProfile)
         } catch (e: Exception) {
             Result.failure(e)
@@ -438,6 +500,7 @@ class AuthRepository(
                 isOnboardingCompleted = true
             )
             userDao.insertOrUpdateUserProfile(finishedProfile)
+            supabaseSyncService?.syncUserProfile(finishedProfile)
             Result.success(finishedProfile)
         } catch (e: Exception) {
             Result.failure(e)
@@ -459,6 +522,7 @@ class AuthRepository(
                 Log.e(TAG, "Error clearing credential state", ignored)
             }
 
+            supabaseAuthManager?.clearSession()
             userDao.clearUser()
             Result.success(Unit)
         } catch (e: Exception) {

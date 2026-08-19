@@ -172,6 +172,13 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val mistakeDiagnosis by viewModel.mistakeDiagnosis.collectAsStateWithLifecycle()
     val isDarkTheme by viewModel.isDarkTheme.collectAsStateWithLifecycle()
     val notifPrefs by viewModel.notificationPrefs.collectAsStateWithLifecycle()
+    val studentMasterContext by viewModel.studentMasterContext.collectAsStateWithLifecycle()
+
+    val allExamObjectives by viewModel.allExamObjectives.collectAsStateWithLifecycle()
+    val activeExamObjective by viewModel.activeExamObjective.collectAsStateWithLifecycle()
+    val allTopicMasteries by viewModel.allTopicMasteries.collectAsStateWithLifecycle()
+    val studentSessionHistory by viewModel.studentSessionHistory.collectAsStateWithLifecycle()
+    val latestIntelligenceSnapshot by viewModel.latestIntelligenceSnapshot.collectAsStateWithLifecycle()
 
     val documentAnalysis by viewModel.documentAnalysisState.collectAsStateWithLifecycle()
     val isDocumentParsing by viewModel.isDocumentParsing.collectAsStateWithLifecycle()
@@ -270,12 +277,18 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             studyPlan = studyPlan,
                             missions = missions,
                             flashcards = flashcards,
+                            studentMasterContext = studentMasterContext,
                             aiCoachRecommendation = aiCoachRecommendation,
                             studyNowRecommendation = studyNowRecommendation,
                             isAiCoachLoading = isAiCoachLoading,
                             isStudyNowLoading = isStudyNowLoading,
                             onLoadAiCoach = { sub -> viewModel.loadAiCoachRecommendation(sub) },
                             onLoadStudyNow = { viewModel.loadStudyNowRecommendation() },
+                            onSelectTimeAvailable = { mins -> viewModel.setSelectedAvailableTime(mins) },
+                            onPerformSmartSearch = { q ->
+                                viewModel.performSmartSearch(q)
+                                onSelectTab(AppNavTab.AI_TUTOR)
+                            },
                             onTogglePlanItem = { id, done -> viewModel.togglePlanItem(id, done) },
                             onStartFocusSession = { sub, top ->
                                 viewModel.startFocusSession(sub, top, 25)
@@ -352,6 +365,10 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             attempts = mockAttempts,
                             mistakes = mistakes,
                             userMaterials = userQuestionMaterials,
+                            examObjective = activeExamObjective,
+                            topicMasteries = allTopicMasteries,
+                            sessionHistory = studentSessionHistory,
+                            snapshot = latestIntelligenceSnapshot,
                             activeTestState = activeTestState,
                             isTestGenerating = isTestGenerating,
                             mistakeDiagnosis = mistakeDiagnosis,
@@ -373,7 +390,12 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             },
                             onDeleteUserMaterial = { id -> viewModel.deleteUserQuestionMaterial(id) },
                             onDiagnoseMistakes = { subject -> viewModel.diagnoseMistakes(subject) },
-                            onMarkMistakeMastered = { id, mastered -> viewModel.markMistakeMastered(id, mastered) }
+                            onMarkMistakeMastered = { id, mastered -> viewModel.markMistakeMastered(id, mastered) },
+                            onSaveExamObjective = { obj -> viewModel.saveExamObjective(obj) },
+                            onStartFocusOnTopic = { sub, top ->
+                                viewModel.startFocusSession(sub, top, 25)
+                                onSelectTab(AppNavTab.FOCUS)
+                            }
                         )
                     }
                 }

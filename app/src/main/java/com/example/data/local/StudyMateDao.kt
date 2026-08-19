@@ -243,4 +243,185 @@ interface VoiceNoteDao {
     suspend fun clearAllVoiceNotes()
 }
 
+@Dao
+interface SmartNoteDao {
+    @Query("SELECT * FROM smart_notes ORDER BY createdAt DESC")
+    fun getAllSmartNotes(): Flow<List<SmartNoteItem>>
+
+    @Query("SELECT * FROM smart_notes WHERE isBookmarked = 1 ORDER BY createdAt DESC")
+    fun getBookmarkedNotes(): Flow<List<SmartNoteItem>>
+
+    @Query("SELECT * FROM smart_notes WHERE subject = :subject ORDER BY createdAt DESC")
+    fun getSmartNotesBySubject(subject: String): Flow<List<SmartNoteItem>>
+
+    @Query("SELECT * FROM smart_notes WHERE id = :id LIMIT 1")
+    suspend fun getSmartNoteById(id: Long): SmartNoteItem?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSmartNote(note: SmartNoteItem): Long
+
+    @Update
+    suspend fun updateSmartNote(note: SmartNoteItem)
+
+    @Query("UPDATE smart_notes SET isBookmarked = :isBookmarked WHERE id = :id")
+    suspend fun toggleBookmark(id: Long, isBookmarked: Boolean)
+
+    @Query("UPDATE smart_notes SET isRevised = :isRevised WHERE id = :id")
+    suspend fun toggleRevised(id: Long, isRevised: Boolean)
+
+    @Query("DELETE FROM smart_notes WHERE id = :id")
+    suspend fun deleteSmartNote(id: Long)
+
+    @Query("DELETE FROM smart_notes")
+    suspend fun clearAllSmartNotes()
+}
+
+@Dao
+interface CurrentAffairsDao {
+    @Query("SELECT * FROM current_affairs ORDER BY createdAt DESC")
+    fun getAllCurrentAffairs(): Flow<List<CurrentAffairsItem>>
+
+    @Query("SELECT * FROM current_affairs WHERE category = :category ORDER BY createdAt DESC")
+    fun getByCategory(category: String): Flow<List<CurrentAffairsItem>>
+
+    @Query("SELECT * FROM current_affairs WHERE isSavedForRevision = 1 ORDER BY createdAt DESC")
+    fun getSavedForRevision(): Flow<List<CurrentAffairsItem>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCurrentAffairs(items: List<CurrentAffairsItem>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertItem(item: CurrentAffairsItem): Long
+
+    @Query("UPDATE current_affairs SET isSavedForRevision = :isSaved WHERE id = :id")
+    suspend fun toggleSavedForRevision(id: Long, isSaved: Boolean)
+
+    @Query("DELETE FROM current_affairs WHERE id = :id")
+    suspend fun deleteItem(id: Long)
+
+    @Query("DELETE FROM current_affairs")
+    suspend fun clearAll()
+}
+
+@Dao
+interface ExamUpdateDao {
+    @Query("SELECT * FROM exam_updates ORDER BY createdAt DESC")
+    fun getAllExamUpdates(): Flow<List<ExamUpdateItem>>
+
+    @Query("SELECT * FROM exam_updates WHERE examName = :examName ORDER BY createdAt DESC")
+    fun getUpdatesByExam(examName: String): Flow<List<ExamUpdateItem>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertExamUpdates(items: List<ExamUpdateItem>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertUpdate(item: ExamUpdateItem): Long
+
+    @Query("UPDATE exam_updates SET isRead = 1 WHERE id = :id")
+    suspend fun markAsRead(id: Long)
+
+    @Query("DELETE FROM exam_updates WHERE id = :id")
+    suspend fun deleteUpdate(id: Long)
+}
+
+@Dao
+interface ExamObjectiveDao {
+    @Query("SELECT * FROM exam_objectives ORDER BY status ASC, examDateMillis ASC")
+    fun getAllExamObjectives(): Flow<List<ExamObjective>>
+
+    @Query("SELECT * FROM exam_objectives WHERE status = 'ACTIVE' LIMIT 1")
+    fun getActiveExamObjective(): Flow<ExamObjective?>
+
+    @Query("SELECT * FROM exam_objectives WHERE status = 'ACTIVE' LIMIT 1")
+    suspend fun getActiveExamObjectiveOnce(): ExamObjective?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertObjective(objective: ExamObjective): Long
+
+    @Update
+    suspend fun updateObjective(objective: ExamObjective)
+
+    @Query("UPDATE exam_objectives SET status = CASE WHEN id = :id THEN 'ACTIVE' ELSE 'PAUSED' END")
+    suspend fun setActiveObjective(id: Long)
+
+    @Query("DELETE FROM exam_objectives WHERE id = :id")
+    suspend fun deleteObjective(id: Long)
+}
+
+@Dao
+interface TopicMasteryDao {
+    @Query("SELECT * FROM topic_masteries ORDER BY masteryScore ASC, lastTestedMillis ASC")
+    fun getAllTopicMasteries(): Flow<List<TopicMastery>>
+
+    @Query("SELECT * FROM topic_masteries WHERE subject = :subject ORDER BY masteryScore ASC")
+    fun getTopicMasteriesBySubject(subject: String): Flow<List<TopicMastery>>
+
+    @Query("SELECT * FROM topic_masteries WHERE masteryScore < :threshold ORDER BY masteryScore ASC")
+    fun getWeakTopics(threshold: Int = 65): Flow<List<TopicMastery>>
+
+    @Query("SELECT * FROM topic_masteries WHERE masteryScore >= :threshold ORDER BY masteryScore DESC")
+    fun getMasteredTopics(threshold: Int = 85): Flow<List<TopicMastery>>
+
+    @Query("SELECT * FROM topic_masteries WHERE subject = :subject AND topic = :topic LIMIT 1")
+    suspend fun getTopicMasteryOnce(subject: String, topic: String): TopicMastery?
+
+    @Query("SELECT * FROM topic_masteries WHERE subject = :subject AND topic = :topic LIMIT 1")
+    fun getTopicMasteryFlow(subject: String, topic: String): Flow<TopicMastery?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdateTopicMastery(topicMastery: TopicMastery): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTopicMasteries(items: List<TopicMastery>)
+
+    @Query("DELETE FROM topic_masteries WHERE id = :id")
+    suspend fun deleteTopicMastery(id: Long)
+
+    @Query("DELETE FROM topic_masteries")
+    suspend fun clearAll()
+}
+
+@Dao
+interface StudentSessionHistoryDao {
+    @Query("SELECT * FROM student_session_history ORDER BY timestamp DESC")
+    fun getAllSessions(): Flow<List<StudentSessionHistory>>
+
+    @Query("SELECT * FROM student_session_history ORDER BY timestamp DESC LIMIT :limit")
+    fun getRecentSessions(limit: Int = 30): Flow<List<StudentSessionHistory>>
+
+    @Query("SELECT * FROM student_session_history WHERE sessionType = :sessionType ORDER BY timestamp DESC")
+    fun getSessionsByType(sessionType: String): Flow<List<StudentSessionHistory>>
+
+    @Query("SELECT * FROM student_session_history WHERE subject = :subject ORDER BY timestamp DESC")
+    fun getSessionsBySubject(subject: String): Flow<List<StudentSessionHistory>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSession(session: StudentSessionHistory): Long
+
+    @Query("SELECT SUM(actualMinutesSpent) FROM student_session_history")
+    fun getTotalSessionMinutes(): Flow<Int?>
+
+    @Query("DELETE FROM student_session_history WHERE id = :id")
+    suspend fun deleteSession(id: Long)
+}
+
+@Dao
+interface IntelligenceSnapshotDao {
+    @Query("SELECT * FROM intelligence_snapshots ORDER BY timestamp DESC")
+    fun getAllSnapshots(): Flow<List<IntelligenceSnapshot>>
+
+    @Query("SELECT * FROM intelligence_snapshots ORDER BY timestamp DESC LIMIT 1")
+    fun getLatestSnapshot(): Flow<IntelligenceSnapshot?>
+
+    @Query("SELECT * FROM intelligence_snapshots ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatestSnapshotOnce(): IntelligenceSnapshot?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSnapshot(snapshot: IntelligenceSnapshot): Long
+
+    @Query("DELETE FROM intelligence_snapshots")
+    suspend fun clearAll()
+}
+
+
 

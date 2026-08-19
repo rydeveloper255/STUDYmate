@@ -8,6 +8,9 @@ import coil.memory.MemoryCache
 import com.example.data.local.StudyMateDatabase
 import com.example.data.remote.AuthRepository
 import com.example.data.remote.GeminiRepository
+import com.example.data.remote.supabase.SupabaseAuthManager
+import com.example.data.remote.supabase.SupabaseClient
+import com.example.data.remote.supabase.SupabaseSyncService
 import com.example.data.repository.StudyRepository
 import com.google.firebase.FirebaseApp
 import kotlinx.coroutines.CoroutineScope
@@ -17,6 +20,15 @@ import kotlinx.coroutines.launch
 class StudyMateApplication : Application(), ImageLoaderFactory {
 
     lateinit var database: StudyMateDatabase
+        private set
+
+    lateinit var supabaseClient: SupabaseClient
+        private set
+
+    lateinit var supabaseAuthManager: SupabaseAuthManager
+        private set
+
+    lateinit var supabaseSyncService: SupabaseSyncService
         private set
 
     lateinit var authRepository: AuthRepository
@@ -81,9 +93,13 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
         }
 
         database = StudyMateDatabase.getDatabase(this)
-        authRepository = AuthRepository(this, database.userDao())
+        supabaseClient = SupabaseClient()
+        supabaseAuthManager = SupabaseAuthManager(this, supabaseClient)
+        supabaseSyncService = SupabaseSyncService(supabaseClient, supabaseAuthManager, database)
+
+        authRepository = AuthRepository(this, database.userDao(), supabaseAuthManager, supabaseClient, supabaseSyncService)
         geminiRepository = GeminiRepository()
-        studyRepository = StudyRepository(database)
+        studyRepository = StudyRepository(database, supabaseSyncService)
 
         // Initialize Focus Shield & Offline Notification System
         com.example.service.FocusShieldManager.init(this)
