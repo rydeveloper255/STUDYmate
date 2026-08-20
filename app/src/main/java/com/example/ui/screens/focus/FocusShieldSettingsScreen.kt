@@ -53,6 +53,19 @@ fun FocusShieldSettingsScreen(
 ) {
     val context = LocalContext.current
 
+    var showAccessibilitySafetyScreen by remember { mutableStateOf(false) }
+    var showAccessibilityPrivacyScreen by remember { mutableStateOf(false) }
+
+    if (showAccessibilitySafetyScreen) {
+        AccessibilitySafetySettingsScreen(onBack = { showAccessibilitySafetyScreen = false })
+        return
+    }
+
+    if (showAccessibilityPrivacyScreen) {
+        AccessibilityPrivacyScreen(onBack = { showAccessibilityPrivacyScreen = false })
+        return
+    }
+
     BackHandler(enabled = true) {
         onBack()
     }
@@ -311,6 +324,40 @@ fun FocusShieldSettingsScreen(
                             color = Color(0xFFCBD5E1),
                             lineHeight = 18.sp
                         )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        OutlinedButton(
+                            onClick = { showAccessibilitySafetyScreen = true },
+                            border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.5f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(38.dp)
+                                .testTag("open_accessibility_safety_settings_btn")
+                        ) {
+                            Icon(Icons.Filled.VerifiedUser, null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Banking & Payment Safety Settings 🛡️", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        OutlinedButton(
+                            onClick = { showAccessibilityPrivacyScreen = true },
+                            border = androidx.compose.foundation.BorderStroke(1.dp, GoldenSpark.copy(alpha = 0.5f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldenSpark),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(38.dp)
+                                .testTag("open_accessibility_privacy_btn")
+                        ) {
+                            Icon(Icons.Filled.Lock, null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Accessibility Privacy Guarantees 🔒", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
 
                         if (!isAccessibilityGranted) {
                             Spacer(modifier = Modifier.height(14.dp))

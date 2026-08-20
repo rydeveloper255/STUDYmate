@@ -44,6 +44,11 @@ fun StudyPlannerScreen(
     onStartFocusSession: (subject: String, topic: String) -> Unit,
     onRecoverMissedSessions: (mode: String) -> Unit = {},
     onUpdateDailyAvailableTime: (Int) -> Unit = {},
+    onStartSessionTimer: (StudyPlanItem) -> Unit = {},
+    deadlineWarning: String? = null,
+    userPreferences: UserStudyPreferences = UserStudyPreferences(),
+    onSavePreferences: (UserStudyPreferences) -> Unit = {},
+    activeExamContext: ExamContext = ExamContext(),
     onAddFlashcard: (subject: String, topic: String, front: String, back: String, hint: String, difficulty: String, sourceDoc: String) -> Unit = { _, _, _, _, _, _, _ -> },
     onUpdateFlashcard: (FlashcardItem) -> Unit = {},
     onDeleteFlashcard: (Long) -> Unit = {},
@@ -290,6 +295,40 @@ fun StudyPlannerScreen(
                     }
                 }
 
+                // Deadline Safety Warning Banner
+                if (deadlineWarning != null) {
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = CoralRose.copy(alpha = 0.18f),
+                            border = BorderStroke(1.dp, CoralRose.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Warning, contentDescription = null, tint = CoralRose, modifier = Modifier.size(24.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Exam Deadline Safety Warning",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = CoralRose
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = deadlineWarning,
+                                        fontSize = 11.sp,
+                                        color = Color(0xFFF1F5F9)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Plan Transparency Warning if work > available time
                 if (totalPendingMinutes > selectedTodayMinutes) {
                     item {
@@ -384,14 +423,30 @@ fun StudyPlannerScreen(
                 }
 
                 item {
-                    GlassButton(
-                        text = "⚡ Regenerate AI Plan with Gemini",
-                        onClick = onGenerateAiPlan,
-                        icon = Icons.Filled.AutoAwesome,
-                        isPrimary = false,
-                        isLoading = isGenerating,
-                        testTag = "generate_ai_plan_btn"
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        GlassButton(
+                            text = "⚡ Adaptive AI Plan",
+                            onClick = onGenerateAiPlan,
+                            icon = Icons.Filled.AutoAwesome,
+                            isPrimary = true,
+                            isLoading = isGenerating,
+                            modifier = Modifier.weight(1f),
+                            testTag = "generate_ai_plan_btn"
+                        )
+                        OutlinedButton(
+                            onClick = { showAddDialog = true },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
+                            border = BorderStroke(1.dp, NeonCyan),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Manual", fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
 
                 if (planItems.isEmpty()) {
@@ -416,7 +471,7 @@ fun StudyPlannerScreen(
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = "Tap the button above to let Gemini build your balanced curriculum schedule!",
+                                    text = "Tap 'Adaptive AI Plan' to generate your exam-aware schedule!",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color(0xFF94A3B8),
                                     textAlign = TextAlign.Center
@@ -431,7 +486,7 @@ fun StudyPlannerScreen(
                             shape = RoundedCornerShape(18.dp),
                             fillAlpha = if (item.isCompleted) 0.35f else 0.75f
                         ) {
-                            Column {
+                            Column(modifier = Modifier.padding(12.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -439,22 +494,27 @@ fun StudyPlannerScreen(
                                 ) {
                                     Row(
                                         modifier = Modifier.weight(1f),
-                                        verticalAlignment = Alignment.CenterVertically
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         Surface(
                                             shape = RoundedCornerShape(8.dp),
-                                            color = when (item.priority) {
-                                                PlanPriority.HIGH -> CoralRose.copy(alpha = 0.2f)
-                                                PlanPriority.MEDIUM -> GoldenSpark.copy(alpha = 0.2f)
-                                                PlanPriority.LOW -> EmeraldSuccess.copy(alpha = 0.2f)
+                                            color = when (item.sessionType) {
+                                                "REVISION" -> Color(0x30F59E0B)
+                                                "WEAK_TOPIC" -> Color(0x30EF4444)
+                                                "LEARNING" -> Color(0x303B82F6)
+                                                "MOCK_TEST" -> Color(0x308B5CF6)
+                                                else -> EmeraldSuccess.copy(alpha = 0.2f)
                                             }
                                         ) {
                                             Text(
-                                                text = item.priority.name,
-                                                color = when (item.priority) {
-                                                    PlanPriority.HIGH -> CoralRose
-                                                    PlanPriority.MEDIUM -> GoldenSpark
-                                                    PlanPriority.LOW -> EmeraldSuccess
+                                                text = item.sessionType.replace('_', ' '),
+                                                color = when (item.sessionType) {
+                                                    "REVISION" -> AmberAlert
+                                                    "WEAK_TOPIC" -> CoralPink
+                                                    "LEARNING" -> NeonCyan
+                                                    "MOCK_TEST" -> ElectricViolet
+                                                    else -> EmeraldSuccess
                                                 },
                                                 style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.Bold,
@@ -462,7 +522,14 @@ fun StudyPlannerScreen(
                                             )
                                         }
 
-                                        Spacer(modifier = Modifier.width(8.dp))
+                                        if (item.startTimeFormatted.isNotBlank()) {
+                                            Text(
+                                                text = "${item.startTimeFormatted}–${item.endTimeFormatted}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = GoldenSpark
+                                            )
+                                        }
 
                                         Text(
                                             text = item.subject,
@@ -471,10 +538,8 @@ fun StudyPlannerScreen(
                                             color = Color.White
                                         )
 
-                                        Spacer(modifier = Modifier.width(6.dp))
-
                                         Text(
-                                            text = "• ${item.targetMinutes} min",
+                                            text = "• ${item.targetMinutes}m",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = NeonCyan
                                         )
@@ -482,10 +547,13 @@ fun StudyPlannerScreen(
 
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         IconButton(
-                                            onClick = { onStartFocusSession(item.subject, item.topic) },
+                                            onClick = {
+                                                onStartSessionTimer(item)
+                                                onStartFocusSession(item.subject, item.topic)
+                                            },
                                             modifier = Modifier.size(32.dp)
                                         ) {
-                                            Icon(Icons.Filled.PlayCircle, "Focus", tint = NeonCyan)
+                                            Icon(Icons.Filled.PlayCircle, "Start Timer", tint = NeonCyan)
                                         }
 
                                         IconButton(
@@ -522,10 +590,17 @@ fun StudyPlannerScreen(
                                     fontWeight = FontWeight.Medium
                                 )
 
-                                if (item.notes.isNotBlank()) {
+                                if (item.aiRecommendationReason.isNotBlank()) {
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "💡 ${item.notes}",
+                                        text = "💡 ${item.aiRecommendationReason}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = NeonCyan.copy(alpha = 0.9f)
+                                    )
+                                } else if (item.notes.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "📝 ${item.notes}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = Color(0xFF94A3B8)
                                     )

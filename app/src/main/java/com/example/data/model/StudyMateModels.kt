@@ -75,19 +75,56 @@ data class StudyTimeBlock(
 @Entity(tableName = "study_plan_items")
 data class StudyPlanItem(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val userId: String = "current_user",
+    val examId: String = "",
+    val subjectId: String = "",
+    val chapterId: String = "",
+    val topicId: String = "",
     val subject: String,
     val chapter: String,
     val topic: String,
     val targetMinutes: Int,
+    val actualMinutesSpent: Int = 0,
     val isCompleted: Boolean = false,
     val scheduledDateMillis: Long = System.currentTimeMillis(),
+    val startTimeFormatted: String = "",
+    val endTimeFormatted: String = "",
+    val sessionType: String = "PRACTICE", // LEARNING, PRACTICE, REVISION, MOCK_TEST, WEAK_TOPIC, REVIEW, BREAK
+    val sessionState: String = "PLANNED", // PLANNED, STARTED, PAUSED, COMPLETED, SKIPPED, MISSED, CANCELLED
     val priority: PlanPriority = PlanPriority.HIGH,
-    val notes: String = ""
+    val aiRecommendationReason: String = "",
+    val isAiGenerated: Boolean = false,
+    val notes: String = "",
+    val completedTimestamp: Long = 0L
 )
 
 enum class PlanPriority {
     HIGH, MEDIUM, LOW
 }
+
+@Entity(tableName = "user_study_preferences")
+data class UserStudyPreferences(
+    @PrimaryKey val userId: String = "current_user",
+    val examId: String = "",
+    val dailyAvailableMinutes: Int = 180,
+    val preferredStudyWindow: String = "MORNING_EVENING", // MORNING, AFTERNOON, EVENING, NIGHT, CUSTOM
+    val windowStartHour: Int = 8,
+    val windowEndHour: Int = 22,
+    val preferredSessionMinutes: Int = 30,
+    val breakMinutes: Int = 5,
+    val breakFrequencyMinutes: Int = 25,
+    val subjectPrioritiesJson: String = "{}", // e.g. {"Physics":"HIGH","Mathematics":"MEDIUM"}
+    val topicPrioritiesJson: String = "{}",
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+data class GeneratedPlanResult(
+    val sessions: List<StudyPlanItem>,
+    val timeBudgetMinutes: Int,
+    val totalScheduledMinutes: Int,
+    val deadlineWarningMessage: String? = null,
+    val summaryAdvice: String = ""
+)
 
 @Entity(tableName = "focus_sessions")
 data class FocusSession(
@@ -120,13 +157,19 @@ enum class QuestionSourceFilter {
 enum class MockTestType(val displayName: String, val description: String, val iconName: String) {
     FULL_MOCK("Full Mock Test", "Comprehensive multi-subject test following official exam pattern", "Assignment"),
     SUBJECT_TEST("Subject Test", "Deep dive into a specific subject of the selected exam", "MenuBook"),
+    CHAPTER_TEST("Chapter Test", "Master specific chapters from your syllabus", "AutoStories"),
     TOPIC_TEST("Topic Test", "Focused mastery on a specific chapter and topic", "Topic"),
-    QUICK_PRACTICE("Quick Practice", "Rapid 10-15 speed questions with instant insights", "Bolt")
+    WEAK_AREAS("Weak Areas Test", "Targeted practice on topics where accuracy is lowest", "ReportProblem"),
+    REVISION_TEST("Revision Test", "Reinforce due topics and spaced learning queue", "Psychology"),
+    PREVIOUS_MISTAKES("Previous Mistakes Test", "Practice questions derived from past incorrect answers", "HistoryEdu"),
+    ADAPTIVE_PRACTICE("Adaptive Practice", "Dynamic difficulty adjusts live based on your accuracy", "Tune"),
+    CUSTOM_TEST("Custom Test", "Custom question counts, duration, and subject selection", "Build"),
+    TIMED_TEST("Timed Speed Test", "High-speed timed practice test for speed building", "Timer")
 }
 
 data class MockTestConfig(
-    val examId: String = "railway_rrb_ntpc",
-    val exam: String = "RRB NTPC (Railway)",
+    val examId: String = "default_exam",
+    val exam: String = "JEE / NEET / Board Exam",
     val testType: MockTestType = MockTestType.FULL_MOCK,
     val subject: String = "All Subjects",
     val chapter: String = "All Chapters",
@@ -172,7 +215,11 @@ data class MockTestAttempt(
     val skippedCount: Int = 0,
     val avgTimePerQuestionSeconds: Float = 0f,
     val markingScheme: String = "+4 / -1 (Standard)",
-    val totalTimeAllowedSeconds: Int = 600
+    val totalTimeAllowedSeconds: Int = 600,
+    val examId: String = "default_exam",
+    val language: String = "English",
+    val attemptState: String = "SUBMITTED",
+    val rawScoreEarned: Float = 0f
 )
 
 data class Question(
@@ -186,7 +233,15 @@ data class Question(
     val difficulty: String = "Medium",
     val source: QuestionSource = QuestionSource.AI_GENERATED,
     val sourceLabel: String = "AI Practice",
-    val yearOrTag: String = ""
+    val yearOrTag: String = "",
+    val examId: String = "",
+    val chapterId: String = "",
+    val language: String = "English",
+    val questionType: String = "MCQ",
+    val generationModel: String = "",
+    val generationTimestamp: Long = 0L,
+    val tags: List<String> = emptyList(),
+    val status: String = "ACTIVE"
 )
 
 data class QuestionAttemptDetail(
@@ -200,15 +255,22 @@ data class QuestionAttemptDetail(
 @Entity(tableName = "mistakes")
 data class MistakeItem(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val userId: String = "current_user",
+    val examId: String = "",
+    val subjectId: String = "",
+    val chapterId: String = "",
+    val topicId: String = "",
+    val chapter: String = "",
     val questionText: String,
     val studentAnswer: String,
     val correctAnswer: String,
     val subject: String,
     val topic: String,
-    val mistakeCategory: String = "Conceptual",
+    val mistakeCategory: String = "Conceptual", // Conceptual, Calculation, Careless, Time Pressure, Guess, Unknown
     val explanation: String,
     val timestamp: Long = System.currentTimeMillis(),
-    val isMastered: Boolean = false
+    val isMastered: Boolean = false,
+    val aiClassified: Boolean = false
 )
 
 @Entity(tableName = "flashcards")
@@ -825,22 +887,114 @@ data class ExamObjective(
 @Entity(tableName = "topic_masteries")
 data class TopicMastery(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val userId: String = "current_user",
+    val examId: String = "",
+    val subjectId: String = "",
+    val chapterId: String = "",
+    val topicId: String = "",
     val subject: String,
+    val chapter: String = "",
     val topic: String,
-    val masteryScore: Int = 50, // 0 - 100
-    val accuracyPercent: Float = 60f,
+    val studyCompletionStatus: String = "NOT_STARTED", // NOT_STARTED, STARTED, COMPLETED
+    val totalStudyMinutes: Int = 0,
+    val practiceAttempts: Int = 0,
+    val practiceCorrect: Int = 0,
+    val practiceAccuracyPercent: Float = 0f,
+    val mockAttempts: Int = 0,
+    val mockCorrect: Int = 0,
+    val recentAttemptsCount: Int = 0,
+    val recentCorrectCount: Int = 0,
+    val recentAccuracyPercent: Float = 0f,
+    val repeatedMistakesCount: Int = 0,
+    val confidenceLevel: String = "LOW", // LOW, MEDIUM, HIGH
+    val masteryState: String = "NOT_STARTED", // NOT_STARTED, LEARNING, PRACTICING, WEAK, IMPROVING, STRONG, MASTERED, REVISION_DUE
+    val masteryScore: Int = 0, // 0 - 100
+    val accuracyPercent: Float = 0f,
     val totalQuestionsAttempted: Int = 0,
     val correctQuestionsCount: Int = 0,
     val incorrectQuestionsCount: Int = 0,
     val easySolved: Int = 0,
     val medSolved: Int = 0,
     val hardSolved: Int = 0,
+    val userManualOverride: String = "NONE", // NONE, I_KNOW_THIS, NEED_HELP, IMPORTANT, SKIP_FOR_NOW
     val retentionDecayRate: Float = 1.0f,
-    val lastTestedMillis: Long = System.currentTimeMillis(),
+    val lastStudiedMillis: Long = 0L,
+    val lastTestedMillis: Long = 0L,
     val recommendedReviewDateMillis: Long = System.currentTimeMillis() + 24L * 60 * 60 * 1000,
-    val masteryLevel: String = "DEVELOPING", // NOVICE, DEVELOPING, PROFICIENT, MASTERED
+    val masteryLevel: String = "DEVELOPING", // DEPRECATED alias for backwards compatibility
     val weakSpots: List<String> = emptyList(),
     val updatedAt: Long = System.currentTimeMillis()
+)
+
+// --- Step 10 Models for Topic Mastery & Exam Readiness ---
+
+data class SubjectProgressSummary(
+    val subjectId: String,
+    val subjectName: String,
+    val totalTopicsCount: Int,
+    val completedTopicsCount: Int,
+    val masteredTopicsCount: Int,
+    val weakTopicsCount: Int,
+    val revisionDueCount: Int,
+    val overallAccuracyPercent: Float,
+    val averageMasteryScore: Int,
+    val weakTopicsList: List<TopicMastery> = emptyList()
+)
+
+data class ChapterProgressSummary(
+    val chapterId: String,
+    val chapterName: String,
+    val subjectName: String,
+    val totalTopicsCount: Int,
+    val masteredTopicsCount: Int,
+    val weakTopicsCount: Int,
+    val averageMasteryScore: Int
+)
+
+data class ExamReadinessScore(
+    val examId: String,
+    val examName: String,
+    val readinessScore: Int, // 0 - 100
+    val status: String, // EARLY_PREPARATION, BUILDING, ON_TRACK, NEEDS_ATTENTION, HIGH_READINESS, INSUFFICIENT_DATA
+    val statusBadgeText: String,
+    val syllabusCoveragePercent: Int,
+    val topicMasteryPercent: Int = 0,
+    val mockPerformancePercent: Int = 0,
+    val revisionHealthPercent: Int = 100,
+    val consistencyPercent: Int = 100,
+    val subjectBalanceScore: Int = 100,
+    val recentAccuracyPercent: Float = 0f,
+    val totalTopicsCount: Int = 0,
+    val masteredTopicsCount: Int = 0,
+    val weakTopicsCount: Int = 0,
+    val revisionDueCount: Int = 0,
+    val actionableInsight: String = "",
+    val explanation: String = "",
+    val warnings: List<String> = emptyList(),
+    val actionPlan: List<String> = emptyList(),
+    val isNearExamMode: Boolean = false
+)
+
+data class StudyRecommendation(
+    val topicId: String,
+    val examId: String,
+    val subjectName: String,
+    val chapterName: String,
+    val topicName: String,
+    val recommendedAction: String, // PRACTICE, REVISE, LEARN_NEW, MISTAKE_REVIEW
+    val reason: String,
+    val priorityScore: Int,
+    val recommendedDurationMinutes: Int,
+    val masteryState: String,
+    val currentMasteryScore: Int,
+    val isHighYield: Boolean = false
+)
+
+data class DailyStudyPlan(
+    val totalAvailableMinutes: Int,
+    val targetExamName: String,
+    val items: List<StudyRecommendation>,
+    val summaryAdvice: String
 )
 
 @Entity(tableName = "student_session_history")
@@ -875,6 +1029,102 @@ data class IntelligenceSnapshot(
     val weakTopicsCount: Int = 0,
     val masteredTopicsCount: Int = 0
 )
+
+// --- Step 14 - Smart Learning Content & Doubt Solving Models ---
+
+@Entity(tableName = "learning_topic_contents")
+data class LearningTopicContent(
+    @PrimaryKey val id: String, // e.g. "railway_rrb_ntpc_mathematics_percentage"
+    val examId: String,
+    val subject: String,
+    val chapter: String,
+    val topic: String,
+    val conceptSummary: String,
+    val explanationQuick: String,
+    val explanationNormal: String,
+    val explanationDetailed: String,
+    val keyPointsJson: String = "[]",
+    val formulasJson: String = "[]",
+    val workedExamplesJson: String = "[]",
+    val commonMistakesJson: String = "[]",
+    val practiceQuestionsJson: String = "[]",
+    val quickTestQuestionsJson: String = "[]",
+    val isAiGenerated: Boolean = true,
+    val language: String = "English",
+    val lastUpdatedMillis: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "user_learning_bookmarks")
+data class UserLearningBookmark(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val userId: String = "current_user",
+    val examId: String = "",
+    val subject: String,
+    val chapter: String = "",
+    val topic: String,
+    val contentType: String, // "TOPIC", "FORMULA", "EXAMPLE", "QUESTION"
+    val title: String,
+    val snippet: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+data class WorkedExampleItem(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val question: String,
+    val approach: String,
+    val steps: List<String>,
+    val finalAnswer: String,
+    val shortcutTip: String = ""
+)
+
+data class PracticeQuestionWithHints(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val questionText: String,
+    val options: List<String>,
+    val correctOptionIndex: Int,
+    val hints: List<String> = emptyList(), // Progressive hints
+    val fullExplanation: String,
+    val difficulty: String = "Medium",
+    val sourceBadge: String = "✨ AI Practice"
+)
+
+data class QuickTestQuestion(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val questionText: String,
+    val options: List<String>,
+    val correctOptionIndex: Int,
+    val explanation: String
+)
+
+@Entity(tableName = "question_history")
+data class QuestionHistoryEntity(
+    @PrimaryKey val id: String, // e.g. "user1_q101"
+    val userId: String = "current_user",
+    val questionId: String,
+    val examId: String = "",
+    val subject: String = "",
+    val topic: String = "",
+    val attemptCount: Int = 0,
+    val correctCount: Int = 0,
+    val incorrectCount: Int = 0,
+    val lastAttemptedAt: Long = System.currentTimeMillis(),
+    val lastResult: String = "", // "CORRECT", "INCORRECT", "SKIPPED"
+    val lastResponseTimeSecs: Int = 0
+)
+
+@Entity(tableName = "question_quality_reports")
+data class QuestionQualityReportEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val userId: String = "current_user",
+    val questionId: String,
+    val examId: String = "",
+    val reason: String, // "Wrong Answer Key", "Unclear Question", "Incorrect Options", "Out of Syllabus", "Duplicate", "Other"
+    val notes: String = "",
+    val status: String = "UNDER_REVIEW", // ACTIVE, UNDER_REVIEW, DISABLED
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+
 
 
 

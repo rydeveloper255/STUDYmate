@@ -161,7 +161,89 @@ fun MockTestSetupDialog(
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        // 1. Target Exam
+                        // 1. Test Mode & Type Selection
+                        ConfigSectionTitle(icon = Icons.Filled.Psychology, title = "Test Type & Strategy")
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(MockTestType.values()) { type ->
+                                val isSel = selectedTestType == type
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isSel) NeonCyan else Color(0x18FFFFFF),
+                                    border = if (isSel) null else BorderStroke(1.dp, Color(0x20FFFFFF)),
+                                    modifier = Modifier.springClickable(testTag = "setup_type_${type.name}") {
+                                        selectedTestType = type
+                                        if (type == MockTestType.FULL_MOCK) {
+                                            selectedSubject = "All Subjects"
+                                            selectedTopic = "All Topics"
+                                            questionCount = 30
+                                            timeLimitMinutes = 35
+                                        } else if (type == MockTestType.WEAK_AREAS) {
+                                            questionCount = 15
+                                            timeLimitMinutes = 20
+                                        } else if (type == MockTestType.PREVIOUS_MISTAKES) {
+                                            questionCount = 15
+                                            timeLimitMinutes = 20
+                                        } else if (type == MockTestType.TIMED_TEST) {
+                                            questionCount = 20
+                                            timeLimitMinutes = 15
+                                        }
+                                    }
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                        horizontalAlignment = Alignment.Start
+                                    ) {
+                                        Text(
+                                            text = type.displayName,
+                                            color = if (isSel) Color(0xFF050814) else Color.White,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = type.description,
+                                            color = if (isSel) Color(0xFF1E293B) else Color(0xFF94A3B8),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // 2. Language Selection
+                        ConfigSectionTitle(icon = Icons.Filled.Translate, title = "Language")
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            listOf("English", "Hindi", "Bilingual").forEach { lang ->
+                                val isSel = selectedLanguage.equals(lang, ignoreCase = true)
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(36.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (isSel) ElectricViolet else Color(0x18FFFFFF))
+                                        .border(1.dp, if (isSel) ElectricViolet else Color(0x20FFFFFF), RoundedCornerShape(10.dp))
+                                        .springClickable(testTag = "setup_lang_$lang") {
+                                            selectedLanguage = lang
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = lang,
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+
+                        // 3. Target Exam
                         ConfigSectionTitle(icon = Icons.Filled.School, title = "Target Exam")
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -399,7 +481,7 @@ fun MockTestSetupDialog(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    listOf(5, 10, 15, 25).forEach { count ->
+                                    listOf(10, 20, 30, 50, 100).forEach { count ->
                                         val isSel = questionCount == count
                                         Box(
                                             modifier = Modifier
@@ -407,16 +489,16 @@ fun MockTestSetupDialog(
                                                 .height(34.dp)
                                                 .clip(RoundedCornerShape(8.dp))
                                                 .background(if (isSel) NeonCyan else Color(0x18FFFFFF))
-                                                .springClickable {
+                                                .springClickable(testTag = "setup_qcount_$count") {
                                                     questionCount = count
-                                                    timeLimitMinutes = (count * 1.5).toInt().coerceAtLeast(5)
+                                                    timeLimitMinutes = (count * 1.2).toInt().coerceAtLeast(5)
                                                 },
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
                                                 text = "$count",
                                                 color = if (isSel) Color(0xFF050814) else Color.White,
-                                                style = MaterialTheme.typography.labelMedium,
+                                                style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.Bold
                                             )
                                         }

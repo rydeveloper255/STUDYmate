@@ -13,8 +13,13 @@ class StudyRepository(
     val syncService: SupabaseSyncService? = null
 ) {
     val intelligenceRepository = StudyMateIntelligenceRepository(database, syncService)
+    val smartLearningEngine = com.example.service.intelligence.SmartLearningEngine(
+        database = database,
+        geminiRepository = com.example.data.remote.GeminiRepository()
+    )
 
     val userProfile: Flow<UserProfile?> = database.userDao().getUserProfile()
+    val userStudyPreferences: Flow<UserStudyPreferences?> = database.userStudyPreferencesDao().getUserPreferences()
     val allPlanItems: Flow<List<StudyPlanItem>> = database.studyPlanDao().getAllPlanItems()
     val allFocusSessions: Flow<List<FocusSession>> = database.focusDao().getAllFocusSessions()
     val allMockTestAttempts: Flow<List<MockTestAttempt>> = database.mockTestDao().getAllAttempts()
@@ -32,6 +37,8 @@ class StudyRepository(
     val allCurrentAffairs: Flow<List<CurrentAffairsItem>> = database.currentAffairsDao().getAllCurrentAffairs()
     val savedCurrentAffairs: Flow<List<CurrentAffairsItem>> = database.currentAffairsDao().getSavedForRevision()
     val allExamUpdates: Flow<List<ExamUpdateItem>> = database.examUpdateDao().getAllExamUpdates()
+    val allLearningBookmarks: Flow<List<UserLearningBookmark>> = database.userLearningBookmarkDao().getAllBookmarks()
+
 
     // Intelligence flows
     val allExamObjectives: Flow<List<ExamObjective>> = intelligenceRepository.allExamObjectives
@@ -221,6 +228,16 @@ class StudyRepository(
     suspend fun saveUserProfile(profile: UserProfile) = withContext(Dispatchers.IO) {
         database.userDao().insertOrUpdateUserProfile(profile)
         syncService?.syncUserProfile(profile)
+    }
+
+    suspend fun saveUserPreferences(preferences: UserStudyPreferences) = withContext(Dispatchers.IO) {
+        database.userStudyPreferencesDao().saveUserPreferences(preferences)
+    }
+
+    suspend fun getUserPreferencesSync(userId: String = "current_user"): UserStudyPreferences {
+        return withContext(Dispatchers.IO) {
+            database.userStudyPreferencesDao().getUserPreferencesSync(userId) ?: UserStudyPreferences(userId = userId)
+        }
     }
 
     suspend fun addStudyPlanItem(item: StudyPlanItem): Long = withContext(Dispatchers.IO) {
@@ -847,4 +864,66 @@ class StudyRepository(
 
     suspend fun generateIntelligenceSnapshot(): IntelligenceSnapshot =
         intelligenceRepository.generateAndPersistSnapshot()
+
+    suspend fun setUserManualOverride(examId: String, subject: String, topic: String, override: String) =
+        intelligenceRepository.setUserManualOverride(examId, subject, topic, override)
+
+    suspend fun resetUserExamPreparationData(examId: String) =
+        intelligenceRepository.resetUserExamPreparationData(examId)
+
+    val allQuestionHistory: Flow<List<QuestionHistoryEntity>> = database.questionHistoryDao().getAllHistory()
+    val allQuestionQualityReports: Flow<List<QuestionQualityReportEntity>> = database.questionQualityReportDao().getAllReports()
+
+    suspend fun recordQuestionAttemptHistory(
+        questionId: String,
+        examId: String,
+        subject: String,
+        topic: String,
+        isCorrect: Boolean,
+        isSkipped: Boolean,
+        responseTimeSecs: Int
+    ) = withContext(Dispatchers.IO) {
+        val existing = database.questionHistoryDao().getHistoryForQuestion(questionId)
+        val attemptCount = (existing?.attemptCount ?: 0) + 1
+        val correctCount = (existing?.correctCount ?: 0) + (if (isCorrect) 1 else 0)
+        val incorrectCount = (existing?.incorrectCount ?: 0) + (if (!isCorrect && !isSkipped) 1 else 0)
+        val resultStr = if (isSkipped) "SKIPPED" else if (isCorrect) "CORRECT" else "INCORRECT"
+
+        val updated = QuestionHistoryEntity(
+            id = "current_user_$questionId",
+            userId = "current_user",
+            questionId = questionId,
+            examId = examId,
+            subject = subject,
+            topic = topic,
+            attemptCount = attemptCount,
+            correctCount = correctCount,
+            incorrectCount = incorrectCount,
+            lastAttemptedAt = System.currentTimeMillis(),
+            lastResult = resultStr,
+            lastResponseTimeSecs = responseTimeSecs
+        )
+        database.questionHistoryDao().insertOrUpdateHistory(updated)
+    }
+
+    suspend fun reportQuestionQuality(
+        questionId: String,
+        examId: String,
+        reason: String,
+        notes: String
+    ): Long = withContext(Dispatchers.IO) {
+        val report = QuestionQualityReportEntity(
+            userId = "current_user",
+            questionId = questionId,
+            examId = examId,
+            reason = reason,
+            notes = notes,
+            status = "UNDER_REVIEW"
+        )
+        database.questionQualityReportDao().insertReport(report)
+    }
+
+    suspend fun getFlaggedQuestionIds(): List<String> = withContext(Dispatchers.IO) {
+        database.questionQualityReportDao().getFlaggedQuestionIds()
+    }
 }

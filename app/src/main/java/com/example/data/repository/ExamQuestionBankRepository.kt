@@ -375,4 +375,8 @@ class ExamQuestionBankRepository {
             desiredCount = 100
         ).size
     }
+
+    fun getAllQuestions(): List<Question> {
+        return questionBank
+    }
 }

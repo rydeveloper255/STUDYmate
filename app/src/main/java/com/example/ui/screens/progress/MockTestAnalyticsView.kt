@@ -41,7 +41,8 @@ fun MockTestAnalyticsView(
     onReviewTest: (MockTestAttempt) -> Unit,
     onRetakeTest: (MockTestAttempt) -> Unit,
     onDeleteTest: (Long) -> Unit,
-    onManageMaterials: () -> Unit
+    onManageMaterials: () -> Unit,
+    onOpenQuestionBankExplorer: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val totalAttempts = attempts.size
@@ -100,7 +101,7 @@ fun MockTestAnalyticsView(
             )
         }
 
-        // Action Row: Export Portfolio PDF + Manage Questions
+        // Action Row: Export Portfolio PDF + Explore QB + Manage Questions
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -119,8 +120,28 @@ fun MockTestAnalyticsView(
                     .testTag("export_analytics_pdf_btn")
             ) {
                 Icon(Icons.Filled.PictureAsPdf, null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Export Portfolio PDF", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Export PDF", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+            }
+
+            if (onOpenQuestionBankExplorer != null) {
+                Button(
+                    onClick = onOpenQuestionBankExplorer,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0x2510B981),
+                        contentColor = EmeraldSuccess
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.5f)),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(42.dp)
+                        .testTag("open_qb_explorer_btn")
+                ) {
+                    Icon(Icons.Filled.MenuBook, null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Question Bank", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                }
             }
 
             OutlinedButton(
@@ -133,8 +154,8 @@ fun MockTestAnalyticsView(
                     .testTag("manage_custom_materials_btn")
             ) {
                 Icon(Icons.Filled.Description, null, tint = NeonCyan, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("My Study Sheets", color = NeonCyan, style = MaterialTheme.typography.labelMedium)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Materials", color = NeonCyan, style = MaterialTheme.typography.labelSmall)
             }
         }
 

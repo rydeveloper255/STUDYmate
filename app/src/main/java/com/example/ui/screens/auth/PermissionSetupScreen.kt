@@ -384,6 +384,16 @@ fun PermissionSetupScreen(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
+                        Text(
+                            text = "🛡️ Safety Mode Enabled: Sensitive banking & payment apps (Paytm, PhonePe, Google Pay) automatically run in Passive Mode with zero screen interaction.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = NeonCyan,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
                         if (!isAccessibilityGranted) {
                             Button(
                                 onClick = {

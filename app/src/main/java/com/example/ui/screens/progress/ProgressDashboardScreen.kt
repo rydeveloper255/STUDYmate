@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.data.model.*
+import com.example.service.intelligence.*
 import com.example.ui.components.GlassCard
 import com.example.ui.components.StreakBadge
 import com.example.ui.components.springClickable
@@ -60,11 +61,40 @@ fun ProgressDashboardScreen(
     onMarkMistakeMastered: (Long, Boolean) -> Unit,
     onSaveExamObjective: (ExamObjective) -> Unit = {},
     onStartFocusOnTopic: (subject: String, topic: String) -> Unit = { _, _ -> },
+    examReadiness: ExamReadinessScore? = null,
+    subjectSummaries: List<SubjectProgressSummary> = emptyList(),
+    recommendations: List<StudyRecommendation> = emptyList(),
+    dailyPlan: DailyStudyPlan? = null,
+    onSetManualTopicOverride: (subject: String, topic: String, override: String) -> Unit = { _, _, _ -> },
+    onResetPreparationData: () -> Unit = {},
+    onOpenReadinessCenter: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Analytics & Mocks, 1: Topic Mastery, 2: Mistake Book
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: AI Coach & Mocks, 1: Smart Revision Queue, 2: Mastery & Goals, 3: Mistake Book
     var showSetupDialog by remember { mutableStateOf(false) }
     var showMaterialManager by remember { mutableStateOf(false) }
+    var showQuestionBankExplorer by remember { mutableStateOf(false) }
+
+    // Calculate real performance report and revision queue
+    val performanceReport = remember(user, attempts, mistakes, topicMasteries) {
+        PerformanceCoachEngine.computePerformanceReport(
+            profile = user ?: UserProfile(),
+            mockAttempts = attempts,
+            mistakes = mistakes,
+            topicMasteries = topicMasteries,
+            focusSessions = emptyList(),
+            plans = emptyList()
+        )
+    }
+
+    val revisionQueue = remember(topicMasteries, mistakes, attempts, user) {
+        SmartRevisionEngine.buildRevisionQueue(
+            topicMasteries = topicMasteries,
+            mistakes = mistakes,
+            mockAttempts = attempts,
+            examDateMillis = user?.examDateMillis ?: (System.currentTimeMillis() + 30L * 24 * 3600 * 1000)
+        )
+    }
 
     // If test is in progress or completed, show Fullscreen Active Mock Test / Review screen
     if (activeTestState.isTestInProgress || activeTestState.isCompleted) {
@@ -104,13 +134,13 @@ fun ProgressDashboardScreen(
             ) {
                 Column {
                     Text(
-                        text = "📊 Progress & Intelligence",
+                        text = "📊 AI Coach & Intelligence",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
                     Text(
-                        text = "Exam mastery, timed mocks & session history",
+                        text = "Real preparation analysis, spaced revision & mocks",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF94A3B8)
                     )
@@ -128,11 +158,12 @@ fun ProgressDashboardScreen(
                     .clip(RoundedCornerShape(16.dp))
                     .background(Color(0x251E293B))
                     .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 listOf(
-                    "Mocks (${attempts.size})",
-                    "Mastery & Goals",
+                    "AI Coach",
+                    "Revision (${revisionQueue.size})",
+                    "Mastery",
                     "Mistakes (${mistakes.size})"
                 ).forEachIndexed { idx, label ->
                     val isSelected = selectedTab == idx
@@ -154,7 +185,8 @@ fun ProgressDashboardScreen(
                             text = label,
                             style = MaterialTheme.typography.labelSmall,
                             color = if (isSelected) Color(0xFF070B19) else Color(0xFFCBD5E1),
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            maxLines = 1
                         )
                     }
                 }
@@ -162,8 +194,83 @@ fun ProgressDashboardScreen(
         }
 
         if (selectedTab == 0) {
-            // --- SECTION 0: ANALYTICS & MOCK TESTS ---
+            // --- SECTION 0: AI PERFORMANCE COACH & MOCK TESTS ---
             item {
+                GlassCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .springClickable(testTag = "progress_exam_readiness_banner", onClick = onOpenReadinessCenter),
+                    elevation = 6.dp,
+                    fillAlpha = 0.8f
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.CenterFocusStrong, null, tint = NeonCyan, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "EXAM READINESS CENTER",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeonCyan
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Readiness Score: ${examReadiness?.readinessScore ?: 0}% • ${examReadiness?.statusBadgeText ?: "Insufficient Data"}",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = examReadiness?.explanation ?: "View subject heatmaps, syllabus coverage & readiness breakdown",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFFCBD5E1),
+                                maxLines = 1
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Button(
+                            onClick = onOpenReadinessCenter,
+                            colors = ButtonDefaults.buttonColors(containerColor = ElectricIndigo),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text("Open →", color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            item {
+                PerformanceCoachView(
+                    report = performanceReport,
+                    onStartNextBestAction = { nba ->
+                        onStartFocusOnTopic(nba.subject, nba.topic)
+                    },
+                    onStartQuickPractice = { subject, topic ->
+                        onStartTestWithConfig(
+                            MockTestConfig(
+                                exam = user?.examName ?: "JEE Main",
+                                testType = MockTestType.SUBJECT_TEST,
+                                subject = subject,
+                                topic = topic,
+                                questionCount = 10,
+                                timeLimitMinutes = 15
+                            )
+                        )
+                    }
+                )
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(8.dp))
                 MockTestAnalyticsView(
                     attempts = attempts,
                     user = user,
@@ -173,11 +280,34 @@ fun ProgressDashboardScreen(
                     onReviewTest = onReviewPastTest,
                     onRetakeTest = onRetakeTest,
                     onDeleteTest = onDeletePastTest,
-                    onManageMaterials = { showMaterialManager = true }
+                    onManageMaterials = { showMaterialManager = true },
+                    onOpenQuestionBankExplorer = { showQuestionBankExplorer = true }
                 )
             }
         } else if (selectedTab == 1) {
-            // --- SECTION 1: TOPIC MASTERY & OBJECTIVES ---
+            // --- SECTION 1: SMART REVISION QUEUE ---
+            item {
+                SmartRevisionQueueView(
+                    queue = revisionQueue,
+                    onStartRevisionSession = { item ->
+                        onStartFocusOnTopic(item.subject, item.topic)
+                    },
+                    onStartQuickRevisionTest = { item, count ->
+                        onStartTestWithConfig(
+                            MockTestConfig(
+                                exam = user?.examName ?: "JEE Main",
+                                testType = MockTestType.TOPIC_TEST,
+                                subject = item.subject,
+                                topic = item.topic,
+                                questionCount = count,
+                                timeLimitMinutes = if (count <= 5) 10 else 20
+                            )
+                        )
+                    }
+                )
+            }
+        } else if (selectedTab == 2) {
+            // --- SECTION 2: TOPIC MASTERY & OBJECTIVES ---
             item {
                 TopicMasteryAndObjectivesView(
                     user = user,
@@ -185,171 +315,28 @@ fun ProgressDashboardScreen(
                     topicMasteries = topicMasteries,
                     sessionHistory = sessionHistory,
                     snapshot = snapshot,
+                    examReadiness = examReadiness,
+                    subjectSummaries = subjectSummaries,
+                    recommendations = recommendations,
+                    dailyPlan = dailyPlan,
                     onSaveExamObjective = onSaveExamObjective,
-                    onStartFocusOnTopic = onStartFocusOnTopic
+                    onStartFocusOnTopic = onStartFocusOnTopic,
+                    onSetManualTopicOverride = onSetManualTopicOverride,
+                    onResetPreparationData = onResetPreparationData
                 )
             }
         } else {
-            // --- SECTION 2: MISTAKE BOOK ---
+            // --- SECTION 3: MISTAKE REVIEW & DIAGNOSTICS ---
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "Mistake Book 📖",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "Wrong mock test answers auto-cataloged for mastery",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF94A3B8)
-                        )
-                    }
-
-                    Button(
-                        onClick = { onDiagnoseMistakes(user?.subjects?.firstOrNull() ?: "Physics") },
-                        colors = ButtonDefaults.buttonColors(containerColor = NebulaPurple),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.testTag("diagnose_mistakes_btn")
-                    ) {
-                        Icon(Icons.Filled.AutoAwesome, null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("AI Diagnosis", fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-
-            if (mistakeDiagnosis != null) {
-                item {
-                    GlassCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        fillAlpha = 0.85f
-                    ) {
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.Psychology, null, tint = GoldenSpark, modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Gemini Mistake Pattern Diagnosis",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = GoldenSpark
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = mistakeDiagnosis,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFFE2E8F0),
-                                lineHeight = 20.sp
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (mistakes.isEmpty()) {
-                item {
-                    GlassCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        fillAlpha = 0.5f
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Icon(Icons.Filled.DoneAll, null, tint = EmeraldSuccess, modifier = Modifier.size(40.dp))
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = "Zero Mistakes Recorded! 🎉",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Any incorrect answers from mock tests are automatically saved here for deep revision.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF94A3B8),
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    }
-                }
-            } else {
-                items(mistakes, key = { it.id }) { mistake ->
-                    GlassCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(18.dp),
-                        fillAlpha = if (mistake.isMastered) 0.35f else 0.75f
-                    ) {
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "${mistake.subject} • ${mistake.topic}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = NeonCyan,
-                                    fontWeight = FontWeight.Bold
-                                )
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = if (mistake.isMastered) "Mastered" else "Mark Mastered",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (mistake.isMastered) EmeraldSuccess else Color(0xFF94A3B8)
-                                    )
-                                    Checkbox(
-                                        checked = mistake.isMastered,
-                                        onCheckedChange = { onMarkMistakeMastered(mistake.id, !mistake.isMastered) },
-                                        colors = CheckboxDefaults.colors(checkedColor = EmeraldSuccess)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(
-                                text = "Q: ${mistake.questionText}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Row {
-                                Text(text = "❌ Your Answer: ", color = CoralRose, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                                Text(text = mistake.studentAnswer, color = Color(0xFFCBD5E1), style = MaterialTheme.typography.bodySmall)
-                            }
-
-                            Row {
-                                Text(text = "✅ Correct: ", color = EmeraldSuccess, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                                Text(text = mistake.correctAnswer, color = Color.White, style = MaterialTheme.typography.bodySmall)
-                            }
-
-                            if (mistake.explanation.isNotBlank()) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = "💡 Explanation: ${mistake.explanation}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF94A3B8)
-                                )
-                            }
-                        }
-                    }
-                }
+                MistakeReviewView(
+                    mistakes = mistakes,
+                    onDiagnoseMistakes = onDiagnoseMistakes,
+                    onMarkMistakeMastered = onMarkMistakeMastered,
+                    onRequestAiExplanation = { mistake ->
+                        onDiagnoseMistakes(mistake.subject)
+                    },
+                    aiExplanationText = mistakeDiagnosis
+                )
             }
         }
     }
@@ -379,6 +366,30 @@ fun ProgressDashboardScreen(
             onDismiss = { showMaterialManager = false },
             onSaveMaterial = onSaveUserMaterial,
             onDeleteMaterial = onDeleteUserMaterial
+        )
+    }
+
+    // Modal for Smart Question Bank Explorer
+    if (showQuestionBankExplorer) {
+        QuestionBankExplorerDialog(
+            repository = com.example.data.repository.ExamQuestionBankRepository(),
+            currentExamName = user?.examName ?: "RRB NTPC (Railway)",
+            onDismiss = { showQuestionBankExplorer = false },
+            onStartPracticeWithQuestions = { selectedQs, title ->
+                showQuestionBankExplorer = false
+                onStartTestWithConfig(
+                    MockTestConfig(
+                        exam = user?.examName ?: "RRB NTPC (Railway)",
+                        testType = MockTestType.CUSTOM_TEST,
+                        subject = selectedQs.firstOrNull()?.subject ?: "Mixed",
+                        questionCount = selectedQs.size,
+                        timeLimitMinutes = (selectedQs.size * 1.5).toInt().coerceAtLeast(10)
+                    )
+                )
+            },
+            onReportQuestion = { qId, reason, notes ->
+                // Handled in viewModel via reportQuestion
+            }
         )
     }
 

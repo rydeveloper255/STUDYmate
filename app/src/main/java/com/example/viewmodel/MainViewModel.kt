@@ -14,6 +14,7 @@ import com.example.data.remote.GeminiRepository
 import com.example.data.repository.ExamCatalogRepository
 import com.example.data.repository.StudyRepository
 import com.example.service.intelligence.StudyMateIntelligenceEngine
+import kotlin.math.roundToInt
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -78,6 +79,51 @@ class MainViewModel(
     val userProfile: StateFlow<UserProfile?> = studyRepository.userProfile
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    // --- Step 9 Smart Exam Intelligence Service & Context ---
+    val examIntelligenceService = com.example.service.intelligence.ExamIntelligenceService(
+        examCatalogDao = (application as StudyMateApplication).database.examCatalogDao(),
+        supabaseClient = (application as StudyMateApplication).supabaseClient,
+        geminiRepository = geminiRepository
+    )
+
+    val examContextRepository = com.example.data.repository.ExamContextRepository(
+        database = (application as StudyMateApplication).database,
+        intelligenceService = examIntelligenceService,
+        syncService = (application as StudyMateApplication).supabaseSyncService,
+        scope = viewModelScope
+    )
+
+    val activeExamContext: StateFlow<ExamContext> = examContextRepository.activeExamContext
+    val examDiscoveryState: StateFlow<ExamDiscoveryState> = examContextRepository.discoveryState
+
+    fun refreshActiveExamSyllabus() {
+        viewModelScope.launch {
+            val curr = activeExamContext.value
+            examContextRepository.loadExamContext(
+                examId = curr.examId,
+                examName = curr.examName,
+                category = curr.category,
+                forceRefresh = true
+            )
+        }
+    }
+
+    fun confirmExamChange(
+        newExamId: String,
+        newExamName: String,
+        category: String = "Competitive Exams",
+        targetDateMillis: Long = System.currentTimeMillis() + 60L * 24 * 60 * 60 * 1000
+    ) {
+        viewModelScope.launch {
+            examContextRepository.confirmExamChange(
+                newExamId = newExamId,
+                newExamName = newExamName,
+                category = category,
+                targetDateMillis = targetDateMillis
+            )
+        }
+    }
+
     // --- Verified Exam Catalog & Single Authoritative Selected Exam ---
     val allCatalogExams: StateFlow<List<ExamEntity>> = examCatalogRepository.allExams
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -135,8 +181,33 @@ class MainViewModel(
     val studyPlanItems: StateFlow<List<StudyPlanItem>> = studyRepository.allPlanItems
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val userStudyPreferences: StateFlow<UserStudyPreferences> = studyRepository.userStudyPreferences
+        .map { it ?: UserStudyPreferences() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UserStudyPreferences())
+
     private val _isPlanGenerating = MutableStateFlow(false)
     val isPlanGenerating: StateFlow<Boolean> = _isPlanGenerating.asStateFlow()
+
+    private val _deadlineWarning = MutableStateFlow<String?>(null)
+    val deadlineWarning: StateFlow<String?> = _deadlineWarning.asStateFlow()
+
+    // --- Active Timer State ---
+    private val _activeStudySession = MutableStateFlow<StudyPlanItem?>(null)
+    val activeStudySession: StateFlow<StudyPlanItem?> = _activeStudySession.asStateFlow()
+
+    private val _sessionRemainingSeconds = MutableStateFlow(0)
+    val sessionRemainingSeconds: StateFlow<Int> = _sessionRemainingSeconds.asStateFlow()
+
+    private val _isSessionTimerRunning = MutableStateFlow(false)
+    val isSessionTimerRunning: StateFlow<Boolean> = _isSessionTimerRunning.asStateFlow()
+
+    private val _isSessionPaused = MutableStateFlow(false)
+    val isSessionPaused: StateFlow<Boolean> = _isSessionPaused.asStateFlow()
+
+    private val _activeSessionActualMinutes = MutableStateFlow(0)
+    val activeSessionActualMinutes: StateFlow<Int> = _activeSessionActualMinutes.asStateFlow()
+
+    private var sessionTimerJob: Job? = null
 
     // --- AI Tutor Chat ---
     private val _chatMessages = MutableStateFlow<List<ChatMessage>>(
@@ -280,6 +351,69 @@ class MainViewModel(
 
     private val _selectedAvailableTimeMinutes = MutableStateFlow<Int?>(null)
     val selectedAvailableTimeMinutes: StateFlow<Int?> = _selectedAvailableTimeMinutes.asStateFlow()
+
+    // --- Step 10 Topic Mastery & Intelligence Engine State Flows ---
+    val subjectProgressSummaries: StateFlow<List<SubjectProgressSummary>> = combine(
+        activeExamContext,
+        allTopicMasteries
+    ) { examCtx, masteries ->
+        com.example.service.intelligence.TopicMasteryEngine.buildSubjectSummaries(examCtx, masteries)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val examReadinessScore: StateFlow<ExamReadinessScore> = combine(
+        activeExamContext,
+        allTopicMasteries,
+        mockTestAttempts,
+        userProfile
+    ) { examCtx, masteries, mocks, user ->
+        val streak = user?.streakDays ?: 1
+        val examDateMillis = user?.examDateMillis ?: 0L
+        com.example.service.intelligence.TopicMasteryEngine.calculateExamReadiness(examCtx, masteries, mocks, streak, examDateMillis)
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        ExamReadinessScore(
+            examId = "",
+            examName = "Competitive Exam",
+            readinessScore = 0,
+            status = "STARTING",
+            statusBadgeText = "Starting Preparation 🌱",
+            syllabusCoveragePercent = 0,
+            subjectBalanceScore = 0,
+            recentAccuracyPercent = 0f,
+            totalTopicsCount = 0,
+            masteredTopicsCount = 0,
+            weakTopicsCount = 0,
+            revisionDueCount = 0,
+            actionableInsight = "Begin studying foundational topics."
+        )
+    )
+
+    val studyRecommendations: StateFlow<List<StudyRecommendation>> = combine(
+        activeExamContext,
+        allTopicMasteries,
+        mistakes
+    ) { examCtx, masteries, mistakeList ->
+        com.example.service.intelligence.TopicMasteryEngine.generateRecommendations(examCtx, masteries, mistakeList)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val dailyStudyPlan: StateFlow<DailyStudyPlan> = combine(
+        _selectedAvailableTimeMinutes,
+        studyRecommendations,
+        activeExamContext
+    ) { timeMinutes, recs, examCtx ->
+        val budget = timeMinutes ?: 60
+        com.example.service.intelligence.TopicMasteryEngine.generateDailyStudyPlan(budget, recs, examCtx.examName)
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        DailyStudyPlan(
+            totalAvailableMinutes = 60,
+            targetExamName = "Exam",
+            items = emptyList(),
+            summaryAdvice = "Plan your daily study session."
+        )
+    )
 
     // --- Smart Search State ---
     private val _smartSearchResult = MutableStateFlow<SmartSearchResult?>(null)
@@ -505,21 +639,136 @@ class MainViewModel(
     // --- Study Plan Actions ---
 
     fun generateAiStudyPlan() {
-        val profile = userProfile.value ?: return
+        generateAdaptiveDailyPlan()
+    }
+
+    fun generateAdaptiveDailyPlan(overrideAvailableMinutes: Int? = null) {
+        val profile = userProfile.value ?: UserProfile()
         viewModelScope.launch {
             _isPlanGenerating.value = true
-            val result = geminiRepository.generateStudyPlan(
-                subjects = profile.subjects,
-                grade = profile.grade,
-                goal = profile.goal,
-                dailyMinutes = profile.dailyTargetMinutes,
-                preferredTime = profile.preferredStudyTime
+            val examCtx = activeExamContext.value ?: ExamContext()
+            val masteries = allTopicMasteries.value
+            val mistakeList = mistakes.value
+            val flashcardsList = flashcards.value
+            val attempts = mockTestAttempts.value
+            val existingPlans = studyPlanItems.value
+            val currentPrefs = userStudyPreferences.value
+            val prefs = if (overrideAvailableMinutes != null) currentPrefs.copy(dailyAvailableMinutes = overrideAvailableMinutes) else currentPrefs
+
+            val daysRemaining = ((profile.examDateMillis - System.currentTimeMillis()) / (1000L * 86400)).coerceAtLeast(1).toInt()
+
+            val result = com.example.service.intelligence.StudyPlannerEngine.generateAdaptiveDailyPlan(
+                examContext = examCtx,
+                topicMasteries = masteries,
+                mistakes = mistakeList,
+                flashcards = flashcardsList,
+                recentMockAttempts = attempts,
+                existingTodayPlans = existingPlans,
+                userPreferences = prefs,
+                examDaysRemaining = daysRemaining
             )
-            result.onSuccess { items ->
-                studyRepository.replaceStudyPlan(items)
-            }
+
+            _deadlineWarning.value = result.deadlineWarningMessage
+            studyRepository.replaceStudyPlan(result.sessions)
+            studyRepository.saveUserPreferences(prefs)
+
             _isPlanGenerating.value = false
         }
+    }
+
+    fun saveUserPreferences(preferences: UserStudyPreferences) {
+        viewModelScope.launch {
+            studyRepository.saveUserPreferences(preferences)
+        }
+    }
+
+    fun updateSubjectPriority(subjectName: String, priority: String) {
+        viewModelScope.launch {
+            val current = userStudyPreferences.value
+            val json = try {
+                org.json.JSONObject(current.subjectPrioritiesJson)
+            } catch (e: Exception) {
+                org.json.JSONObject()
+            }
+            json.put(subjectName, priority)
+            saveUserPreferences(current.copy(subjectPrioritiesJson = json.toString()))
+        }
+    }
+
+    // --- Interactive Session Timer Methods ---
+
+    fun startStudySession(item: StudyPlanItem) {
+        _activeStudySession.value = item
+        val initialSeconds = (item.targetMinutes * 60).coerceAtLeast(60)
+        _sessionRemainingSeconds.value = initialSeconds
+        _isSessionTimerRunning.value = true
+        _isSessionPaused.value = false
+        _activeSessionActualMinutes.value = 0
+        startSessionTimerLoop()
+    }
+
+    private fun startSessionTimerLoop() {
+        sessionTimerJob?.cancel()
+        sessionTimerJob = viewModelScope.launch {
+            var elapsedSeconds = 0
+            while (_isSessionTimerRunning.value && _sessionRemainingSeconds.value > 0) {
+                kotlinx.coroutines.delay(1000L)
+                if (!_isSessionPaused.value) {
+                    _sessionRemainingSeconds.value = (_sessionRemainingSeconds.value - 1).coerceAtLeast(0)
+                    elapsedSeconds++
+                    _activeSessionActualMinutes.value = elapsedSeconds / 60
+                }
+            }
+            if (_sessionRemainingSeconds.value == 0 && _activeStudySession.value != null) {
+                finishStudySession("Target session time completed!")
+            }
+        }
+    }
+
+    fun pauseStudySession() {
+        _isSessionPaused.value = true
+    }
+
+    fun resumeStudySession() {
+        _isSessionPaused.value = false
+    }
+
+    fun finishStudySession(notes: String = "") {
+        val session = _activeStudySession.value ?: return
+        sessionTimerJob?.cancel()
+        _isSessionTimerRunning.value = false
+        val actualMins = _activeSessionActualMinutes.value.coerceAtLeast(1)
+
+        viewModelScope.launch {
+            val updatedPlan = session.copy(
+                isCompleted = true,
+                actualMinutesSpent = actualMins,
+                sessionState = "COMPLETED",
+                completedTimestamp = System.currentTimeMillis(),
+                notes = if (notes.isNotBlank()) notes else session.notes
+            )
+            studyRepository.updateStudyPlanItem(updatedPlan)
+
+            studyRepository.recordFocusSession(
+                subject = session.subject,
+                topic = session.topic,
+                durationMinutes = session.targetMinutes,
+                actualMinutesSpent = actualMins
+            )
+
+            studyRepository.togglePlanItemCompletion(session.id, true, xpReward = 50)
+
+            _activeStudySession.value = null
+            _activeSessionActualMinutes.value = 0
+            _sessionRemainingSeconds.value = 0
+        }
+    }
+
+    fun cancelStudySession() {
+        sessionTimerJob?.cancel()
+        _isSessionTimerRunning.value = false
+        _isSessionPaused.value = false
+        _activeStudySession.value = null
     }
 
     fun togglePlanItem(id: Long, completed: Boolean) {
@@ -841,6 +1090,8 @@ class MainViewModel(
         }
     }
 
+    fun speakText(text: String) = speakTts(text)
+
     // --- Focus Mode Actions ---
 
     fun startFocusSession(subject: String, topic: String, durationMinutes: Int = 25) {
@@ -946,17 +1197,93 @@ class MainViewModel(
             _isTestGenerating.value = true
 
             val targetExamName = config.exam.ifBlank { selectedExam.value.examName }
+            val masteries = allTopicMasteries.value
+            val currentMistakes = mistakes.value
+            val flaggedIds = studyRepository.getFlaggedQuestionIds()
+            val historyList = studyRepository.allQuestionHistory.firstOrNull() ?: emptyList()
 
-            // 1. Fetch verified exam questions
-            var questions = examQuestionBankRepository.getQuestionsForTest(
-                examName = targetExamName,
-                subject = config.subject,
-                topic = config.topic,
-                difficulty = config.difficulty,
-                language = config.language,
-                desiredCount = config.questionCount,
-                testType = config.testType
-            )
+            val weakTopicsSet = masteries.filter { it.masteryState == "WEAK" || it.masteryScore < 60 }.map { it.topic }.toSet()
+            val mistakeTopicsSet = currentMistakes.filter { !it.isMastered }.map { it.topic }.toSet()
+
+            var questions = when (config.testType) {
+                MockTestType.WEAK_AREAS -> {
+                    val candidateAll = examQuestionBankRepository.getQuestionsForTest(
+                        examName = targetExamName,
+                        subject = config.subject,
+                        topic = "All Topics",
+                        difficulty = "Mixed",
+                        language = config.language,
+                        desiredCount = 50,
+                        testType = config.testType
+                    )
+                    com.example.service.intelligence.SmartMockEngine.filterWeakAreaQuestions(
+                        allQuestions = candidateAll,
+                        topicMasteries = masteries,
+                        mistakes = currentMistakes,
+                        targetSubject = config.subject,
+                        desiredCount = config.questionCount
+                    )
+                }
+                MockTestType.REVISION_TEST -> {
+                    val candidateAll = examQuestionBankRepository.getQuestionsForTest(
+                        examName = targetExamName,
+                        subject = config.subject,
+                        topic = "All Topics",
+                        difficulty = "Mixed",
+                        language = config.language,
+                        desiredCount = 50,
+                        testType = config.testType
+                    )
+                    com.example.service.intelligence.SmartMockEngine.filterRevisionQuestions(
+                        allQuestions = candidateAll,
+                        topicMasteries = masteries,
+                        targetSubject = config.subject,
+                        desiredCount = config.questionCount
+                    )
+                }
+                MockTestType.PREVIOUS_MISTAKES -> {
+                    val candidateAll = examQuestionBankRepository.getQuestionsForTest(
+                        examName = targetExamName,
+                        subject = config.subject,
+                        topic = "All Topics",
+                        difficulty = "Mixed",
+                        language = config.language,
+                        desiredCount = 50,
+                        testType = config.testType
+                    )
+                    com.example.service.intelligence.SmartMockEngine.filterPreviousMistakeQuestions(
+                        allQuestions = candidateAll,
+                        mistakes = currentMistakes,
+                        targetSubject = config.subject,
+                        desiredCount = config.questionCount
+                    )
+                }
+                else -> {
+                    val candidateAll = examQuestionBankRepository.getQuestionsForTest(
+                        examName = targetExamName,
+                        subject = config.subject,
+                        topic = config.topic,
+                        difficulty = config.difficulty,
+                        language = config.language,
+                        desiredCount = 50,
+                        testType = config.testType
+                    )
+                    com.example.service.intelligence.SmartMockEngine.rankAndSelectQuestions(
+                        candidates = candidateAll,
+                        targetExamName = targetExamName,
+                        targetSubject = config.subject,
+                        targetTopic = config.topic,
+                        targetDifficulty = config.difficulty,
+                        targetLanguage = config.language,
+                        history = historyList,
+                        weakTopics = weakTopicsSet,
+                        mistakeTopics = mistakeTopicsSet,
+                        flaggedQuestionIds = flaggedIds,
+                        desiredCount = config.questionCount,
+                        testType = config.testType
+                    )
+                }
+            }
 
             // 2. If additional questions needed, request exam-aware questions from AI
             if (questions.size < config.questionCount) {
@@ -964,7 +1291,10 @@ class MainViewModel(
                 val aiResult = geminiRepository.generateMockTestQuestions(
                     subject = if (config.subject == "All Subjects") (selectedExamSubjects.value.firstOrNull()?.name ?: "General") else config.subject,
                     chapter = config.topic,
-                    count = needCount
+                    difficulty = config.difficulty,
+                    count = needCount,
+                    examName = targetExamName,
+                    language = config.language
                 )
                 aiResult.onSuccess { aiQs ->
                     val tagged = aiQs.map { q ->
@@ -976,7 +1306,9 @@ class MainViewModel(
                             yearOrTag = targetExamName
                         )
                     }
-                    questions = questions + tagged
+                    questions = com.example.service.intelligence.SmartMockEngine.deduplicateQuestions(
+                        com.example.service.intelligence.SmartMockEngine.validateAndFilterQuestions(questions + tagged)
+                    )
                 }
             }
 
@@ -989,8 +1321,14 @@ class MainViewModel(
                 title = when (config.testType) {
                     MockTestType.FULL_MOCK -> "$targetExamName Full Mock Test"
                     MockTestType.SUBJECT_TEST -> "$targetExamName - ${config.subject}"
-                    MockTestType.TOPIC_TEST -> "$targetExamName - ${config.topic}"
-                    MockTestType.QUICK_PRACTICE -> "$targetExamName Speed Practice"
+                    MockTestType.CHAPTER_TEST -> "$targetExamName - Chapter: ${config.chapter}"
+                    MockTestType.TOPIC_TEST -> "$targetExamName - Topic: ${config.topic}"
+                    MockTestType.WEAK_AREAS -> "$targetExamName - Weak Areas Targeted Test"
+                    MockTestType.REVISION_TEST -> "$targetExamName - Spaced Revision Test"
+                    MockTestType.PREVIOUS_MISTAKES -> "$targetExamName - Past Mistakes Retest"
+                    MockTestType.ADAPTIVE_PRACTICE -> "$targetExamName - Adaptive Live Practice"
+                    MockTestType.CUSTOM_TEST -> "$targetExamName - Custom Test"
+                    MockTestType.TIMED_TEST -> "$targetExamName - Timed Speed Test"
                 },
                 questions = finalQuestions,
                 currentQuestionIndex = 0,
@@ -1033,9 +1371,25 @@ class MainViewModel(
     }
 
     fun selectTestAnswer(questionIndex: Int, optionIndex: Int) {
-        val currentAnswers = _activeTestState.value.selectedAnswers.toMutableMap()
+        val currentState = _activeTestState.value
+        val currentAnswers = currentState.selectedAnswers.toMutableMap()
         currentAnswers[questionIndex] = optionIndex
-        _activeTestState.value = _activeTestState.value.copy(selectedAnswers = currentAnswers)
+
+        _activeTestState.value = currentState.copy(
+            selectedAnswers = currentAnswers
+        )
+    }
+
+    fun reportQuestion(questionId: String, reason: String, notes: String = "") {
+        viewModelScope.launch {
+            val examId = activeExamContext.value.examId
+            studyRepository.reportQuestionQuality(
+                questionId = questionId,
+                examId = examId,
+                reason = reason,
+                notes = notes
+            )
+        }
     }
 
     fun clearTestAnswer(questionIndex: Int) {
@@ -1077,6 +1431,7 @@ class MainViewModel(
     }
 
     fun submitMockTest() {
+        if (_activeTestState.value.isCompleted) return
         mockTestTimerJob?.cancel()
         val state = _activeTestState.value
         val questions = state.questions
@@ -1115,7 +1470,6 @@ class MainViewModel(
             )
         }
 
-        // Apply strict sample threshold before classifying weak or strong topics
         val weakTopics = mutableListOf<String>()
         val strongTopics = mutableListOf<String>()
 
@@ -1134,7 +1488,22 @@ class MainViewModel(
         viewModelScope.launch {
             questions.forEachIndexed { idx, q ->
                 val chosen = answers[idx]
-                if (chosen != null && chosen != q.correctOptionIndex) {
+                val isCorr = chosen != null && chosen == q.correctOptionIndex
+                val isSkip = chosen == null
+                val spentSecs = details.getOrNull(idx)?.timeSpentSeconds ?: 30
+
+                // Record history for anti-repetition engine
+                studyRepository.recordQuestionAttemptHistory(
+                    questionId = q.id,
+                    examId = activeExamContext.value.examId,
+                    subject = q.subject,
+                    topic = q.topic,
+                    isCorrect = isCorr,
+                    isSkipped = isSkip,
+                    responseTimeSecs = spentSecs
+                )
+
+                if (chosen != null && !isCorr) {
                     val chosenText = q.options.getOrNull(chosen) ?: "Not attempted"
                     val correctText = q.options.getOrNull(q.correctOptionIndex) ?: ""
                     studyRepository.recordMistake(
@@ -1148,6 +1517,13 @@ class MainViewModel(
                 }
             }
 
+            val (earnedMarks, percentage, schemeLabel) = com.example.service.intelligence.SmartMockEngine.calculateDeterministicScore(
+                correctCount = correctCount,
+                incorrectCount = incorrectCount,
+                skippedCount = skippedCount,
+                examContext = activeExamContext.value
+            )
+
             val totalAllowedSecs = state.config.timeLimitMinutes * 60
             val timeSpent = totalAllowedSecs - state.remainingSeconds
             val recommendation = if (questions.size < 3) {
@@ -1158,10 +1534,42 @@ class MainViewModel(
                 "Excellent mastery across attempted topics! Maintain momentum with full-length timed tests."
             }
 
+            // Update topic performance records
+            topicAttemptCounts.forEach { (topicName, totalAtt) ->
+                val correctAtt = topicCorrectCounts[topicName] ?: 0
+                studyRepository.recordTopicPerformance(
+                    subject = state.subject,
+                    topic = topicName,
+                    questionsAttempted = totalAtt,
+                    correctCount = correctAtt,
+                    difficulty = state.config.difficulty
+                )
+            }
+
+            questions.forEachIndexed { idx, q ->
+                val chosen = answers[idx]
+                if (chosen != null && chosen != q.correctOptionIndex) {
+                    val chosenText = q.options.getOrNull(chosen) ?: "Not attempted"
+                    val correctText = q.options.getOrNull(q.correctOptionIndex) ?: ""
+                    val reason = com.example.service.intelligence.SmartMockEngine.classifyMistakeReason(
+                        question = q,
+                        timeSpentSecs = details.getOrNull(idx)?.timeSpentSeconds ?: 30
+                    )
+                    studyRepository.recordMistake(
+                        questionText = q.questionText,
+                        studentAnswer = chosenText,
+                        correctAnswer = correctText,
+                        subject = q.subject,
+                        topic = q.topic,
+                        explanation = "${q.explanation} (Classification: $reason)"
+                    )
+                }
+            }
+
             val attempt = studyRepository.recordMockTestAttempt(
                 title = state.title,
                 subject = state.subject,
-                score = correctCount,
+                score = earnedMarks.roundToInt(),
                 totalQuestions = questions.size,
                 timeSpentSeconds = timeSpent.coerceAtLeast(10),
                 weakTopics = weakTopics,
@@ -1174,8 +1582,12 @@ class MainViewModel(
                 incorrectCount = incorrectCount,
                 skippedCount = skippedCount,
                 avgTimePerQuestionSeconds = if (questions.isNotEmpty()) timeSpent.toFloat() / questions.size else 0f,
-                markingScheme = "+4 / -1 (Standard)",
+                markingScheme = schemeLabel,
                 totalTimeAllowedSeconds = totalAllowedSecs
+            ).copy(
+                examId = activeExamContext.value.examId,
+                language = state.config.language,
+                rawScoreEarned = earnedMarks
             )
 
             _activeTestState.value = state.copy(
@@ -2103,6 +2515,22 @@ class MainViewModel(
         }
     }
 
+    fun setUserManualTopicOverride(subject: String, topic: String, override: String) {
+        viewModelScope.launch {
+            val examId = activeExamContext.value.examId
+            studyRepository.setUserManualOverride(examId, subject, topic, override)
+            _snackbarMessage.emit("Updated preference for $topic")
+        }
+    }
+
+    fun resetActiveExamPreparationData() {
+        viewModelScope.launch {
+            val examId = activeExamContext.value.examId
+            studyRepository.resetUserExamPreparationData(examId)
+            _snackbarMessage.emit("Reset preparation data for ${activeExamContext.value.examName}")
+        }
+    }
+
     fun changeSelectedExam(
         examId: String,
         customName: String? = null,
@@ -2178,7 +2606,133 @@ class MainViewModel(
         }
     }
 
+    // --- STEP 14 - Smart Content & AI Doubt Solving State & Methods ---
+    private val _activeLearningContent = MutableStateFlow<LearningTopicContent?>(null)
+    val activeLearningContent: StateFlow<LearningTopicContent?> = _activeLearningContent.asStateFlow()
+
+    private val _isLearningContentLoading = MutableStateFlow(false)
+    val isLearningContentLoading: StateFlow<Boolean> = _isLearningContentLoading.asStateFlow()
+
+    private val _novaDoubtResponse = MutableStateFlow("")
+    val novaDoubtResponse: StateFlow<String> = _novaDoubtResponse.asStateFlow()
+
+    private val _isNovaDoubtThinking = MutableStateFlow(false)
+    val isNovaDoubtThinking: StateFlow<Boolean> = _isNovaDoubtThinking.asStateFlow()
+
+    val allLearningBookmarks: StateFlow<List<UserLearningBookmark>> = studyRepository.allLearningBookmarks
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    fun loadLearningTopicContent(
+        subject: String,
+        chapter: String,
+        topic: String,
+        forceRefresh: Boolean = false,
+        language: String = "English"
+    ) {
+        viewModelScope.launch {
+            _isLearningContentLoading.value = true
+            try {
+                val ctx = activeExamContext.value
+                val content = studyRepository.smartLearningEngine.loadTopicContent(
+                    examContext = ctx,
+                    subject = subject,
+                    chapter = chapter,
+                    topic = topic,
+                    masteryScore = 60,
+                    languagePreference = language,
+                    forceRefresh = forceRefresh
+                )
+                _activeLearningContent.value = content
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "Failed loading topic content: $topic", e)
+            } finally {
+                _isLearningContentLoading.value = false
+            }
+        }
+    }
+
+    fun toggleLearningBookmark(subject: String, topic: String, title: String, snippet: String, type: String = "TOPIC") {
+        viewModelScope.launch {
+            studyRepository.smartLearningEngine.toggleBookmark(subject, topic, title, snippet, type)
+            _snackbarMessage.emit("Bookmark saved")
+        }
+    }
+
+    fun saveTopicNote(subject: String, topic: String, contentText: String) {
+        viewModelScope.launch {
+            studyRepository.smartLearningEngine.saveTopicNote(subject, topic, contentText)
+            _snackbarMessage.emit("Saved note for $topic")
+        }
+    }
+
+    fun deleteLearningBookmark(id: Long) {
+        viewModelScope.launch {
+            studyRepository.smartLearningEngine.removeBookmark(id)
+            _snackbarMessage.emit("Bookmark removed")
+        }
+    }
+
+    fun deleteTopicNote(id: Long) {
+        viewModelScope.launch {
+            studyRepository.deleteSmartNote(id)
+            _snackbarMessage.emit("Note deleted")
+        }
+    }
+
+    fun askNovaTopicDoubt(
+        subject: String,
+        chapter: String,
+        topic: String,
+        prompt: String,
+        language: String = "English"
+    ) {
+        viewModelScope.launch {
+            _isNovaDoubtThinking.value = true
+            _novaDoubtResponse.value = ""
+            try {
+                val ctx = activeExamContext.value
+                val doubtContext = "Student is studying $topic in $subject under $chapter for target exam ${ctx.examName}. Language: $language."
+                val fullPrompt = "$doubtContext\nStudent Doubt: $prompt"
+
+                val result = geminiRepository.askNova(
+                    userPrompt = fullPrompt,
+                    studyContext = NovaStudyContext(
+                        targetExam = ctx.examName,
+                        preferredLanguage = language
+                    )
+                )
+
+                _novaDoubtResponse.value = result.getOrNull()?.replyMarkdown ?: "Nova is here to help! Could you rephrase your doubt?"
+            } catch (e: Exception) {
+                _novaDoubtResponse.value = "Sorry, I ran into a connection glitch. Please try again!"
+            } finally {
+                _isNovaDoubtThinking.value = false
+            }
+        }
+    }
+
+    fun completeQuickTest(subject: String, topic: String, score: Int, total: Int) {
+        viewModelScope.launch {
+            val percent = if (total > 0) (score.toFloat() / total * 100).toInt() else 0
+            studyRepository.recordStudentSessionHistory(
+                sessionType = "PRACTICE_TEST",
+                subject = subject,
+                topic = topic,
+                durationMinutes = 10,
+                actualMinutesSpent = 10,
+                xpEarned = score * 15,
+                accuracyPercent = percent.toFloat(),
+                questionsAttempted = total,
+                productivityRating = 5,
+                notesSummary = "Completed $topic quick check: $score/$total correct"
+            )
+
+            _snackbarMessage.emit("Quick Test Completed! Score: $score/$total (+$${score * 15} XP)")
+        }
+    }
+
     override fun onCleared() {
+
         super.onCleared()
         timerJob?.cancel()
         tts?.stop()

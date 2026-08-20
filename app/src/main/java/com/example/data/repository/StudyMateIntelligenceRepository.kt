@@ -117,70 +117,109 @@ class StudyMateIntelligenceRepository(
     }
 
     // 3. Topic Mastery Operations & Adaptive Tracking
+    fun getTopicMasteriesByExam(examId: String): Flow<List<TopicMastery>> {
+        return topicMasteryDao.getTopicMasteriesByExam(examId)
+    }
+
+    fun getWeakTopicsByExam(examId: String): Flow<List<TopicMastery>> {
+        return topicMasteryDao.getWeakTopicsByExam(examId)
+    }
+
     suspend fun recordTopicPerformance(
         subject: String,
         topic: String,
         questionsAttempted: Int,
         correctCount: Int,
         difficulty: String = "Medium",
-        weakSpots: List<String> = emptyList()
+        weakSpots: List<String> = emptyList(),
+        examId: String = "",
+        subjectId: String = "",
+        chapterId: String = "",
+        topicId: String = "",
+        chapterName: String = ""
     ): TopicMastery = withContext(Dispatchers.IO) {
-        val existing = topicMasteryDao.getTopicMasteryOnce(subject, topic)
-        val now = System.currentTimeMillis()
-
-        val totalAttempted = (existing?.totalQuestionsAttempted ?: 0) + questionsAttempted
-        val totalCorrect = (existing?.correctQuestionsCount ?: 0) + correctCount
-        val totalIncorrect = totalAttempted - totalCorrect
-        val accuracy = if (totalAttempted > 0) (totalCorrect.toFloat() / totalAttempted) * 100f else 60f
-
-        val easyCount = (existing?.easySolved ?: 0) + if (difficulty.equals("Easy", ignoreCase = true)) correctCount else 0
-        val medCount = (existing?.medSolved ?: 0) + if (difficulty.equals("Medium", ignoreCase = true)) correctCount else 0
-        val hardCount = (existing?.hardSolved ?: 0) + if (difficulty.equals("Hard", ignoreCase = true)) correctCount else 0
-
-        // Weighted Mastery Calculation
-        val rawMastery = (accuracy * 0.6f + (hardCount * 5 + medCount * 2 + easyCount * 1).coerceAtMost(40)).roundToInt().coerceIn(5, 100)
-
-        val level = when {
-            rawMastery >= 85 -> "MASTERED"
-            rawMastery >= 70 -> "PROFICIENT"
-            rawMastery >= 45 -> "DEVELOPING"
-            else -> "NOVICE"
+        val existing = if (examId.isNotBlank()) {
+            topicMasteryDao.getTopicMasteryByExamAndTopicOnce(examId, subject, topic)
+        } else {
+            topicMasteryDao.getTopicMasteryOnce(subject, topic)
         }
 
-        // Adaptive review interval based on mastery level
-        val reviewIntervalDays = when (level) {
-            "MASTERED" -> 7
-            "PROFICIENT" -> 4
-            "DEVELOPING" -> 2
-            else -> 1
-        }
-        val nextReviewMillis = now + (reviewIntervalDays * 24L * 60 * 60 * 1000)
-
-        val combinedWeakSpots = ((existing?.weakSpots ?: emptyList()) + weakSpots).distinct().takeLast(5)
-
-        val updated = TopicMastery(
-            id = existing?.id ?: 0,
-            subject = subject,
-            topic = topic,
-            masteryScore = rawMastery,
-            accuracyPercent = accuracy,
-            totalQuestionsAttempted = totalAttempted,
-            correctQuestionsCount = totalCorrect,
-            incorrectQuestionsCount = totalIncorrect,
-            easySolved = easyCount,
-            medSolved = medCount,
-            hardSolved = hardCount,
-            retentionDecayRate = if (rawMastery > 75) 0.8f else 1.2f,
-            lastTestedMillis = now,
-            recommendedReviewDateMillis = nextReviewMillis,
-            masteryLevel = level,
-            weakSpots = combinedWeakSpots,
-            updatedAt = now
+        val updated = com.example.service.intelligence.TopicMasteryEngine.computeUpdatedMastery(
+            existing = existing,
+            examId = examId,
+            subjectId = subjectId,
+            chapterId = chapterId,
+            topicId = topicId,
+            subjectName = subject,
+            chapterName = chapterName,
+            topicName = topic,
+            practiceAttemptedDelta = questionsAttempted,
+            practiceCorrectDelta = correctCount
         )
 
         topicMasteryDao.insertOrUpdateTopicMastery(updated)
         syncService?.syncTopicMastery(updated)
         updated
+    }
+
+    suspend fun recordMockQuestionResult(
+        examId: String,
+        subjectId: String,
+        chapterId: String,
+        topicId: String,
+        subjectName: String,
+        chapterName: String,
+        topicName: String,
+        isCorrect: Boolean,
+        wasMistake: Boolean = false
+    ): TopicMastery = withContext(Dispatchers.IO) {
+        val existing = topicMasteryDao.getTopicMasteryByExamAndTopicOnce(examId, subjectName, topicName)
+
+        val updated = com.example.service.intelligence.TopicMasteryEngine.computeUpdatedMastery(
+            existing = existing,
+            examId = examId,
+            subjectId = subjectId,
+            chapterId = chapterId,
+            topicId = topicId,
+            subjectName = subjectName,
+            chapterName = chapterName,
+            topicName = topicName,
+            mockAttemptedDelta = 1,
+            mockCorrectDelta = if (isCorrect) 1 else 0,
+            newMistakeCountDelta = if (wasMistake) 1 else 0
+        )
+
+        topicMasteryDao.insertOrUpdateTopicMastery(updated)
+        syncService?.syncTopicMastery(updated)
+        updated
+    }
+
+    suspend fun setUserManualOverride(
+        examId: String,
+        subjectName: String,
+        topicName: String,
+        override: String // NONE, I_KNOW_THIS, NEED_HELP, IMPORTANT, SKIP_FOR_NOW
+    ) = withContext(Dispatchers.IO) {
+        val existing = topicMasteryDao.getTopicMasteryByExamAndTopicOnce(examId, subjectName, topicName)
+        val updated = com.example.service.intelligence.TopicMasteryEngine.computeUpdatedMastery(
+            existing = existing,
+            examId = examId,
+            subjectId = existing?.subjectId ?: "",
+            chapterId = existing?.chapterId ?: "",
+            topicId = existing?.topicId ?: "",
+            subjectName = subjectName,
+            chapterName = existing?.chapter ?: "",
+            topicName = topicName,
+            manualOverride = override
+        )
+        topicMasteryDao.insertOrUpdateTopicMastery(updated)
+    }
+
+    suspend fun resetUserExamPreparationData(examId: String) = withContext(Dispatchers.IO) {
+        if (examId.isNotBlank()) {
+            topicMasteryDao.clearTopicMasteriesForExam(examId)
+            mistakeDao.clearMistakesForExam(examId)
+        }
     }
 
     suspend fun saveTopicMastery(topicMastery: TopicMastery): Long = withContext(Dispatchers.IO) {
@@ -209,7 +248,8 @@ class StudyMateIntelligenceRepository(
         accuracyPercent: Float? = null,
         questionsAttempted: Int = 0,
         productivityRating: Int = 4,
-        notesSummary: String = ""
+        notesSummary: String = "",
+        examId: String = ""
     ): StudentSessionHistory = withContext(Dispatchers.IO) {
         val session = StudentSessionHistory(
             sessionType = sessionType,
@@ -227,6 +267,22 @@ class StudyMateIntelligenceRepository(
         val id = sessionHistoryDao.insertSession(session)
         val savedSession = session.copy(id = id)
         syncService?.syncStudySessionHistory(savedSession)
+
+        // Also update topic study activity
+        val existing = topicMasteryDao.getTopicMasteryByExamAndTopicOnce(examId, subject, topic)
+        val updatedMastery = com.example.service.intelligence.TopicMasteryEngine.computeUpdatedMastery(
+            existing = existing,
+            examId = examId,
+            subjectId = existing?.subjectId ?: "",
+            chapterId = existing?.chapterId ?: "",
+            topicId = existing?.topicId ?: "",
+            subjectName = subject,
+            chapterName = existing?.chapter ?: "",
+            topicName = topic,
+            studyMinutesDelta = actualMinutesSpent,
+            studyCompleted = (actualMinutesSpent >= durationMinutes && durationMinutes > 0)
+        )
+        topicMasteryDao.insertOrUpdateTopicMastery(updatedMastery)
 
         // Award XP and increment total focus time
         val user = userDao.getUserProfileOnce()

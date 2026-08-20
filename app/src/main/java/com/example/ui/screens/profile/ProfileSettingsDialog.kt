@@ -60,6 +60,7 @@ fun ProfileSettingsDialog(
     var showFocusShieldSettings by remember { mutableStateOf(false) }
     var showNotificationCenter by remember { mutableStateOf(false) }
     var showPermissionSetup by remember { mutableStateOf(false) }
+    var showAccessibilityPrivacy by remember { mutableStateOf(false) }
 
     // ==========================================
     // Editable Profile State (Steps 1 to 5)
@@ -149,6 +150,19 @@ fun ProfileSettingsDialog(
                     onTestFocusStarted = onTestFocusStarted,
                     onTestFocusCompleted = onTestFocusCompleted,
                     onTestDailyMotivation = onTestDailyMotivation
+                )
+            }
+        }
+    } else if (showAccessibilityPrivacy) {
+        Dialog(onDismissRequest = { showAccessibilityPrivacy = false }) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(24.dp)),
+                color = Color(0xFF070B19)
+            ) {
+                com.example.ui.screens.focus.AccessibilityPrivacyScreen(
+                    onBack = { showAccessibilityPrivacy = false }
                 )
             }
         }
@@ -427,6 +441,17 @@ fun ProfileSettingsDialog(
                                 status = "Review",
                                 isGranted = true,
                                 onClick = { showPermissionSetup = true }
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Accessibility Privacy Center
+                            PermissionRow(
+                                title = "Accessibility Privacy & Security 🔒",
+                                subtitle = "How Nova uses accessibility and guarantees financial privacy",
+                                status = "Explain",
+                                isGranted = true,
+                                onClick = { showAccessibilityPrivacy = true }
                             )
                         } else {
                             // ====================================================

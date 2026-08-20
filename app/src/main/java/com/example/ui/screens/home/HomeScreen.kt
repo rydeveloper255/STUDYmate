@@ -44,6 +44,7 @@ fun HomeScreen(
     studyNowRecommendation: StudyNowRecommendation? = null,
     isAiCoachLoading: Boolean = false,
     isStudyNowLoading: Boolean = false,
+    examReadiness: ExamReadinessScore? = null,
     onLoadAiCoach: (String) -> Unit = {},
     onLoadStudyNow: () -> Unit = {},
     onSelectTimeAvailable: (Int?) -> Unit = {},
@@ -52,6 +53,7 @@ fun HomeScreen(
     onStartFocusSession: (subject: String, topic: String) -> Unit,
     onNavigateToTab: (AppNavTab) -> Unit,
     onOpenProfileSettings: () -> Unit,
+    onOpenExamReadinessCenter: () -> Unit = {},
     onSignOut: () -> Unit = {},
     onScanQuestion: () -> Unit = {},
     onOpenDocumentSummarizer: () -> Unit = {},
@@ -281,6 +283,92 @@ fun HomeScreen(
                             ) {
                                 Text("Select", color = Color(0xFF070B19), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        // =========================================================================
+        // 1B. OVERALL EXAM READINESS INDEX CARD
+        // =========================================================================
+        item {
+            val score = examReadiness?.readinessScore ?: 0
+            val badgeText = examReadiness?.statusBadgeText ?: "Insufficient Data 🌱"
+            val explanation = examReadiness?.explanation ?: "Complete study sessions or mock tests to unlock your readiness index."
+
+            GlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .springClickable(testTag = "home_exam_readiness_card", onClick = onOpenExamReadinessCenter),
+                elevation = 6.dp,
+                fillAlpha = 0.75f
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.CenterFocusStrong, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "EXAM READINESS SCORE",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = NeonCyan
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = NeonCyan.copy(alpha = 0.2f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.5f))
+                        ) {
+                            Text(
+                                text = badgeText,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = NeonCyan,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Preparation: $score%",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isDark) Color.White else Color(0xFF0F172A)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = explanation,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Button(
+                            onClick = onOpenExamReadinessCenter,
+                            colors = ButtonDefaults.buttonColors(containerColor = ElectricIndigo),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text("Details →", color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -834,6 +922,94 @@ fun HomeScreen(
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // =========================================================================
+        // QUICK ACCESS SHORTCUTS HUB
+        // =========================================================================
+        item {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "⚡ Quick Study Hub",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDark) Color.White else Color(0xFF0F172A)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QuickProgressPill(
+                        title = "Readiness",
+                        value = "${examReadiness?.readinessScore ?: 0}%",
+                        subtitle = "Full Center",
+                        icon = Icons.Filled.CenterFocusStrong,
+                        color = NeonCyan,
+                        modifier = Modifier.weight(1f),
+                        onClick = onOpenExamReadinessCenter
+                    )
+
+                    QuickProgressPill(
+                        title = "Planner",
+                        value = "${studyPlan.count { !it.isCompleted }} Tasks",
+                        subtitle = "Adaptive Schedule",
+                        icon = Icons.Filled.CalendarMonth,
+                        color = ElectricIndigo,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onNavigateToTab(AppNavTab.STUDY) }
+                    )
+
+                    QuickProgressPill(
+                        title = "Mock Tests",
+                        value = "Speed & Mocks",
+                        subtitle = "Exam Mode",
+                        icon = Icons.Filled.Quiz,
+                        color = EmeraldSuccess,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onNavigateToTab(AppNavTab.PROGRESS) }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QuickProgressPill(
+                        title = "Spaced Revision",
+                        value = "${examReadiness?.revisionDueCount ?: 0} Due",
+                        subtitle = "Smart Review",
+                        icon = Icons.Filled.Repeat,
+                        color = GoldenSpark,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onNavigateToTab(AppNavTab.STUDY) }
+                    )
+
+                    QuickProgressPill(
+                        title = "Focus Shield",
+                        value = "App Blocker",
+                        subtitle = "Distraction Free",
+                        icon = Icons.Filled.Shield,
+                        color = CoralRose,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onNavigateToTab(AppNavTab.FOCUS) }
+                    )
+
+                    QuickProgressPill(
+                        title = "Nova AI",
+                        value = "Instant Help",
+                        subtitle = "24/7 AI Tutor",
+                        icon = Icons.Filled.AutoAwesome,
+                        color = NeonCyan,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onNavigateToTab(AppNavTab.AI_TUTOR) }
+                    )
                 }
             }
         }

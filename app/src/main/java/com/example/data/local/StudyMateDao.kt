@@ -27,6 +27,9 @@ interface StudyPlanDao {
     @Query("SELECT * FROM study_plan_items ORDER BY isCompleted ASC, scheduledDateMillis ASC, id ASC")
     fun getAllPlanItems(): Flow<List<StudyPlanItem>>
 
+    @Query("SELECT * FROM study_plan_items WHERE examId = :examId OR examId = '' ORDER BY isCompleted ASC, scheduledDateMillis ASC, id ASC")
+    fun getPlanItemsForExam(examId: String): Flow<List<StudyPlanItem>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPlanItem(item: StudyPlanItem): Long
 
@@ -44,6 +47,18 @@ interface StudyPlanDao {
 
     @Query("DELETE FROM study_plan_items")
     suspend fun clearAllPlanItems()
+}
+
+@Dao
+interface UserStudyPreferencesDao {
+    @Query("SELECT * FROM user_study_preferences WHERE userId = :userId LIMIT 1")
+    fun getUserPreferences(userId: String = "current_user"): Flow<UserStudyPreferences?>
+
+    @Query("SELECT * FROM user_study_preferences WHERE userId = :userId LIMIT 1")
+    suspend fun getUserPreferencesSync(userId: String = "current_user"): UserStudyPreferences?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveUserPreferences(preferences: UserStudyPreferences)
 }
 
 @Dao
@@ -87,6 +102,15 @@ interface MistakeDao {
     @Query("SELECT * FROM mistakes ORDER BY isMastered ASC, timestamp DESC")
     fun getAllMistakes(): Flow<List<MistakeItem>>
 
+    @Query("SELECT * FROM mistakes WHERE examId = :examId ORDER BY isMastered ASC, timestamp DESC")
+    fun getMistakesByExam(examId: String): Flow<List<MistakeItem>>
+
+    @Query("SELECT * FROM mistakes WHERE examId = :examId AND isMastered = 0 ORDER BY timestamp DESC")
+    fun getUnmasteredMistakesByExam(examId: String): Flow<List<MistakeItem>>
+
+    @Query("SELECT * FROM mistakes WHERE examId = :examId AND topic = :topic AND isMastered = 0")
+    suspend fun getUnmasteredMistakesForTopic(examId: String, topic: String): List<MistakeItem>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMistake(mistake: MistakeItem): Long
 
@@ -95,6 +119,9 @@ interface MistakeDao {
 
     @Query("DELETE FROM mistakes WHERE id = :id")
     suspend fun deleteMistake(id: Long)
+
+    @Query("DELETE FROM mistakes WHERE examId = :examId")
+    suspend fun clearMistakesForExam(examId: String)
 }
 
 @Dao
@@ -353,17 +380,38 @@ interface TopicMasteryDao {
     @Query("SELECT * FROM topic_masteries ORDER BY masteryScore ASC, lastTestedMillis ASC")
     fun getAllTopicMasteries(): Flow<List<TopicMastery>>
 
+    @Query("SELECT * FROM topic_masteries WHERE examId = :examId ORDER BY masteryScore ASC, lastTestedMillis ASC")
+    fun getTopicMasteriesByExam(examId: String): Flow<List<TopicMastery>>
+
+    @Query("SELECT * FROM topic_masteries WHERE examId = :examId")
+    suspend fun getTopicMasteriesByExamOnce(examId: String): List<TopicMastery>
+
     @Query("SELECT * FROM topic_masteries WHERE subject = :subject ORDER BY masteryScore ASC")
     fun getTopicMasteriesBySubject(subject: String): Flow<List<TopicMastery>>
+
+    @Query("SELECT * FROM topic_masteries WHERE examId = :examId AND subject = :subject ORDER BY masteryScore ASC")
+    fun getTopicMasteriesByExamAndSubject(examId: String, subject: String): Flow<List<TopicMastery>>
 
     @Query("SELECT * FROM topic_masteries WHERE masteryScore < :threshold ORDER BY masteryScore ASC")
     fun getWeakTopics(threshold: Int = 65): Flow<List<TopicMastery>>
 
+    @Query("SELECT * FROM topic_masteries WHERE examId = :examId AND (masteryState = 'WEAK' OR masteryScore < 50) ORDER BY masteryScore ASC")
+    fun getWeakTopicsByExam(examId: String): Flow<List<TopicMastery>>
+
     @Query("SELECT * FROM topic_masteries WHERE masteryScore >= :threshold ORDER BY masteryScore DESC")
     fun getMasteredTopics(threshold: Int = 85): Flow<List<TopicMastery>>
 
+    @Query("SELECT * FROM topic_masteries WHERE examId = :examId AND masteryState = 'MASTERED'")
+    fun getMasteredTopicsByExam(examId: String): Flow<List<TopicMastery>>
+
     @Query("SELECT * FROM topic_masteries WHERE subject = :subject AND topic = :topic LIMIT 1")
     suspend fun getTopicMasteryOnce(subject: String, topic: String): TopicMastery?
+
+    @Query("SELECT * FROM topic_masteries WHERE examId = :examId AND subject = :subject AND topic = :topic LIMIT 1")
+    suspend fun getTopicMasteryByExamAndTopicOnce(examId: String, subject: String, topic: String): TopicMastery?
+
+    @Query("SELECT * FROM topic_masteries WHERE examId = :examId AND topicId = :topicId LIMIT 1")
+    suspend fun getTopicMasteryByTopicIdOnce(examId: String, topicId: String): TopicMastery?
 
     @Query("SELECT * FROM topic_masteries WHERE subject = :subject AND topic = :topic LIMIT 1")
     fun getTopicMasteryFlow(subject: String, topic: String): Flow<TopicMastery?>
@@ -376,6 +424,9 @@ interface TopicMasteryDao {
 
     @Query("DELETE FROM topic_masteries WHERE id = :id")
     suspend fun deleteTopicMastery(id: Long)
+
+    @Query("DELETE FROM topic_masteries WHERE examId = :examId")
+    suspend fun clearTopicMasteriesForExam(examId: String)
 
     @Query("DELETE FROM topic_masteries")
     suspend fun clearAll()
@@ -485,6 +536,71 @@ interface ExamCatalogDao {
     @Query("SELECT COUNT(*) FROM exams")
     suspend fun getExamsCount(): Int
 }
+
+@Dao
+interface LearningTopicContentDao {
+    @Query("SELECT * FROM learning_topic_contents WHERE id = :contentId LIMIT 1")
+    suspend fun getContentById(contentId: String): LearningTopicContent?
+
+    @Query("SELECT * FROM learning_topic_contents WHERE examId = :examId AND subject = :subject AND topic = :topic LIMIT 1")
+    suspend fun getContentForTopic(examId: String, subject: String, topic: String): LearningTopicContent?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdateContent(content: LearningTopicContent)
+
+    @Query("DELETE FROM learning_topic_contents WHERE id = :contentId")
+    suspend fun deleteContent(contentId: String)
+}
+
+@Dao
+interface UserLearningBookmarkDao {
+    @Query("SELECT * FROM user_learning_bookmarks ORDER BY timestamp DESC")
+    fun getAllBookmarks(): Flow<List<UserLearningBookmark>>
+
+    @Query("SELECT * FROM user_learning_bookmarks WHERE subject = :subject AND topic = :topic ORDER BY timestamp DESC")
+    fun getBookmarksForTopic(subject: String, topic: String): Flow<List<UserLearningBookmark>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBookmark(bookmark: UserLearningBookmark): Long
+
+    @Query("DELETE FROM user_learning_bookmarks WHERE id = :id")
+    suspend fun deleteBookmark(id: Long)
+
+    @Query("DELETE FROM user_learning_bookmarks WHERE title = :title AND topic = :topic")
+    suspend fun deleteBookmarkByTitle(title: String, topic: String)
+}
+
+@Dao
+interface QuestionHistoryDao {
+    @Query("SELECT * FROM question_history WHERE userId = :userId")
+    fun getAllHistory(userId: String = "current_user"): Flow<List<QuestionHistoryEntity>>
+
+    @Query("SELECT * FROM question_history WHERE userId = :userId")
+    suspend fun getAllHistoryOnce(userId: String = "current_user"): List<QuestionHistoryEntity>
+
+    @Query("SELECT * FROM question_history WHERE questionId = :questionId AND userId = :userId LIMIT 1")
+    suspend fun getHistoryForQuestion(questionId: String, userId: String = "current_user"): QuestionHistoryEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdateHistory(history: QuestionHistoryEntity)
+}
+
+@Dao
+interface QuestionQualityReportDao {
+    @Query("SELECT * FROM question_quality_reports ORDER BY timestamp DESC")
+    fun getAllReports(): Flow<List<QuestionQualityReportEntity>>
+
+    @Query("SELECT questionId FROM question_quality_reports WHERE status = 'DISABLED' OR status = 'UNDER_REVIEW'")
+    suspend fun getFlaggedQuestionIds(): List<String>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertReport(report: QuestionQualityReportEntity): Long
+
+    @Query("UPDATE question_quality_reports SET status = :status WHERE id = :reportId")
+    suspend fun updateReportStatus(reportId: Long, status: String)
+}
+
+
 
 
 

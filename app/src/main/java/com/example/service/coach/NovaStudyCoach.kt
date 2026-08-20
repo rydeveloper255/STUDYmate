@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.data.model.*
 import com.example.service.AppUsageSummary
 import com.example.service.NovaUsageStatsHelper
+import com.example.service.intelligence.PerformanceReport
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -72,6 +73,69 @@ object NovaStudyCoach {
                 append("📌 Priority tomorrow: $pendingSubject\n")
             }
             append("\nGreat effort today! Rest well and recharge for tomorrow.")
+        }
+    }
+
+    fun generatePerformanceQueryResponse(
+        userPrompt: String,
+        report: PerformanceReport,
+        latestAttempt: MockTestAttempt?
+    ): String {
+        val promptLower = userPrompt.lowercase()
+        return when {
+            promptLower.contains("result") || promptLower.contains("kaisa") || promptLower.contains("score") || promptLower.contains("performance") -> {
+                if (latestAttempt == null) {
+                    "Boss! Abhi tak koi mock test complete nahi hua hai. Phele ek Quick Test ya Mock Test start karo, fir main detailed analysis dunga!"
+                } else {
+                    buildString {
+                        append("Boss! Is ${latestAttempt.title} mein tumhari accuracy **${latestAttempt.accuracyPercent.toInt()}%** rahi.\n")
+                        if (report.previousAccuracyPercent != null) {
+                            append("Pichhle test ke comparison mein: **${report.accuracyDeltaText}**.\n")
+                        }
+                        if (report.weakAreas.isNotEmpty() && report.weakAreas.first() != "None — Keep up the good work!") {
+                            append("\n⚠️ Sabse zyada focus **${report.weakAreas.first()}** par zaroori hai.")
+                        }
+                        if (report.strongAreas.isNotEmpty()) {
+                            append("\n✅ Strong area: **${report.strongAreas.first()}**.")
+                        }
+                    }
+                }
+            }
+            promptLower.contains("ab kya") || promptLower.contains("next") || promptLower.contains("kya karun") -> {
+                val nba = report.nextBestAction
+                "Boss! Real-time performance analysis ke mutabiq tumhara Next Best Action hai:\n\n🎯 **${nba.title}**\n• Subject: ${nba.subject}\n• Duration: ${nba.durationMinutes} mins\n• Reason: ${nba.reason}\n\nKya main ise tumhare aaj ke plan mein add kar doon?"
+            }
+            else -> {
+                "Boss! Tumhara overall accuracy **${report.overallAccuracyPercent.toInt()}%** hai. Total tests: ${report.totalMocksTaken}. High recommendation: ${report.topRecommendations.firstOrNull() ?: "Keep practicing!"}"
+            }
+        }
+    }
+
+    fun generateNovaPlanResponse(
+        userPrompt: String,
+        todayPlans: List<StudyPlanItem>,
+        userPrefs: UserStudyPreferences
+    ): String {
+        val pendingPlans = todayPlans.filter { !it.isCompleted }
+        if (pendingPlans.isEmpty()) {
+            return "Boss! Aaj ke saare planned sessions poore ho chuke hain, ya koi naya plan nahi bana. Tap **[⚡ Adaptive AI Plan]** in Study Planner to generate fresh targeted sessions!"
+        }
+
+        val promptLower = userPrompt.lowercase()
+        return when {
+            promptLower.contains("1 ghanta") || promptLower.contains("1 hour") || promptLower.contains("sirf") || promptLower.contains("only") -> {
+                val next1Or2 = pendingPlans.take(2)
+                val summary = next1Or2.joinToString("\n") { "• **${it.subject}**: ${it.topic} (${it.targetMinutes}m) [${it.sessionType}]" }
+                "Boss! Agar abhi sirf 1 ghanta hai, toh yeh top priority topics complete karo:\n\n$summary\n\nReady? Start button tap karo in Study Planner!"
+            }
+            promptLower.contains("miss") || promptLower.contains("chhoot") || promptLower.contains("delay") -> {
+                val missed = pendingPlans.firstOrNull { it.priority == PlanPriority.HIGH } ?: pendingPlans.first()
+                "Don't worry Boss! Skipped session (**${missed.subject}: ${missed.topic}**) ko overload nahi karenge. Main isse shorten karke 20 min recovery session mein convert kar raha hoon. Let's do it!"
+            }
+            else -> {
+                val summary = pendingPlans.take(3).joinToString("\n") { "• **${it.subject}**: ${it.topic} (${it.targetMinutes}m) — ${it.aiRecommendationReason.ifBlank { "Targeted practice" }}" }
+                "Boss! Aaj ke priority sessions:\n\n$summary\n\nKonsa subject pehle start karoge?"
+            }
         }
     }
 

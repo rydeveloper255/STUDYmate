@@ -312,4 +312,129 @@ class NovaNotificationEngine(private val context: Context) {
 
         notificationManager.notify(4001, notification)
     }
+
+    fun sendRevisionReminder(subject: String, topic: String) {
+        if (isQuietHours() || !canSendCoachNotification()) return
+        recordNotificationSent()
+
+        val mainIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("NAVIGATE_TO", "REVISION")
+            putExtra(EXTRA_SUBJECT, subject)
+            putExtra(EXTRA_TOPIC, topic)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            5001,
+            mainIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val title = "Spaced Revision Due 🧠 $subject"
+        val message = "$topic ka revision due hai — 20 min ka quick revision recommended hai."
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_NOVA_COACH)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .addAction(android.R.drawable.ic_menu_agenda, "Revise Now", pendingIntent)
+            .build()
+
+        notificationManager.notify(5001, notification)
+    }
+
+    fun sendMockTestReminder(examName: String, testTitle: String) {
+        if (isQuietHours() || !canSendCoachNotification()) return
+        recordNotificationSent()
+
+        val mainIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("NAVIGATE_TO", "MOCK")
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            5002,
+            mainIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val title = "Mock Test Practice 🎯 $examName"
+        val message = "Weekly $testTitle is ready to evaluate your prep level."
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_NOVA_ALERTS)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .addAction(android.R.drawable.ic_menu_view, "Take Test", pendingIntent)
+            .build()
+
+        notificationManager.notify(5002, notification)
+    }
+
+    fun sendPerformanceInsight(subject: String, insight: String, isImproved: Boolean) {
+        if (isQuietHours()) return
+
+        val mainIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("NAVIGATE_TO", "PROGRESS")
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            5003,
+            mainIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val title = if (isImproved) "Performance Boost 🔥 $subject" else "Performance Coach Insight 💡"
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_NOVA_ALERTS)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(insight)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(insight))
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+
+        notificationManager.notify(5003, notification)
+    }
+
+    fun sendExamCountdownAlert(examName: String, daysLeft: Int) {
+        if (isQuietHours()) return
+
+        val mainIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("NAVIGATE_TO", "HOME")
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            5004,
+            mainIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val title = "⏳ $examName Countdown"
+        val message = "$daysLeft days remaining until $examName! Keep your momentum strong."
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_NOVA_ALERTS)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+
+        notificationManager.notify(5004, notification)
+    }
 }

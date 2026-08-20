@@ -156,8 +156,9 @@ class GeminiRepository(
                 )
             }
 
+            val sanitizedPrompt = com.example.service.PrivacyFilter.sanitizeForGemini(userPrompt)
             val userParts = mutableListOf<Part>()
-            userParts.add(Part(text = userPrompt))
+            userParts.add(Part(text = sanitizedPrompt))
             if (imageBitmap != null) {
                 val base64 = imageBitmap.toBase64String()
                 userParts.add(Part(inlineData = InlineData(mimeType = "image/jpeg", data = base64)))
@@ -626,13 +627,16 @@ class GeminiRepository(
         subject: String,
         chapter: String,
         difficulty: String = "Medium",
-        count: Int = 5
+        count: Int = 5,
+        examName: String = "",
+        language: String = "English"
     ): Result<List<Question>> = withContext(Dispatchers.IO) {
         try {
             val prompt = """
             Generate $count original multiple-choice questions for $subject (Chapter/Topic: $chapter).
-            Difficulty: $difficulty.
-            Each question must have 4 clear options (A, B, C, D), correct option index (0 to 3), and an insightful pedagogical explanation.
+            Target Exam Context: ${examName.ifBlank { "Standard Competitive Exam" }}.
+            Difficulty: $difficulty. Language: $language.
+            Each question must have 4 clear options, correct option index (0 to 3), and an insightful explanation.
             
             Return ONLY a valid JSON array of objects with keys:
             - "id": string (e.g. "q_1")
@@ -652,9 +656,21 @@ class GeminiRepository(
 
             val response = apiService.generateContent("gemini-3.5-flash", apiKey, request)
             val jsonText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: ""
-            val questions = parseQuestionsJson(jsonText, subject)
-            if (questions.isNotEmpty()) {
-                Result.success(questions)
+            val parsed = parseQuestionsJson(jsonText, subject)
+            val validQuestions = com.example.service.intelligence.SmartMockEngine.validateAndFilterQuestions(parsed)
+                .map { q ->
+                    q.copy(
+                        source = QuestionSource.AI_GENERATED,
+                        sourceLabel = "AI Exam Concept",
+                        yearOrTag = examName.ifBlank { "AI Generated" },
+                        language = language,
+                        generationModel = "gemini-3.5-flash",
+                        generationTimestamp = System.currentTimeMillis()
+                    )
+                }
+
+            if (validQuestions.isNotEmpty()) {
+                Result.success(validQuestions)
             } else {
                 Result.success(getDefaultQuestions(subject))
             }

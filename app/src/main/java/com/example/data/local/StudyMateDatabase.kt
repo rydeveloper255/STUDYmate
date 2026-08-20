@@ -29,15 +29,21 @@ import com.example.data.model.*
         ExamEntity::class,
         ExamSubjectEntity::class,
         ChapterEntity::class,
-        TopicEntity::class
+        TopicEntity::class,
+        UserStudyPreferences::class,
+        LearningTopicContent::class,
+        UserLearningBookmark::class,
+        QuestionHistoryEntity::class,
+        QuestionQualityReportEntity::class
     ],
-    version = 7,
+    version = 10,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
 abstract class StudyMateDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao
     abstract fun studyPlanDao(): StudyPlanDao
+    abstract fun userStudyPreferencesDao(): UserStudyPreferencesDao
     abstract fun focusDao(): FocusDao
     abstract fun mockTestDao(): MockTestDao
     abstract fun mistakeDao(): MistakeDao
@@ -54,6 +60,10 @@ abstract class StudyMateDatabase : RoomDatabase() {
     abstract fun studentSessionHistoryDao(): StudentSessionHistoryDao
     abstract fun intelligenceSnapshotDao(): IntelligenceSnapshotDao
     abstract fun examCatalogDao(): ExamCatalogDao
+    abstract fun learningTopicContentDao(): LearningTopicContentDao
+    abstract fun userLearningBookmarkDao(): UserLearningBookmarkDao
+    abstract fun questionHistoryDao(): QuestionHistoryDao
+    abstract fun questionQualityReportDao(): QuestionQualityReportDao
 
     companion object {
         @Volatile

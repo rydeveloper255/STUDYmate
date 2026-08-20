@@ -118,6 +118,7 @@ object FocusShieldManager {
             restrictedPackageSet = saved.toMutableSet()
         }
         isShieldFeatureEnabled = prefs.getBoolean(KEY_SHIELD_ENABLED, true)
+        AccessibilitySafetyManager.init(context)
     }
 
     /**
@@ -157,6 +158,7 @@ object FocusShieldManager {
     fun isAppRestricted(pkgName: String): Boolean {
         if (!isShieldFeatureEnabled) return false
         if (ESSENTIAL_APPS_WHITELIST.contains(pkgName)) return false
+        if (AccessibilitySafetyManager.shouldSuppressInterruption(pkgName)) return false
         return restrictedPackageSet.contains(pkgName)
     }
 
@@ -363,6 +365,7 @@ object FocusShieldManager {
     fun triggerInterruption(context: Context, blockedPkg: String) {
         if (!_isSessionActive.value || !isShieldFeatureEnabled) return
         if (ESSENTIAL_APPS_WHITELIST.contains(blockedPkg)) return
+        if (AccessibilitySafetyManager.shouldSuppressInterruption(blockedPkg)) return
 
         val now = System.currentTimeMillis()
         if (blockedPkg == lastTriggeredPackage && (now - lastTriggerTime) < 1800L) {
