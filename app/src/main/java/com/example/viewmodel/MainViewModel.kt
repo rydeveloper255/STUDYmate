@@ -14,6 +14,7 @@ import com.example.data.remote.GeminiRepository
 import com.example.data.repository.ExamCatalogRepository
 import com.example.data.repository.StudyRepository
 import com.example.service.intelligence.StudyMateIntelligenceEngine
+import com.example.ui.theme.AppThemeMode
 import kotlin.math.roundToInt
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -458,6 +459,9 @@ class MainViewModel(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     // --- Theme & Settings ---
+    private val _themeMode = MutableStateFlow(AppThemeMode.NOVA_DARK)
+    val themeMode: StateFlow<AppThemeMode> = _themeMode.asStateFlow()
+
     private val _isDarkTheme = MutableStateFlow(true)
     val isDarkTheme: StateFlow<Boolean> = _isDarkTheme.asStateFlow()
 
@@ -1877,6 +1881,12 @@ class MainViewModel(
 
     fun updateTheme(isDark: Boolean) {
         _isDarkTheme.value = isDark
+        _themeMode.value = if (isDark) AppThemeMode.NOVA_DARK else AppThemeMode.GLASS_LIGHT
+    }
+
+    fun updateThemeMode(mode: AppThemeMode) {
+        _themeMode.value = mode
+        _isDarkTheme.value = (mode != AppThemeMode.GLASS_LIGHT)
     }
 
     fun updateNotificationPrefs(prefs: NotificationPreference) {

@@ -313,49 +313,55 @@ fun FloatingGlassNavBar(
     onTabSelected: (AppNavTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = isAppInDarkTheme()
+    val themeMode = currentThemeMode()
+
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 18.dp, vertical = 12.dp),
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(68.dp)
+                .height(66.dp)
                 .glassEffect(
-                    shape = RoundedCornerShape(34.dp),
-                    elevation = 14.dp,
-                    fillAlpha = 0.85f
+                    shape = RoundedCornerShape(33.dp),
+                    elevation = if (themeMode == AppThemeMode.AMOLED_BLACK) 2.dp else 12.dp,
+                    fillAlpha = if (isDark) 0.88f else 0.92f
                 ),
             color = Color.Transparent
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 8.dp),
+                    .padding(horizontal = 6.dp),
                 horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 AppNavTab.entries.forEach { tab ->
                     val isSelected = currentTab == tab
                     val scale by animateFloatAsState(
-                        targetValue = if (isSelected) 1.08f else 1f,
-                        animationSpec = spring(dampingRatio = 0.6f, stiffness = 500f),
+                        targetValue = if (isSelected) 1.06f else 1f,
+                        animationSpec = spring(dampingRatio = 0.65f, stiffness = 450f),
                         label = "tab_scale"
                     )
+
+                    val activeBg = if (isDark) NeonCyan.copy(alpha = 0.18f) else DeepIndigo.copy(alpha = 0.12f)
+                    val activeTint = if (isDark) NeonCyan else DeepIndigo
+                    val inactiveTint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
 
                     Box(
                         modifier = Modifier
                             .scale(scale)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(
-                                if (isSelected) Color(0x3038BDF8) else Color.Transparent
-                            )
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(if (isSelected) activeBg else Color.Transparent)
                             .springClickable(testTag = "nav_tab_${tab.name.lowercase()}") {
                                 onTabSelected(tab)
                             }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(
@@ -365,15 +371,16 @@ fun FloatingGlassNavBar(
                             Icon(
                                 imageVector = if (isSelected) tab.selectedIcon else tab.icon,
                                 contentDescription = tab.title,
-                                tint = if (isSelected) NeonCyan else Color(0xFF94A3B8),
+                                tint = if (isSelected) activeTint else inactiveTint,
                                 modifier = Modifier.size(22.dp)
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = tab.title,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (isSelected) Color.White else Color(0xFF94A3B8),
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                color = if (isSelected) (if (isDark) Color.White else DeepIndigo) else inactiveTint,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                fontSize = 11.sp
                             )
                         }
                     }
@@ -382,6 +389,7 @@ fun FloatingGlassNavBar(
         }
     }
 }
+
 
 // --- Streak and Header Badges ---
 

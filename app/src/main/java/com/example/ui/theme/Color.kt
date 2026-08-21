@@ -3,26 +3,46 @@ package com.example.ui.theme
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
-// Base Dark Canvas
-val BackgroundDark = Color(0xFF090D16)
-val SurfaceDark = Color(0xFF111827)
-val CardSurfaceDark = Color(0xFF161F30)
+// ==========================================
+// Base Background Canvases
+// ==========================================
+// Nova Dark (Default)
+val BackgroundDark = Color(0xFF070B19)
+val SurfaceDark = Color(0xFF0F172A)
+val CardSurfaceDark = Color(0xFF131C2E)
 
-val DarkCanvas = Color(0xFF090D16)
-val DarkSurface = Color(0xFF111827)
-val DarkSurfaceElevated = Color(0xFF161F30)
+val DarkCanvas = Color(0xFF070B19)
+val DarkSurface = Color(0xFF0F172A)
+val DarkSurfaceElevated = Color(0xFF131C2E)
 
-// Text Colors
-val TextPrimary = Color(0xFFFFFFFF)
-val TextSecondary = Color(0xFF94A3B8)
-val TextMuted = Color(0xFF64748B)
+// AMOLED Deep Black
+val AmoledBackground = Color(0xFF000000)
+val AmoledSurface = Color(0xFF0A0A0A)
+val AmoledCardSurface = Color(0xFF121212)
 
-// Base Light Canvas
+// Glass Light
 val BackgroundLight = Color(0xFFF8FAFC)
 val SurfaceLight = Color(0xFFFFFFFF)
 val CardSurfaceLight = Color(0xFFF1F5F9)
 
-// Brand Core Accents
+// ==========================================
+// Typography & Text Colors
+// ==========================================
+val TextPrimaryDark = Color(0xFFFFFFFF)
+val TextSecondaryDark = Color(0xFF94A3B8)
+val TextMutedDark = Color(0xFF64748B)
+
+val TextPrimaryLight = Color(0xFF0F172A)
+val TextSecondaryLight = Color(0xFF475569)
+val TextMutedLight = Color(0xFF94A3B8)
+
+val TextPrimary = Color(0xFFFFFFFF)
+val TextSecondary = Color(0xFF94A3B8)
+val TextMuted = Color(0xFF64748B)
+
+// ==========================================
+// Brand Core Accents & Highlights
+// ==========================================
 val NeonCyan = Color(0xFF38BDF8)
 val ElectricViolet = Color(0xFF818CF8)
 val DeepIndigo = Color(0xFF6366F1)
@@ -41,19 +61,26 @@ val NeonGreen = Color(0xFF10B981)
 val CoralRose = Color(0xFFF43F5E)
 val CoralPink = Color(0xFFF43F5E)
 
+// ==========================================
 // Liquid Glass Translucencies
-val GlassFillDark = Color(0x241E293B)
-val GlassFillLight = Color(0xCCFFFFFF)
-val GlassBorderDark = Color(0x38FFFFFF)
-val GlassBorderLight = Color(0x3064748B)
+// ==========================================
+val GlassFillDark = Color(0x28131C2E)
+val GlassFillAmoled = Color(0x33121212)
+val GlassFillLight = Color(0xB8FFFFFF)
 
-// Gradients
+val GlassBorderDark = Color(0x28FFFFFF)
+val GlassBorderAmoled = Color(0x20FFFFFF)
+val GlassBorderLight = Color(0x40CBD5E1)
+
+// ==========================================
+// Atmospheric Gradients
+// ==========================================
 val GlassGradientPrimary = Brush.linearGradient(
     colors = listOf(Color(0xFF38BDF8), Color(0xFF818CF8), Color(0xFFA855F7))
 )
 
 val GlassCardGradientDark = Brush.linearGradient(
-    colors = listOf(Color(0x2B38BDF8), Color(0x15818CF8), Color(0x10000000))
+    colors = listOf(Color(0x2538BDF8), Color(0x10818CF8), Color(0x05000000))
 )
 
 val GlassBorderGradient = Brush.linearGradient(
@@ -62,16 +89,25 @@ val GlassBorderGradient = Brush.linearGradient(
 
 val DarkBackgroundGradient = Brush.verticalGradient(
     colors = listOf(
-        Color(0xFF090D16),
-        Color(0xFF0E1322),
-        Color(0xFF141A2E)
+        Color(0xFF070B19),
+        Color(0xFF0D1427),
+        Color(0xFF111A33)
+    )
+)
+
+val AmoledBackgroundGradient = Brush.verticalGradient(
+    colors = listOf(
+        Color(0xFF000000),
+        Color(0xFF050505),
+        Color(0xFF0A0A0A)
     )
 )
 
 val LightBackgroundGradient = Brush.verticalGradient(
     colors = listOf(
         Color(0xFFF8FAFC),
-        Color(0xFFEEF2F7),
+        Color(0xFFF1F5F9),
         Color(0xFFE2E8F0)
     )
 )
+

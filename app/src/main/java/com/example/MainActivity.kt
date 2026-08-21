@@ -40,7 +40,7 @@ import com.example.ui.screens.nova.NovaScreen
 import com.example.ui.screens.planner.StudyPlannerScreen
 import com.example.ui.screens.planner.StudySessionTimerView
 import com.example.data.model.ExamContext
-import com.example.ui.screens.profile.ProfileSettingsDialog
+import com.example.ui.screens.profile.ProfileSettingsScreen
 import com.example.ui.screens.progress.ProgressDashboardScreen
 import com.example.ui.screens.progress.ExamReadinessCenterScreen
 import com.example.ui.screens.tutor.GeminiTutorScreen
@@ -62,12 +62,15 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
+            val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
             val isDarkTheme by viewModel.isDarkTheme.collectAsStateWithLifecycle()
 
             StudyMateTheme(
                 darkTheme = isDarkTheme,
+                themeMode = themeMode,
                 onToggleTheme = { viewModel.updateTheme(!isDarkTheme) },
-                onSetTheme = { viewModel.updateTheme(it) }
+                onSetTheme = { viewModel.updateTheme(it) },
+                onSetThemeMode = { viewModel.updateThemeMode(it) }
             ) {
                 StudyMateAppContent(viewModel = viewModel)
             }
@@ -84,7 +87,8 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     var isSplashFinished by remember { mutableStateOf(false) }
     var tabStack by remember { mutableStateOf(listOf(AppNavTab.HOME)) }
     val currentTab = tabStack.lastOrNull() ?: AppNavTab.HOME
-    var showProfileDialog by remember { mutableStateOf(false) }
+    var showProfileSettings by remember { mutableStateOf(false) }
+    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
 
     val onSelectTab: (AppNavTab) -> Unit = { selected ->
         if (selected == AppNavTab.HOME) {
@@ -244,8 +248,8 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
             selectedLearningSubject != null -> {
                 selectedLearningSubject = null
             }
-            showProfileDialog -> {
-                showProfileDialog = false
+            showProfileSettings -> {
+                showProfileSettings = false
             }
 
             showDocumentSummarizer -> {
@@ -283,8 +287,8 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
         contentWindowInsets = WindowInsets.safeDrawing,
         bottomBar = {
-            // Hide bottom bar during active fullscreen mock test or document summarizer
-            if (!activeTestState.isTestInProgress && !activeTestState.isCompleted && !showDocumentSummarizer) {
+            // Hide bottom bar during active fullscreen mock test, document summarizer, or profile settings
+            if (!activeTestState.isTestInProgress && !activeTestState.isCompleted && !showDocumentSummarizer && !showProfileSettings) {
                 FloatingGlassNavBar(
                     currentTab = currentTab,
                     onTabSelected = { onSelectTab(it) }
@@ -295,10 +299,32 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(appBackgroundGradient(isDarkTheme))
+                .background(appBackgroundGradient(isDarkTheme, themeMode))
                 .padding(innerPadding)
         ) {
-            if (showExamReadinessCenter) {
+            if (showProfileSettings) {
+                ProfileSettingsScreen(
+                    user = userProfile,
+                    themeMode = themeMode,
+                    isDarkTheme = isDarkTheme,
+                    notificationPrefs = notifPrefs,
+                    onSetThemeMode = { viewModel.updateThemeMode(it) },
+                    onToggleDarkTheme = { viewModel.updateTheme(it) },
+                    onUpdateNotificationPrefs = { viewModel.updateNotificationPrefs(it) },
+                    onUpdateProfile = { viewModel.updateUserProfile(it, refreshStudyPlan = true) },
+                    onSignOut = { viewModel.signOut(context) },
+                    onDeleteAccount = { viewModel.deleteAccount() },
+                    onBack = { showProfileSettings = false },
+                    onTestStudyReminder = { viewModel.testStudySessionReminder() },
+                    onTestExamCountdown = { viewModel.testExamCountdownReminder() },
+                    onTestDailyGoal = { viewModel.testDailyGoalReminder() },
+                    onTestMissedStudy = { viewModel.testMissedStudyReminder() },
+                    onTestBreakReminder = { viewModel.testBreakReminder() },
+                    onTestFocusStarted = { viewModel.testFocusStartedNotification() },
+                    onTestFocusCompleted = { viewModel.testFocusCompletedNotification() },
+                    onTestDailyMotivation = { viewModel.testDailyMotivationalNotification() }
+                )
+            } else if (showExamReadinessCenter) {
                 ExamReadinessCenterScreen(
                     user = userProfile,
                     examReadiness = examReadinessScore,
@@ -366,7 +392,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                                 onSelectTab(AppNavTab.FOCUS)
                             },
                             onNavigateToTab = { onSelectTab(it) },
-                            onOpenProfileSettings = { showProfileDialog = true },
+                            onOpenProfileSettings = { showProfileSettings = true },
                             onOpenExamReadinessCenter = { showExamReadinessCenter = true },
                             onSignOut = { viewModel.signOut(context) },
                             onScanQuestion = { onSelectTab(AppNavTab.AI_TUTOR) },
@@ -566,7 +592,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                                                             viewModel.performSmartSearch(query)
                                                             onSelectTab(AppNavTab.AI_TUTOR)
                                                         },
-                                                        onChangeExam = { showProfileDialog = true },
+                                                        onChangeExam = { showProfileSettings = true },
                                                         onOpenSavedLearning = { showSavedLearning = true },
                                                         onAskNova = { onSelectTab(AppNavTab.AI_TUTOR) }
                                                     )
@@ -633,29 +659,6 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                         )
                     }
                 }
-            }
-
-            // Profile & Settings Dialog
-            if (showProfileDialog) {
-                ProfileSettingsDialog(
-                    user = userProfile,
-                    isDarkTheme = isDarkTheme,
-                    notificationPrefs = notifPrefs,
-                    onToggleDarkTheme = { viewModel.updateTheme(it) },
-                    onUpdateNotificationPrefs = { viewModel.updateNotificationPrefs(it) },
-                    onUpdateProfile = { viewModel.updateUserProfile(it) },
-                    onSignOut = { viewModel.signOut(context) },
-                    onDeleteAccount = { viewModel.deleteAccount() },
-                    onDismiss = { showProfileDialog = false },
-                    onTestStudyReminder = { viewModel.testStudySessionReminder() },
-                    onTestExamCountdown = { viewModel.testExamCountdownReminder() },
-                    onTestDailyGoal = { viewModel.testDailyGoalReminder() },
-                    onTestMissedStudy = { viewModel.testMissedStudyReminder() },
-                    onTestBreakReminder = { viewModel.testBreakReminder() },
-                    onTestFocusStarted = { viewModel.testFocusStartedNotification() },
-                    onTestFocusCompleted = { viewModel.testFocusCompletedNotification() },
-                    onTestDailyMotivation = { viewModel.testDailyMotivationalNotification() }
-                )
             }
         }
     }
