@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,7 +22,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -29,6 +33,7 @@ import android.app.Application
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.NovaVoiceState
 import com.example.ui.components.GlassCard
+import com.example.ui.components.GlassDialog
 import com.example.ui.components.springClickable
 import com.example.ui.screens.voicenotes.VoiceNotesTab
 import com.example.ui.theme.*
@@ -46,6 +51,7 @@ fun NovaScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val isDark = isAppInDarkTheme()
     val voiceNotesViewModel: VoiceNotesViewModel = viewModel(
         factory = VoiceNotesViewModelFactory(context.applicationContext as Application)
     )
@@ -55,6 +61,7 @@ fun NovaScreen(
     val recognizedText by viewModel.voiceManager.recognizedText.collectAsState()
 
     var showVoiceModal by remember { mutableStateOf(false) }
+    var showQuickSwitchMenu by remember { mutableStateOf(false) }
 
     // Listen to ViewModel Navigation Events
     LaunchedEffect(Unit) {
@@ -113,18 +120,22 @@ fun NovaScreen(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = DarkCanvas,
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            NovaTopBar(
-                currentTab = currentTab,
-                onSelectTab = { viewModel.setTab(it) }
-            )
+            if (currentTab != NovaScreenTab.DASHBOARD && currentTab != NovaScreenTab.ASSISTANT_CHAT && currentTab != NovaScreenTab.SMART_SEARCH && currentTab != NovaScreenTab.SMART_NOTES) {
+                NovaSubScreenTopBar(
+                    currentTab = currentTab,
+                    isDark = isDark,
+                    onBackToHub = { viewModel.setTab(NovaScreenTab.DASHBOARD) },
+                    onOpenQuickSwitch = { showQuickSwitchMenu = true }
+                )
+            }
         }
     ) { paddingValues ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
+                .padding(if (currentTab == NovaScreenTab.DASHBOARD || currentTab == NovaScreenTab.ASSISTANT_CHAT || currentTab == NovaScreenTab.SMART_SEARCH || currentTab == NovaScreenTab.SMART_NOTES) PaddingValues(0.dp) else paddingValues)
         ) {
             when (currentTab) {
                 NovaScreenTab.DASHBOARD -> {
@@ -138,18 +149,22 @@ fun NovaScreen(
                 NovaScreenTab.ASSISTANT_CHAT -> {
                     NovaAssistantChatTab(
                         viewModel = viewModel,
-                        onRequestMicPermission = { startListeningWithPermission() }
+                        onRequestMicPermission = { startListeningWithPermission() },
+                        onBackToHub = { viewModel.setTab(NovaScreenTab.DASHBOARD) }
                     )
                 }
                 NovaScreenTab.SMART_SEARCH -> {
                     NovaSmartSearchTab(
                         viewModel = viewModel,
-                        onNavigateToFocus = onNavigateToFocus
+                        onNavigateToFocus = onNavigateToFocus,
+                        onBackToHub = { viewModel.setTab(NovaScreenTab.DASHBOARD) },
+                        onRequestMicPermission = { startListeningWithPermission() }
                     )
                 }
                 NovaScreenTab.SMART_NOTES -> {
                     NovaSmartNotesTab(
-                        viewModel = viewModel
+                        viewModel = viewModel,
+                        onBackToHub = { viewModel.setTab(NovaScreenTab.DASHBOARD) }
                     )
                 }
                 NovaScreenTab.CURRENT_AFFAIRS -> {
@@ -192,97 +207,167 @@ fun NovaScreen(
                     }
                 )
             }
+
+            // Quick Tool Switcher Dialog
+            if (showQuickSwitchMenu) {
+                NovaQuickSwitchDialog(
+                    currentTab = currentTab,
+                    isDark = isDark,
+                    onDismiss = { showQuickSwitchMenu = false },
+                    onSelectTab = { tab ->
+                        viewModel.setTab(tab)
+                        showQuickSwitchMenu = false
+                    }
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun NovaTopBar(
+private fun NovaSubScreenTopBar(
     currentTab: NovaScreenTab,
-    onSelectTab: (NovaScreenTab) -> Unit
+    isDark: Boolean,
+    onBackToHub: () -> Unit,
+    onOpenQuickSwitch: () -> Unit
 ) {
     Surface(
-        color = DarkCanvas.copy(alpha = 0.95f),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+        color = if (isDark) DarkSurface.copy(alpha = 0.95f) else Color.White.copy(alpha = 0.95f),
+        border = BorderStroke(0.5.dp, if (isDark) Color(0x20FFFFFF) else Color(0x18000000)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                IconButton(
+                    onClick = onBackToHub,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(if (isDark) Color(0x15FFFFFF) else Color(0x0A000000))
+                        .testTag("nova_back_to_hub_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back to NOVA Hub",
+                        tint = if (isDark) Color.White else Color(0xFF0F172A),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                Column {
+                    Text(
+                        text = "${currentTab.icon} ${currentTab.title}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDark) Color.White else Color(0xFF0F172A),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "NOVA AI Companion",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                        fontSize = 10.sp
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onOpenQuickSwitch,
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(if (isDark) Color(0x15FFFFFF) else Color(0x0A000000))
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.GridView,
+                    contentDescription = "Switch Tool",
+                    tint = if (isDark) NeonCyan else DeepIndigo,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NovaQuickSwitchDialog(
+    currentTab: NovaScreenTab,
+    isDark: Boolean,
+    onDismiss: () -> Unit,
+    onSelectTab: (NovaScreenTab) -> Unit
+) {
+    GlassDialog(
+        onDismissRequest = onDismiss,
+        title = "Switch Tool",
+        subtitle = "Jump to any NOVA AI capability",
+        dismissText = "Cancel"
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .heightIn(max = 380.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
+            NovaScreenTab.values().forEach { tab ->
+                val isSelected = tab == currentTab
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isSelected) {
+                        if (isDark) Color(0x2838BDF8) else Color(0x186366F1)
+                    } else {
+                        if (isDark) Color(0x12FFFFFF) else Color(0x08000000)
+                    },
+                    border = BorderStroke(
+                        0.5.dp,
+                        if (isSelected) NeonCyan.copy(alpha = 0.5f) else Color.Transparent
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .springClickable { onSelectTab(tab) }
+                ) {
+                    Row(
                         modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(NeonCyan.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("✨", fontSize = 16.sp)
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "NOVA AI Assistant",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(CircleShape)
-                                    .background(EmeraldGreen)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "ONLINE • ORIGINAL FEMALE AI VOICE",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EmeraldGreen,
-                                letterSpacing = 0.5.sp
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Tab Selector Chips
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                NovaScreenTab.values().forEach { tab ->
-                    val isSelected = currentTab == tab
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = if (isSelected) NeonCyan.copy(alpha = 0.2f) else DarkSurfaceElevated,
-                        border = BorderStroke(
-                            1.dp,
-                            if (isSelected) NeonCyan else Color.White.copy(alpha = 0.08f)
-                        ),
-                        modifier = Modifier.springClickable { onSelectTab(tab) }
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text(tab.icon, fontSize = 12.sp)
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(tab.icon, fontSize = 16.sp)
                             Text(
                                 text = tab.title,
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) NeonCyan else Color.White.copy(alpha = 0.8f)
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) {
+                                    if (isDark) NeonCyan else DeepIndigo
+                                } else {
+                                    if (isDark) Color.White else Color(0xFF0F172A)
+                                }
+                            )
+                        }
+
+                        if (isSelected) {
+                            Icon(
+                                imageVector = Icons.Filled.Check,
+                                contentDescription = "Selected",
+                                tint = if (isDark) NeonCyan else DeepIndigo,
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
@@ -300,62 +385,68 @@ private fun NovaVoiceListeningModal(
     onStopListening: () -> Unit,
     onCancel: () -> Unit
 ) {
+    val isDark = isAppInDarkTheme()
+
     Dialog(onDismissRequest = onCancel) {
-        Surface(
+        GlassCard(
             shape = RoundedCornerShape(24.dp),
-            color = DarkSurfaceElevated,
-            border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.4f)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
-                modifier = Modifier.padding(24.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
                     text = "NOVA is listening...",
-                    fontSize = 18.sp,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = if (isDark) Color.White else Color(0xFF0F172A)
                 )
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Bolna start karein (e.g. '30 min focus mode laga do')",
-                    fontSize = 12.sp,
-                    color = TextSecondary
+                    text = "Speak your doubt or study command",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                 NovaOrbVisualizer(
                     voiceState = voiceState,
                     audioRms = audioRms,
-                    size = 110.dp
+                    size = 100.dp
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = DarkCanvas.copy(alpha = 0.6f),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isDark) Color(0x22131C2E) else Color(0x10000000),
+                    border = BorderStroke(0.5.dp, if (isDark) Color(0x33FFFFFF) else Color(0x2064748B)),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 60.dp)
+                        .heightIn(min = 64.dp)
                 ) {
                     Box(
                         modifier = Modifier.padding(12.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (recognizedText.isNotBlank()) recognizedText else "Speak now...",
-                            fontSize = 14.sp,
-                            color = if (recognizedText.isNotBlank()) Color.White else TextSecondary,
+                            text = if (recognizedText.isNotBlank()) recognizedText else "Listening to your voice...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (recognizedText.isNotBlank()) {
+                                if (isDark) Color.White else Color(0xFF0F172A)
+                            } else {
+                                if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                            },
                             fontWeight = if (recognizedText.isNotBlank()) FontWeight.SemiBold else FontWeight.Normal
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -366,7 +457,7 @@ private fun NovaVoiceListeningModal(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Cancel", color = TextSecondary)
+                        Text("Cancel", color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569))
                     }
                     Button(
                         onClick = onStopListening,
@@ -374,7 +465,7 @@ private fun NovaVoiceListeningModal(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Done", fontWeight = FontWeight.Bold, color = DarkCanvas)
+                        Text("Done", fontWeight = FontWeight.Bold, color = Color(0xFF0B1120))
                     }
                 }
             }

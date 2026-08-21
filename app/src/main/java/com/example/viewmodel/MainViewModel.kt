@@ -39,16 +39,37 @@ data class ChatMessage(
     val topicContext: String? = null
 )
 
+data class CompletedSessionSummary(
+    val examName: String = "",
+    val subject: String = "",
+    val topic: String = "",
+    val plannedMinutes: Int = 0,
+    val actualMinutes: Int = 0,
+    val xpEarned: Int = 0
+)
+
 data class FocusTimerState(
     val isRunning: Boolean = false,
     val isPaused: Boolean = false,
     val initialMinutes: Int = 25,
     val remainingSeconds: Int = 25 * 60,
-    val subject: String = "Physics",
-    val topic: String = "Current Electricity",
+    val actualMinutesSpent: Int = 0,
+    val subject: String = "General Science",
+    val topic: String = "Sound",
+    val examName: String = "",
+    val sessionGoal: String = "",
+    val planItemId: Long? = null,
     val restrictedAppsCount: Int = 4,
     val showCelebration: Boolean = false,
-    val lastSessionXp: Int = 50
+    val lastSessionXp: Int = 50,
+    val lastCompletedSession: CompletedSessionSummary? = null,
+    val sessionStartTimestamp: Long = 0L,
+    val pausedAccumulatedSeconds: Long = 0L,
+    val pauseStartTimestamp: Long = 0L,
+    val isBreakActive: Boolean = false,
+    val breakDurationMinutes: Int = 5,
+    val breakRemainingSeconds: Int = 5 * 60,
+    val isFocusShieldActive: Boolean = true
 )
 
 data class ActiveTestState(
@@ -686,6 +707,45 @@ class MainViewModel(
         }
     }
 
+    fun applySubjectTimeAllocations(
+        subjectMinutesMap: Map<String, Int>,
+        totalDailyMinutes: Int,
+        startHour: Int = 8,
+        startMinute: Int = 0,
+        breakMinutes: Int = 5
+    ) {
+        viewModelScope.launch {
+            _isPlanGenerating.value = true
+            val examCtx = activeExamContext.value ?: ExamContext()
+            val masteries = allTopicMasteries.value
+            val mistakeList = mistakes.value
+            val flashcardsList = flashcards.value
+            val currentPrefs = userStudyPreferences.value
+            val updatedPrefs = currentPrefs.copy(
+                dailyAvailableMinutes = totalDailyMinutes,
+                windowStartHour = startHour,
+                breakMinutes = breakMinutes
+            )
+
+            val sessions = com.example.service.intelligence.StudyPlannerEngine.generatePlanFromSubjectAllocations(
+                examContext = examCtx,
+                subjectAllocations = subjectMinutesMap,
+                startHour = startHour,
+                startMinute = startMinute,
+                breakMinutes = breakMinutes,
+                topicMasteries = masteries,
+                mistakes = mistakeList,
+                flashcards = flashcardsList,
+                userPreferences = updatedPrefs
+            )
+
+            studyRepository.replaceStudyPlan(sessions)
+            studyRepository.saveUserPreferences(updatedPrefs)
+            _isPlanGenerating.value = false
+            _snackbarMessage.emit("Updated daily study plan with custom allocations! 📚")
+        }
+    }
+
     fun updateSubjectPriority(subjectName: String, priority: String) {
         viewModelScope.launch {
             val current = userStudyPreferences.value
@@ -1098,19 +1158,37 @@ class MainViewModel(
 
     // --- Focus Mode Actions ---
 
-    fun startFocusSession(subject: String, topic: String, durationMinutes: Int = 25) {
+    fun startFocusSession(
+        subject: String,
+        topic: String,
+        durationMinutes: Int = 25,
+        examName: String = "",
+        sessionGoal: String = "",
+        planItemId: Long? = null
+    ) {
         timerJob?.cancel()
         val appContext = getApplication<Application>()
         val restrictedCount = com.example.service.FocusShieldManager.getRestrictedPackages().size
+        val currentExam = if (examName.isNotBlank()) examName else (activeExamContext.value.examName.ifBlank { userProfile.value?.examName ?: "RRB Group D" })
+        val startTs = System.currentTimeMillis()
+
         _focusState.value = _focusState.value.copy(
             isRunning = true,
             isPaused = false,
             initialMinutes = durationMinutes,
             remainingSeconds = durationMinutes * 60,
+            actualMinutesSpent = 0,
             subject = subject,
             topic = topic,
+            examName = currentExam,
+            sessionGoal = sessionGoal.ifBlank { "Complete $topic — Key Concepts" },
+            planItemId = planItemId,
             restrictedAppsCount = restrictedCount,
-            showCelebration = false
+            showCelebration = false,
+            sessionStartTimestamp = startTs,
+            pausedAccumulatedSeconds = 0L,
+            pauseStartTimestamp = 0L,
+            isBreakActive = false
         )
 
         com.example.service.FocusShieldManager.startFocusSession(appContext, subject, topic, durationMinutes)
@@ -1123,67 +1201,175 @@ class MainViewModel(
             durationMinutes = durationMinutes
         )
 
+        startAccurateFocusTimerLoop()
+    }
+
+    private fun startAccurateFocusTimerLoop() {
+        timerJob?.cancel()
         timerJob = viewModelScope.launch {
-            while (_focusState.value.remainingSeconds > 0) {
-                delay(1000)
-                if (!_focusState.value.isPaused) {
-                    val nextSecs = _focusState.value.remainingSeconds - 1
-                    _focusState.value = _focusState.value.copy(
-                        remainingSeconds = nextSecs
+            while (_focusState.value.isRunning) {
+                delay(1000L)
+                val state = _focusState.value
+                if (state.isRunning && !state.isPaused) {
+                    val now = System.currentTimeMillis()
+                    val totalPaused = state.pausedAccumulatedSeconds + (if (state.isPaused && state.pauseStartTimestamp > 0L) (now - state.pauseStartTimestamp) / 1000L else 0L)
+                    val elapsedSecs = if (state.sessionStartTimestamp > 0L) {
+                        ((now - state.sessionStartTimestamp) / 1000L - totalPaused).coerceAtLeast(0L).toInt()
+                    } else {
+                        (state.initialMinutes * 60) - state.remainingSeconds
+                    }
+                    val remSecs = (state.initialMinutes * 60 - elapsedSecs).coerceAtLeast(0)
+                    val actMins = (elapsedSecs / 60).coerceAtLeast(0)
+
+                    _focusState.value = state.copy(
+                        remainingSeconds = remSecs,
+                        actualMinutesSpent = actMins
                     )
-                    com.example.service.FocusShieldManager.updateRemainingTime(nextSecs)
+                    com.example.service.FocusShieldManager.updateRemainingTime(remSecs)
+
+                    if (remSecs == 0) {
+                        endFocusSession(isAutoFinished = true)
+                        break
+                    }
                 }
             }
-            // Completed
-            endFocusSession(isAutoFinished = true)
         }
     }
 
     fun toggleFocusPause() {
-        _focusState.value = _focusState.value.copy(
-            isPaused = !_focusState.value.isPaused
-        )
+        val state = _focusState.value
+        if (!state.isRunning) return
+        val willPause = !state.isPaused
+        if (willPause) {
+            _focusState.value = state.copy(
+                isPaused = true,
+                pauseStartTimestamp = System.currentTimeMillis()
+            )
+        } else {
+            val pausedDuration = if (state.pauseStartTimestamp > 0L) {
+                (System.currentTimeMillis() - state.pauseStartTimestamp) / 1000L
+            } else 0L
+            _focusState.value = state.copy(
+                isPaused = false,
+                pausedAccumulatedSeconds = state.pausedAccumulatedSeconds + pausedDuration,
+                pauseStartTimestamp = 0L
+            )
+        }
     }
 
     fun endFocusSession(isAutoFinished: Boolean = false) {
         timerJob?.cancel()
         val appContext = getApplication<Application>()
         com.example.service.FocusShieldManager.endFocusSession()
-        val initialMins = _focusState.value.initialMinutes
-        val elapsedSeconds = (initialMins * 60) - _focusState.value.remainingSeconds
-        val actualMinutes = (elapsedSeconds / 60).coerceAtLeast(1)
+        val state = _focusState.value
+        val initialMins = state.initialMinutes
+
+        val now = System.currentTimeMillis()
+        val totalPaused = state.pausedAccumulatedSeconds + (if (state.isPaused && state.pauseStartTimestamp > 0L) (now - state.pauseStartTimestamp) / 1000L else 0L)
+        val elapsedSeconds = if (state.sessionStartTimestamp > 0L) {
+            ((now - state.sessionStartTimestamp) / 1000L - totalPaused).coerceAtLeast(0L).toInt()
+        } else {
+            (initialMins * 60) - state.remainingSeconds
+        }
+
+        // Accurately record actual elapsed minutes (never inflate partial sessions)
+        val actualMinutes = if (elapsedSeconds < 60) {
+            if (isAutoFinished) initialMins else 1
+        } else {
+            (elapsedSeconds / 60).coerceIn(1, initialMins)
+        }
 
         viewModelScope.launch {
             val session = studyRepository.recordFocusSession(
-                subject = _focusState.value.subject,
-                topic = _focusState.value.topic,
+                subject = state.subject,
+                topic = state.topic,
                 durationMinutes = initialMins,
                 actualMinutesSpent = actualMinutes
             )
-            _focusState.value = _focusState.value.copy(
+
+            state.planItemId?.let { pId ->
+                studyRepository.togglePlanItemCompletion(pId, true, xpReward = session.xpEarned)
+            }
+
+            val summary = CompletedSessionSummary(
+                examName = state.examName.ifBlank { activeExamContext.value.examName.ifBlank { "Exam Prep" } },
+                subject = state.subject,
+                topic = state.topic,
+                plannedMinutes = initialMins,
+                actualMinutes = actualMinutes,
+                xpEarned = session.xpEarned
+            )
+
+            _focusState.value = state.copy(
                 isRunning = false,
                 isPaused = false,
                 showCelebration = true,
-                lastSessionXp = session.xpEarned
+                lastSessionXp = session.xpEarned,
+                lastCompletedSession = summary,
+                actualMinutesSpent = actualMinutes
             )
 
             val userName = userProfile.value?.name ?: "Rahul"
             com.example.notification.StudyNotificationManager.sendFocusSessionCompleted(
                 context = appContext,
                 userName = userName,
-                subject = _focusState.value.subject,
+                subject = state.subject,
                 minutes = actualMinutes,
                 xpEarned = session.xpEarned
             )
 
             if (isAutoFinished) {
-                val breakMins = userProfile.value?.breakDurationMinutes ?: 15
+                val breakMins = userProfile.value?.breakDurationMinutes ?: 5
                 com.example.notification.StudyNotificationManager.sendBreakReminder(
                     context = appContext,
                     userName = userName,
                     breakMinutes = breakMins
                 )
             }
+        }
+    }
+
+    fun startBreakTimer(durationMinutes: Int = 5) {
+        timerJob?.cancel()
+        _focusState.value = _focusState.value.copy(
+            isBreakActive = true,
+            breakDurationMinutes = durationMinutes,
+            breakRemainingSeconds = durationMinutes * 60
+        )
+        timerJob = viewModelScope.launch {
+            while (_focusState.value.isBreakActive && _focusState.value.breakRemainingSeconds > 0) {
+                delay(1000L)
+                val curSecs = _focusState.value.breakRemainingSeconds
+                if (curSecs > 0) {
+                    _focusState.value = _focusState.value.copy(
+                        breakRemainingSeconds = curSecs - 1
+                    )
+                }
+            }
+            if (_focusState.value.breakRemainingSeconds == 0) {
+                _focusState.value = _focusState.value.copy(isBreakActive = false)
+            }
+        }
+    }
+
+    fun endBreakTimer() {
+        timerJob?.cancel()
+        _focusState.value = _focusState.value.copy(isBreakActive = false)
+    }
+
+    fun saveSessionNote(subject: String, topic: String, content: String) {
+        viewModelScope.launch {
+            val note = com.example.data.model.SmartNoteItem(
+                title = if (topic.isNotBlank()) "$topic Notes" else "$subject Focus Notes",
+                subject = subject,
+                topic = topic,
+                contentMarkdown = content,
+                keyPoints = content.lines().filter { it.isNotBlank() },
+                isBookmarked = false,
+                revisionCategory = com.example.data.model.RevisionCategory.PRACTICE_SOON
+            )
+            studyRepository.saveSmartNote(note)
+            _snackbarMessage.emit("Note saved to Smart Notes 📝")
         }
     }
 
@@ -2629,6 +2815,12 @@ class MainViewModel(
     private val _isNovaDoubtThinking = MutableStateFlow(false)
     val isNovaDoubtThinking: StateFlow<Boolean> = _isNovaDoubtThinking.asStateFlow()
 
+    private val _novaProgressAnalysis = MutableStateFlow<String?>(null)
+    val novaProgressAnalysis: StateFlow<String?> = _novaProgressAnalysis.asStateFlow()
+
+    private val _isNovaProgressAnalyzing = MutableStateFlow(false)
+    val isNovaProgressAnalyzing: StateFlow<Boolean> = _isNovaProgressAnalyzing.asStateFlow()
+
     val allLearningBookmarks: StateFlow<List<UserLearningBookmark>> = studyRepository.allLearningBookmarks
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
@@ -2737,7 +2929,48 @@ class MainViewModel(
                 notesSummary = "Completed $topic quick check: $score/$total correct"
             )
 
-            _snackbarMessage.emit("Quick Test Completed! Score: $score/$total (+$${score * 15} XP)")
+            _snackbarMessage.emit("Quick Test Completed! Score: $score/$total (+${score * 15} XP)")
+        }
+    }
+
+    fun generateNovaProgressAnalysis(
+        examName: String,
+        aggregatedMetricsSummary: String,
+        language: String = "English"
+    ) {
+        viewModelScope.launch {
+            _isNovaProgressAnalyzing.value = true
+            try {
+                val prompt = """
+                    You are NOVA, an expert academic preparation mentor for Indian competitive exams ($examName).
+                    Analyze the following REAL student performance analytics data:
+                    $aggregatedMetricsSummary
+
+                    Instructions:
+                    - Provide a concise, highly actionable evaluation in $language (around 3-4 bullet points or short paragraphs).
+                    - Identify: 1) Strongest subject/area, 2) Weakest subject or topic needing improvement, 3) Improvement trend observation, 4) The single most recommended next focus step.
+                    - Do not fabricate missing stats or give generic advice; tailor directly to the provided metrics.
+                    - Keep the tone encouraging, objective, and mentor-like.
+                """.trimIndent()
+
+                val result = geminiRepository.askNova(
+                    userPrompt = prompt,
+                    studyContext = NovaStudyContext(
+                        targetExam = examName,
+                        preferredLanguage = language
+                    )
+                )
+
+                _novaProgressAnalysis.value = result.getOrNull()?.replyMarkdown
+                    ?: if (language.equals("Hindi", ignoreCase = true))
+                        "आपकी तैयारी का विश्लेषण: अपने कमजोर विषयों पर नियमित रूप से मॉक टेस्ट और रीविजन पर ध्यान दें।"
+                    else
+                        "Your performance analysis is ready. Focus on regular practice and targeted revision in your lower-accuracy areas."
+            } catch (e: Exception) {
+                _novaProgressAnalysis.value = "NOVA analysis is temporarily unavailable."
+            } finally {
+                _isNovaProgressAnalyzing.value = false
+            }
         }
     }
 

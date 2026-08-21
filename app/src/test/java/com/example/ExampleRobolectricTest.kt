@@ -73,4 +73,45 @@ class ExampleRobolectricTest {
     FocusShieldManager.endFocusSession()
     assertFalse(FocusShieldManager.isSessionActive.value)
   }
+
+  @Test
+  fun `performance coach computes real analytics metrics`() {
+    val profile = com.example.data.model.UserProfile(
+        examName = "RRB Group D",
+        streakDays = 5,
+        dailyTargetMinutes = 120
+    )
+    val attempts = listOf(
+        com.example.data.model.MockTestAttempt(
+            id = 1L,
+            examName = "RRB Group D",
+            subject = "Mathematics",
+            score = 15,
+            totalQuestions = 20,
+            accuracyPercent = 75f,
+            timestamp = System.currentTimeMillis()
+        ),
+        com.example.data.model.MockTestAttempt(
+            id = 2L,
+            examName = "RRB Group D",
+            subject = "General Science",
+            score = 8,
+            totalQuestions = 10,
+            accuracyPercent = 80f,
+            timestamp = System.currentTimeMillis()
+        )
+    )
+    val report = com.example.service.intelligence.PerformanceCoachEngine.computePerformanceReport(
+        profile = profile,
+        mockAttempts = attempts,
+        mistakes = emptyList(),
+        topicMasteries = emptyList(),
+        focusSessions = emptyList(),
+        plans = emptyList()
+    )
+
+    assertEquals(2, report.totalTestsTaken)
+    assertEquals(30, report.totalQuestionsSolved)
+    assertEquals(77, report.overallAccuracyPercent)
+  }
 }

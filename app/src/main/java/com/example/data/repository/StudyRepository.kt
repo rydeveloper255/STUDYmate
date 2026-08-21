@@ -70,6 +70,11 @@ class StudyRepository(
         database.smartNoteDao().toggleRevised(id, isRevised)
     }
 
+    suspend fun updateSmartNote(note: SmartNoteItem) = withContext(Dispatchers.IO) {
+        database.smartNoteDao().updateSmartNote(note)
+        syncService?.syncSmartNote(note)
+    }
+
     suspend fun deleteSmartNote(id: Long) = withContext(Dispatchers.IO) {
         database.smartNoteDao().deleteSmartNote(id)
         syncService?.deleteSmartNote(id)

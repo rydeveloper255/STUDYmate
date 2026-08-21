@@ -74,6 +74,7 @@ fun HomeScreen(
     var showExamSwitcherDialog by remember { mutableStateOf(false) }
     var showQuickSearchDialog by remember { mutableStateOf(false) }
     var showNotificationSummaryDialog by remember { mutableStateOf(false) }
+    var showAllToolsDialog by remember { mutableStateOf(false) }
 
     // 1. Time-based dynamic greeting
     val currentHour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
@@ -88,7 +89,8 @@ fun HomeScreen(
     }
 
     // 2. Exam Context & Dynamic Countdown
-    val selectedExamName = user?.examName?.ifBlank { "Competitive / Board Exam" } ?: "Competitive / Board Exam"
+    val selectedExamName = user?.examName?.ifBlank { "RRB Group D (Railway)" } ?: "RRB Group D (Railway)"
+    val examCategory = user?.examCategory?.ifBlank { "Railway Recruitment" } ?: "Railway Recruitment"
     val targetDateMillis = user?.examDateMillis ?: (System.currentTimeMillis() + 90L * 24 * 60 * 60 * 1000)
     val daysRemaining = remember(targetDateMillis) {
         val diff = targetDateMillis - System.currentTimeMillis()
@@ -102,7 +104,7 @@ fun HomeScreen(
         }
     }
 
-    // 3. Smart Mission Determination (The ONE Primary Mission)
+    // 3. Smart Mission & Progress Determination
     val nextPendingTask = remember(studyPlan) {
         studyPlan.firstOrNull { !it.isCompleted }
     }
@@ -122,17 +124,40 @@ fun HomeScreen(
     val missionTopic = nextPendingTask?.topic
         ?: studyNowRecommendation?.topic
         ?: user?.weakTopics?.firstOrNull()
-        ?: "Core Foundation & Practice"
+        ?: "Core Concepts & High-Yield Practice"
 
     val missionTargetMinutes = nextPendingTask?.targetMinutes
         ?: studyNowRecommendation?.targetMinutes
         ?: 30
 
+    val recommendationReason = remember(nextPendingTask, studyNowRecommendation, user) {
+        if (nextPendingTask != null) {
+            "Next priority item in your structured study schedule"
+        } else if (studyNowRecommendation != null) {
+            studyNowRecommendation.reasoning.ifBlank { "High-yield topic calibrated for your exam" }
+        } else if (!user?.weakSubjects.isNullOrEmpty()) {
+            "Targeted practice for ${user?.weakSubjects?.first()}"
+        } else {
+            "Daily core topic for ${selectedExamName.take(15)}"
+        }
+    }
+
     val todayFocusMinutes = user?.totalFocusMinutes ?: 0
-    val targetDailyMinutes = user?.dailyTargetMinutes ?: 180
-    val prepPercentage = examReadiness?.readinessScore
-        ?: if (totalPlanCount > 0) ((completedPlanCount.toFloat() / totalPlanCount.toFloat()) * 100).toInt().coerceIn(10, 95)
-        else 56
+    val targetDailyMinutes = (user?.dailyTargetMinutes ?: 180).coerceAtLeast(60)
+    val progressFraction = (todayFocusMinutes.toFloat() / targetDailyMinutes.toFloat()).coerceIn(0f, 1f)
+    val progressPercentage = (progressFraction * 100).toInt()
+
+    val studyHours = todayFocusMinutes / 60
+    val studyMins = todayFocusMinutes % 60
+    val formattedStudyTime = if (studyHours > 0) "${studyHours}h ${studyMins}m" else "${studyMins}m"
+
+    val targetHours = targetDailyMinutes / 60
+    val targetMins = targetDailyMinutes % 60
+    val formattedTargetTime = if (targetHours > 0 && targetMins > 0) "${targetHours}h ${targetMins}m" else if (targetHours > 0) "${targetHours}h" else "${targetMins}m"
+
+    val userLevel = user?.level ?: 1
+    val userXp = user?.xp ?: (todayFocusMinutes * 10)
+    val streakDays = user?.streakDays ?: 1
 
     // Custom study schedule blocks (from user profile)
     val customBlocks = remember(user?.customStudyBlocksJson) {
@@ -156,48 +181,78 @@ fun HomeScreen(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        contentPadding = PaddingValues(top = 12.dp, bottom = 108.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         // =========================================================================
-        // 1. TOP HEADER (Dynamic Greeting, Search, Notifications, Profile)
+        // A. COMPACT HEADER (Greeting, User Name, Motivational Indicator, Profile)
         // =========================================================================
         item {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 8.dp, bottom = 4.dp),
+                    .padding(top = 4.dp, bottom = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Left: Greeting & Subtitle
+                // Left: Compact Greeting Hierarchy
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "$greetingTime, $studentDisplayName 👋",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isDark) Color.White else Color(0xFF0F172A),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            text = "$greetingTime 👋",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isDark) NeonCyan else DeepIndigo
                         )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        // Small motivational flame/streak pill
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isDark) Color(0x22FBBF24) else Color(0x18FBBF24),
+                            border = androidx.compose.foundation.BorderStroke(0.5.dp, GoldenSpark.copy(alpha = 0.5f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.LocalFireDepartment,
+                                    contentDescription = "Streak",
+                                    tint = GoldenSpark,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Text(
+                                    text = "$streakDays d",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = GoldenSpark,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
                     }
+
                     Spacer(modifier = Modifier.height(2.dp))
+
                     Text(
-                        text = "Let's make today count.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                        text = studentDisplayName,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDark) Color.White else Color(0xFF0F172A),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(10.dp))
 
-                // Right: Action Buttons (Search, Notifications, Profile, Theme)
+                // Right: Compact Action Cluster (Search, Notifications, Profile)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Search Button
+                    // Search
                     IconButton(
                         onClick = { showQuickSearchDialog = true },
                         modifier = Modifier
@@ -215,7 +270,7 @@ fun HomeScreen(
                         )
                     }
 
-                    // Notification Button with badge
+                    // Notification
                     Box {
                         IconButton(
                             onClick = { showNotificationSummaryDialog = true },
@@ -224,7 +279,7 @@ fun HomeScreen(
                                 .clip(CircleShape)
                                 .background(if (isDark) Color(0x1CFFFFFF) else Color(0x10000000))
                                 .border(0.5.dp, if (isDark) Color(0x33FFFFFF) else Color(0x2064748B), CircleShape)
-                                .testTag("home_notification_button")
+                            .testTag("home_notification_button")
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Notifications,
@@ -233,25 +288,24 @@ fun HomeScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-                        // Unread pulse indicator
                         Box(
                             modifier = Modifier
-                                .size(8.dp)
+                                .size(7.dp)
                                 .align(Alignment.TopEnd)
                                 .clip(CircleShape)
                                 .background(GoldenSpark)
                         )
                     }
 
-                    // Profile / Avatar Button
+                    // Profile Avatar
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(40.dp)
                             .clip(CircleShape)
                             .background(
-                                Brush.linearGradient(listOf(NeonCyan.copy(alpha = 0.3f), ElectricViolet.copy(alpha = 0.3f)))
+                                Brush.linearGradient(listOf(NeonCyan.copy(alpha = 0.35f), ElectricViolet.copy(alpha = 0.35f)))
                             )
-                            .border(1.dp, NeonCyan.copy(alpha = 0.6f), CircleShape)
+                            .border(1.dp, NeonCyan.copy(alpha = 0.65f), CircleShape)
                             .springClickable(testTag = "home_profile_button", onClick = onOpenProfileSettings),
                         contentAlignment = Alignment.Center
                     ) {
@@ -277,15 +331,15 @@ fun HomeScreen(
         }
 
         // =========================================================================
-        // 2. CURRENT EXAM CARD (Dynamic Context, Days Remaining, Exam Switcher)
+        // 2. EXAM CONTEXT CARD (Dynamic Target, Days Left, Edit Action)
         // =========================================================================
         item {
             GlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("current_exam_card"),
-                shape = RoundedCornerShape(20.dp),
-                elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 2.dp else 8.dp,
+                shape = RoundedCornerShape(18.dp),
+                elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 1.dp else 6.dp,
                 onClick = { showExamSwitcherDialog = true }
             ) {
                 Row(
@@ -293,62 +347,71 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Left Exam Info
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        // Exam Icon Container
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isDark) Color(0x2838BDF8) else Color(0x186366F1))
+                                .border(0.5.dp, if (isDark) NeonCyan.copy(alpha = 0.4f) else DeepIndigo.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Filled.School,
-                                contentDescription = null,
-                                tint = NeonCyan,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Text(
-                                text = "CURRENT EXAM",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = NeonCyan,
-                                letterSpacing = 1.sp
+                                contentDescription = "Exam",
+                                tint = if (isDark) NeonCyan else DeepIndigo,
+                                modifier = Modifier.size(22.dp)
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        Text(
-                            text = selectedExamName,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isDark) Color.White else Color(0xFF0F172A),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-
-                        Spacer(modifier = Modifier.height(2.dp))
-
-                        Text(
-                            text = "Target Date: $formattedTargetDate",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-                        )
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = selectedExamName,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDark) Color.White else Color(0xFF0F172A),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.Filled.ArrowDropDown,
+                                    contentDescription = "Switch Exam",
+                                    tint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "$examCategory • Target: $formattedTargetDate",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
 
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
 
-                    // Right Days Remaining Badge
+                    // Days Remaining Glass Pill
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = if (isDark) Color(0x2838BDF8) else Color(0x186366F1),
+                        color = if (isDark) Color(0x2238BDF8) else Color(0x156366F1),
                         border = androidx.compose.foundation.BorderStroke(
-                            width = 0.5.dp,
-                            color = if (isDark) NeonCyan.copy(alpha = 0.5f) else DeepIndigo.copy(alpha = 0.4f)
+                            0.5.dp,
+                            if (isDark) NeonCyan.copy(alpha = 0.5f) else DeepIndigo.copy(alpha = 0.4f)
                         )
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
                                 text = "$daysRemaining",
@@ -359,200 +422,17 @@ fun HomeScreen(
                             Text(
                                 text = "days left",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // =========================================================================
-        // 3. TODAY'S MISSION — THE MOST IMPORTANT CARD
-        // =========================================================================
-        item {
-            GlassCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("todays_mission_card"),
-                shape = RoundedCornerShape(22.dp),
-                elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 3.dp else 10.dp
-            ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    // Header row: Mission badge & Status
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(EmeraldSuccess)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "TODAY'S MISSION",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (isDark) Color.White else Color(0xFF0F172A),
-                                letterSpacing = 0.8.sp
-                            )
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (isDark) Color(0x2010B981) else Color(0x1510B981),
-                            border = androidx.compose.foundation.BorderStroke(0.5.dp, EmeraldSuccess.copy(alpha = 0.5f))
-                        ) {
-                            Text(
-                                text = if (nextPendingTask != null) "ACTIVE PLAN" else "SMART NEXT ACTION",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = EmeraldSuccess,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
                                 fontSize = 10.sp
                             )
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Mission Subject & Topic
-                    Text(
-                        text = "$missionSubject • $missionTopic",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDark) Color.White else Color(0xFF0F172A),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Text(
-                        text = "$missionTargetMinutes min focused session",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Subtle Progress Bar
-                    val completedFraction = if (targetDailyMinutes > 0) {
-                        (todayFocusMinutes.toFloat() / targetDailyMinutes.toFloat()).coerceIn(0f, 1f)
-                    } else 0f
-
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "$todayFocusMinutes min completed",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-                            )
-                            Text(
-                                text = "$targetDailyMinutes min goal",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(if (isDark) Color(0x20FFFFFF) else Color(0x15000000))
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth(completedFraction)
-                                    .fillMaxHeight()
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(
-                                        Brush.horizontalGradient(
-                                            listOf(NeonCyan, ElectricViolet, NebulaPurple)
-                                        )
-                                    )
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Action Buttons: START NOW / CONTINUE & VIEW PLAN
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        // Primary Action
-                        Button(
-                            onClick = { onStartFocusSession(missionSubject, missionTopic) },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp)
-                                .testTag("start_mission_button"),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isDark) ElectricIndigo else DeepIndigo
-                            ),
-                            contentPadding = PaddingValues(horizontal = 14.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.PlayArrow,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (todayFocusMinutes > 0) "CONTINUE" else "START NOW",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                            }
-                        }
-
-                        // Secondary Action
-                        OutlinedButton(
-                            onClick = { onNavigateToTab(AppNavTab.STUDY) },
-                            modifier = Modifier
-                                .height(46.dp)
-                                .testTag("view_plan_button"),
-                            shape = RoundedCornerShape(14.dp),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                if (isDark) Color(0x40FFFFFF) else Color(0x406366F1)
-                            ),
-                            contentPadding = PaddingValues(horizontal = 16.dp)
-                        ) {
-                            Text(
-                                text = "VIEW PLAN",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isDark) Color.White else DeepIndigo
-                            )
-                        }
-                    }
                 }
             }
         }
 
         // =========================================================================
-        // 4. TODAY'S PROGRESS (Study Time, Tasks Completed, Streak, Preparation %)
+        // 3. TODAY'S STUDY STATUS (Single Unified Clean Glass Card)
         // =========================================================================
         item {
             GlassCard(
@@ -564,101 +444,7 @@ fun HomeScreen(
                 onClick = onOpenExamReadinessCenter
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "TODAY'S PROGRESS",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
-                            letterSpacing = 0.8.sp
-                        )
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable { onOpenExamReadinessCenter() }
-                        ) {
-                            Text(
-                                text = "Analytics",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = NeonCyan,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = null,
-                                tint = NeonCyan,
-                                modifier = Modifier.size(12.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        // Study Time Metric
-                        val hours = todayFocusMinutes / 60
-                        val mins = todayFocusMinutes % 60
-                        val formattedTime = if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
-
-                        ProgressMetricItem(
-                            label = "Study Time",
-                            value = formattedTime,
-                            icon = Icons.Outlined.Timer,
-                            color = NeonCyan,
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        // Tasks Completed Metric
-                        ProgressMetricItem(
-                            label = "Tasks Done",
-                            value = "$completedPlanCount / $totalPlanCount",
-                            icon = Icons.Outlined.CheckCircle,
-                            color = EmeraldSuccess,
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        // Current Streak Metric
-                        ProgressMetricItem(
-                            label = "Streak",
-                            value = "${user?.streakDays ?: 1} Days",
-                            icon = Icons.Filled.LocalFireDepartment,
-                            color = GoldenSpark,
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        // Preparation % Metric
-                        ProgressMetricItem(
-                            label = "Prep Score",
-                            value = "$prepPercentage%",
-                            icon = Icons.Outlined.TrendingUp,
-                            color = NebulaPurple,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            }
-        }
-
-        // =========================================================================
-        // 5. NOVA AI CARD (Contextual AI Study Guidance)
-        // =========================================================================
-        item {
-            GlassCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("nova_ai_card"),
-                shape = RoundedCornerShape(20.dp),
-                elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 2.dp else 8.dp
-            ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    // Nova Header
+                    // Header Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -666,115 +452,185 @@ fun HomeScreen(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = Icons.Filled.AutoAwesome,
-                                contentDescription = "Nova AI",
+                                imageVector = Icons.Outlined.TrendingUp,
+                                contentDescription = null,
                                 tint = NeonCyan,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "✨ Nova AI",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isDark) Color.White else Color(0xFF0F172A)
+                                text = "TODAY'S PROGRESS",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                                letterSpacing = 0.8.sp
                             )
                         }
 
-                        TextButton(
-                            onClick = { onNavigateToTab(AppNavTab.AI_TUTOR) },
-                            contentPadding = PaddingValues(0.dp)
+                        // Percentage badge
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isDark) Color(0x2238BDF8) else Color(0x186366F1),
+                            border = androidx.compose.foundation.BorderStroke(0.5.dp, NeonCyan.copy(alpha = 0.4f))
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "Ask Nova",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = NeonCyan,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                    contentDescription = null,
-                                    tint = NeonCyan,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                            }
+                            Text(
+                                text = "$progressPercentage%",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) NeonCyan else DeepIndigo,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                fontSize = 11.sp
+                            )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // Contextual Nova AI Message
-                    val novaContextualMessage = remember(user, nextPendingTask, completedPlanCount, todayFocusMinutes) {
-                        generateContextualNovaMessage(
-                            user = user,
-                            nextTask = nextPendingTask,
-                            pendingTasksCount = totalPlanCount - completedPlanCount,
-                            completedTasksCount = completedPlanCount,
-                            todayFocusMins = todayFocusMinutes
+                    // Progress time & goal headline
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(
+                                text = formattedStudyTime,
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isDark) Color.White else Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = " / $formattedTargetTime",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                modifier = Modifier.padding(bottom = 2.dp, start = 4.dp)
+                            )
+                        }
+
+                        Text(
+                            text = if (progressPercentage >= 100) "Goal Reached! 🎉" else "${(targetDailyMinutes - todayFocusMinutes).coerceAtLeast(0)}m remaining",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (progressPercentage >= 100) EmeraldSuccess else (if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)),
+                            fontWeight = if (progressPercentage >= 100) FontWeight.Bold else FontWeight.Normal
                         )
                     }
 
-                    Text(
-                        text = novaContextualMessage,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155),
-                        lineHeight = 20.sp
-                    )
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    // Liquid Progress Bar
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (isDark) Color(0x20FFFFFF) else Color(0x15000000))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(progressFraction.coerceAtLeast(0.02f))
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(NeonCyan, ElectricViolet, NebulaPurple)
+                                    )
+                                )
+                        )
+                    }
 
-                    // Nova Buttons: Chat With Nova & Get Guidance
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 3-Metric Sub-row: Tasks Completed | Level & XP | Readiness
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Button(
-                            onClick = { onNavigateToTab(AppNavTab.AI_TUTOR) },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp)
-                                .testTag("chat_nova_button"),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isDark) Color(0x2838BDF8) else Color(0x186366F1),
-                                contentColor = if (isDark) NeonCyan else DeepIndigo
-                            ),
-                            border = androidx.compose.foundation.BorderStroke(
-                                0.5.dp,
-                                if (isDark) NeonCyan.copy(alpha = 0.5f) else DeepIndigo.copy(alpha = 0.4f)
-                            ),
-                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        // Metric 1: Tasks
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(
-                                text = "CHAT WITH NOVA",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold
+                            Icon(
+                                imageVector = Icons.Outlined.CheckCircle,
+                                contentDescription = null,
+                                tint = EmeraldSuccess,
+                                modifier = Modifier.size(15.dp)
                             )
+                            Column {
+                                Text(
+                                    text = "$completedPlanCount / $totalPlanCount Done",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDark) Color.White else Color(0xFF0F172A)
+                                )
+                                Text(
+                                    text = "Daily Tasks",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                    fontSize = 10.sp
+                                )
+                            }
                         }
 
-                        OutlinedButton(
-                            onClick = {
-                                onLoadAiCoach(missionSubject)
-                                onNavigateToTab(AppNavTab.AI_TUTOR)
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp)
-                                .testTag("get_guidance_button"),
-                            shape = RoundedCornerShape(10.dp),
-                            border = androidx.compose.foundation.BorderStroke(
-                                0.5.dp,
-                                if (isDark) Color(0x30FFFFFF) else Color(0x306366F1)
-                            ),
-                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        // Divider dot
+                        Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(Color(0x40888888)))
+
+                        // Metric 2: XP & Level
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(
-                                text = "GET GUIDANCE",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isDark) Color.White else Color(0xFF0F172A)
+                            Icon(
+                                imageVector = Icons.Outlined.Stars,
+                                contentDescription = null,
+                                tint = GoldenSpark,
+                                modifier = Modifier.size(15.dp)
                             )
+                            Column {
+                                Text(
+                                    text = "Lvl $userLevel • ${userXp} XP",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDark) Color.White else Color(0xFF0F172A)
+                                )
+                                Text(
+                                    text = "Student Rank",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+
+                        // Divider dot
+                        Box(modifier = Modifier.size(3.dp).clip(CircleShape).background(Color(0x40888888)))
+
+                        // Metric 3: Readiness Score
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Speed,
+                                contentDescription = null,
+                                tint = NebulaPurple,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "${examReadiness?.readinessScore ?: 56}%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDark) Color.White else Color(0xFF0F172A)
+                                )
+                                Text(
+                                    text = "Readiness",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                    fontSize = 10.sp
+                                )
+                            }
                         }
                     }
                 }
@@ -782,15 +638,121 @@ fun HomeScreen(
         }
 
         // =========================================================================
-        // 6. TODAY'S SCHEDULE (Compact Timetable)
+        // 4. PRIMARY ACTION (Dominant Cyan → Violet CTA + Current Subject/Topic)
         // =========================================================================
         item {
             GlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("todays_schedule_card"),
-                shape = RoundedCornerShape(20.dp),
-                elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 2.dp else 6.dp
+                    .testTag("todays_mission_card"),
+                shape = RoundedCornerShape(22.dp),
+                elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 2.dp else 10.dp,
+                borderColor = NeonCyan.copy(alpha = 0.5f)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Dominant Button
+                    val isSessionActive = todayFocusMinutes > 0
+                    val primaryCtaTitle = if (isSessionActive) "▶ Continue Studying" else "▶ Start Today's Study"
+
+                    Button(
+                        onClick = { onStartFocusSession(missionSubject, missionTopic) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .testTag("start_mission_button"),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.Transparent
+                        ),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(NeonCyan, DeepIndigo, NebulaPurple)
+                                    )
+                                )
+                                .border(1.dp, Color.White.copy(alpha = 0.4f), RoundedCornerShape(16.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = primaryCtaTitle.removePrefix("▶ ").trim(),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    letterSpacing = 0.5.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Current / Recommended Subject Sub-bar
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isDark) Color(0x18FFFFFF) else Color(0x0A000000))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(EmeraldSuccess)
+                            )
+                            Text(
+                                text = "$missionSubject • $missionTopic",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isDark) Color.White else Color(0xFF0F172A),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Text(
+                            text = "${missionTargetMinutes}m session",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = NeonCyan,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+
+        // =========================================================================
+        // 5. NEXT BEST STUDY ACTION (Recommended Next Card)
+        // =========================================================================
+        item {
+            GlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("recommended_next_card"),
+                shape = RoundedCornerShape(18.dp),
+                elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 1.dp else 6.dp
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     // Header
@@ -799,21 +761,227 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            text = "TODAY'S SCHEDULE",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
-                            letterSpacing = 0.8.sp
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "✨ RECOMMENDED NEXT",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                                letterSpacing = 0.8.sp
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isDark) Color(0x20818CF8) else Color(0x156366F1),
+                            border = androidx.compose.foundation.BorderStroke(0.5.dp, ElectricViolet.copy(alpha = 0.4f))
+                        ) {
+                            Text(
+                                text = "${missionTargetMinutes} min focused session",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) ElectricViolet else DeepIndigo,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = missionSubject,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) Color.White else Color(0xFF0F172A),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = missionTopic,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = recommendationReason,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        // Start CTA
+                        Button(
+                            onClick = { onStartFocusSession(missionSubject, missionTopic) },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isDark) Color(0x2838BDF8) else Color(0x186366F1),
+                                contentColor = if (isDark) NeonCyan else DeepIndigo
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(
+                                0.5.dp,
+                                if (isDark) NeonCyan.copy(alpha = 0.5f) else DeepIndigo.copy(alpha = 0.4f)
+                            ),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Start",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // =========================================================================
+        // 6. NOVA QUICK ASSIST (Compact Card)
+        // =========================================================================
+        item {
+            GlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("nova_ai_card"),
+                shape = RoundedCornerShape(18.dp),
+                elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 1.dp else 6.dp,
+                onClick = { onNavigateToTab(AppNavTab.AI_TUTOR) }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Brush.linearGradient(listOf(NeonCyan.copy(alpha = 0.3f), NebulaPurple.copy(alpha = 0.3f))))
+                                .border(0.5.dp, NeonCyan.copy(alpha = 0.5f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.AutoAwesome,
+                                contentDescription = "Nova",
+                                tint = NeonCyan,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        Column {
+                            Text(
+                                text = "✨ Ask NOVA",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) Color.White else Color(0xFF0F172A)
+                            )
+                            Spacer(modifier = Modifier.height(1.dp))
+                            Text(
+                                text = "Ask anything about your preparation...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isDark) Color(0x2838BDF8) else Color(0x186366F1),
+                        border = androidx.compose.foundation.BorderStroke(0.5.dp, NeonCyan.copy(alpha = 0.4f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Ask",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) NeonCyan else DeepIndigo
+                            )
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = if (isDark) NeonCyan else DeepIndigo,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // =========================================================================
+        // 7. TODAY'S SCHEDULE (Compact Upcoming 2–3 Sessions)
+        // =========================================================================
+        item {
+            GlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("todays_schedule_card"),
+                shape = RoundedCornerShape(18.dp),
+                elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 1.dp else 6.dp
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Outlined.CalendarToday,
+                                contentDescription = null,
+                                tint = NeonCyan,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "TODAY'S SCHEDULE",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                                letterSpacing = 0.8.sp
+                            )
+                        }
 
                         TextButton(
                             onClick = { onNavigateToTab(AppNavTab.STUDY) },
-                            contentPadding = PaddingValues(0.dp)
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            modifier = Modifier.testTag("view_plan_button")
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = "Full Timetable",
+                                    text = "View Full Timetable",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = NeonCyan,
                                     fontWeight = FontWeight.Bold
@@ -854,22 +1022,16 @@ fun HomeScreen(
                                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                                             modifier = Modifier.weight(1f)
                                         ) {
-                                            Icon(
-                                                imageVector = Icons.Outlined.AccessTime,
-                                                contentDescription = null,
-                                                tint = NeonCyan,
-                                                modifier = Modifier.size(14.dp)
-                                            )
                                             Text(
                                                 text = block.startTime,
                                                 style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.Bold,
-                                                color = if (isDark) Color.White else Color(0xFF0F172A)
+                                                color = if (isDark) NeonCyan else DeepIndigo
                                             )
                                             Text(
-                                                text = "• ${block.subject} (${block.topic.ifBlank { "Concept Practice" }})",
+                                                text = "${block.subject} • ${block.topic.ifBlank { "Practice" }}",
                                                 style = MaterialTheme.typography.bodySmall,
-                                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155),
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
@@ -878,8 +1040,8 @@ fun HomeScreen(
                                         Text(
                                             text = "${block.durationMinutes}m",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = NeonCyan,
-                                            fontWeight = FontWeight.Bold
+                                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                            fontWeight = FontWeight.SemiBold
                                         )
                                     }
                                 }
@@ -921,7 +1083,7 @@ fun HomeScreen(
                                                 modifier = Modifier.size(16.dp)
                                             )
                                             Text(
-                                                text = "${planItem.subject} — ${planItem.topic}",
+                                                text = "${planItem.subject} • ${planItem.topic}",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = if (planItem.isCompleted) Color(0xFF94A3B8) else (if (isDark) Color.White else Color(0xFF0F172A)),
                                                 maxLines = 1,
@@ -932,7 +1094,7 @@ fun HomeScreen(
                                         Text(
                                             text = "${planItem.targetMinutes}m",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = if (planItem.isCompleted) EmeraldSuccess else NeonCyan,
+                                            color = if (planItem.isCompleted) EmeraldSuccess else (if (isDark) NeonCyan else DeepIndigo),
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
@@ -949,7 +1111,7 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "Nothing scheduled for today.",
+                                text = "Start your first study session",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
                             )
@@ -976,67 +1138,126 @@ fun HomeScreen(
         }
 
         // =========================================================================
-        // 7. QUICK ACTIONS (Sleek 4-Action Hub: Study, Mock Test, Revision, Focus)
+        // 8. QUICK STUDY TOOLS (Clean 2-Column Glass Grid + View All Tools)
         // =========================================================================
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = "QUICK ACTIONS",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
-                    letterSpacing = 0.8.sp
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "QUICK TOOLS",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                        letterSpacing = 0.8.sp
+                    )
+
+                    TextButton(
+                        onClick = { showAllToolsDialog = true },
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "View All Tools",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = NeonCyan,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = NeonCyan,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Action 1: Study
-                    QuickActionCard(
-                        title = "Study",
-                        subtitle = "Planner",
-                        icon = Icons.AutoMirrored.Filled.MenuBook,
-                        accentColor = ElectricIndigo,
-                        modifier = Modifier.weight(1f),
-                        testTag = "quick_action_study",
-                        onClick = { onNavigateToTab(AppNavTab.STUDY) }
-                    )
+                // 2-Column Grid for the 6 core tools
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Row 1: Readiness & Planner
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        QuickToolGridCard(
+                            title = "Readiness",
+                            subtitle = "Exam Score & Gaps",
+                            icon = Icons.Outlined.Speed,
+                            accentColor = NebulaPurple,
+                            modifier = Modifier.weight(1f),
+                            testTag = "quick_action_readiness",
+                            onClick = onOpenExamReadinessCenter
+                        )
 
-                    // Action 2: Mock Test
-                    QuickActionCard(
-                        title = "Mock Test",
-                        subtitle = "Exam Mode",
-                        icon = Icons.Filled.Quiz,
-                        accentColor = EmeraldSuccess,
-                        modifier = Modifier.weight(1f),
-                        testTag = "quick_action_mock",
-                        onClick = { onNavigateToTab(AppNavTab.PROGRESS) }
-                    )
+                        QuickToolGridCard(
+                            title = "Planner",
+                            subtitle = "Study Timetable",
+                            icon = Icons.AutoMirrored.Filled.MenuBook,
+                            accentColor = DeepIndigo,
+                            modifier = Modifier.weight(1f),
+                            testTag = "quick_action_study",
+                            onClick = { onNavigateToTab(AppNavTab.STUDY) }
+                        )
+                    }
 
-                    // Action 3: Revision
-                    QuickActionCard(
-                        title = "Revision",
-                        subtitle = "Spaced Review",
-                        icon = Icons.Filled.Repeat,
-                        accentColor = GoldenSpark,
-                        modifier = Modifier.weight(1f),
-                        testTag = "quick_action_revision",
-                        onClick = { onNavigateToTab(AppNavTab.STUDY) }
-                    )
+                    // Row 2: Mock Tests & Revision
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        QuickToolGridCard(
+                            title = "Mock Tests",
+                            subtitle = "Full-Length & Quiz",
+                            icon = Icons.Filled.Quiz,
+                            accentColor = EmeraldSuccess,
+                            modifier = Modifier.weight(1f),
+                            testTag = "quick_action_mock",
+                            onClick = { onNavigateToTab(AppNavTab.PROGRESS) }
+                        )
 
-                    // Action 4: Focus
-                    QuickActionCard(
-                        title = "Focus",
-                        subtitle = "App Shield",
-                        icon = Icons.Filled.Shield,
-                        accentColor = CoralRose,
-                        modifier = Modifier.weight(1f),
-                        testTag = "quick_action_focus",
-                        onClick = { onNavigateToTab(AppNavTab.FOCUS) }
-                    )
+                        QuickToolGridCard(
+                            title = "Revision",
+                            subtitle = "Smart Spaced Review",
+                            icon = Icons.Filled.Repeat,
+                            accentColor = GoldenSpark,
+                            modifier = Modifier.weight(1f),
+                            testTag = "quick_action_revision",
+                            onClick = { onNavigateToTab(AppNavTab.STUDY) }
+                        )
+                    }
+
+                    // Row 3: Focus Shield & NOVA
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        QuickToolGridCard(
+                            title = "Focus",
+                            subtitle = "App Shield & Pomodoro",
+                            icon = Icons.Filled.Shield,
+                            accentColor = CoralRose,
+                            modifier = Modifier.weight(1f),
+                            testTag = "quick_action_focus",
+                            onClick = { onNavigateToTab(AppNavTab.FOCUS) }
+                        )
+
+                        QuickToolGridCard(
+                            title = "NOVA AI",
+                            subtitle = "24/7 Personal Tutor",
+                            icon = Icons.Filled.AutoAwesome,
+                            accentColor = NeonCyan,
+                            modifier = Modifier.weight(1f),
+                            testTag = "quick_action_nova",
+                            onClick = { onNavigateToTab(AppNavTab.AI_TUTOR) }
+                        )
+                    }
                 }
             }
         }
@@ -1307,6 +1528,88 @@ fun HomeScreen(
             }
         )
     }
+
+    // =========================================================================
+    // VIEW ALL TOOLS MODAL DIALOG
+    // =========================================================================
+    if (showAllToolsDialog) {
+        AlertDialog(
+            onDismissRequest = { showAllToolsDialog = false },
+            containerColor = if (isDark) Color(0xFF111827) else Color.White,
+            shape = RoundedCornerShape(22.dp),
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.GridView, null, tint = NeonCyan, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "All Study Hub Tools",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDark) Color.White else Color(0xFF0F172A)
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Tool: Document Summarizer
+                    AllToolsRowItem(
+                        title = "Document & PDF Summarizer",
+                        subtitle = "Extract key concepts & formulas",
+                        icon = Icons.Outlined.Description,
+                        accentColor = NeonCyan,
+                        onClick = {
+                            showAllToolsDialog = false
+                            onOpenDocumentSummarizer()
+                        }
+                    )
+
+                    // Tool: Scan Question
+                    AllToolsRowItem(
+                        title = "Scan / Doubt Solver",
+                        subtitle = "Snap photos of problems for instant steps",
+                        icon = Icons.Outlined.PhotoCamera,
+                        accentColor = ElectricViolet,
+                        onClick = {
+                            showAllToolsDialog = false
+                            onScanQuestion()
+                        }
+                    )
+
+                    // Tool: Smart Search
+                    AllToolsRowItem(
+                        title = "Smart Topic Search",
+                        subtitle = "Search syllabus & PYQs",
+                        icon = Icons.Filled.Search,
+                        accentColor = EmeraldSuccess,
+                        onClick = {
+                            showAllToolsDialog = false
+                            showQuickSearchDialog = true
+                        }
+                    )
+
+                    // Tool: Exam Readiness Center
+                    AllToolsRowItem(
+                        title = "Exam Readiness Analytics",
+                        subtitle = "Detailed subject-wise breakdown",
+                        icon = Icons.Outlined.Speed,
+                        accentColor = NebulaPurple,
+                        onClick = {
+                            showAllToolsDialog = false
+                            onOpenExamReadinessCenter()
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAllToolsDialog = false }) {
+                    Text("Close", color = NeonCyan, fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
 }
 
 // =========================================================================
@@ -1314,52 +1617,7 @@ fun HomeScreen(
 // =========================================================================
 
 @Composable
-private fun ProgressMetricItem(
-    label: String,
-    value: String,
-    icon: ImageVector,
-    color: Color,
-    modifier: Modifier = Modifier
-) {
-    val isDark = isAppInDarkTheme()
-    Column(
-        modifier = modifier.padding(horizontal = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .background(color.copy(alpha = if (isDark) 0.18f else 0.12f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = color,
-                modifier = Modifier.size(16.dp)
-            )
-        }
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.ExtraBold,
-            color = if (isDark) Color.White else Color(0xFF0F172A),
-            maxLines = 1
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-            fontSize = 10.sp,
-            maxLines = 1
-        )
-    }
-}
-
-@Composable
-private fun QuickActionCard(
+private fun QuickToolGridCard(
     title: String,
     subtitle: String,
     icon: ImageVector,
@@ -1372,43 +1630,112 @@ private fun QuickActionCard(
 
     Surface(
         modifier = modifier
-            .height(82.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .height(72.dp)
+            .clip(RoundedCornerShape(14.dp))
             .springClickable(testTag = testTag, onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         color = if (isDark) Color(0x14FFFFFF) else Color(0x0A000000),
         border = androidx.compose.foundation.BorderStroke(
             0.5.dp,
-            accentColor.copy(alpha = if (isDark) 0.4f else 0.3f)
+            accentColor.copy(alpha = if (isDark) 0.35f else 0.25f)
         )
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(8.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(accentColor.copy(alpha = if (isDark) 0.18f else 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = accentColor,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDark) Color.White else Color(0xFF0F172A),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AllToolsRowItem(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    accentColor: Color,
+    onClick: () -> Unit
+) {
+    val isDark = isAppInDarkTheme()
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = if (isDark) Color(0x14FFFFFF) else Color(0x08000000),
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, accentColor.copy(alpha = 0.3f))
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(accentColor.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, contentDescription = null, tint = accentColor, modifier = Modifier.size(18.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDark) Color.White else Color(0xFF0F172A)
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                    fontSize = 11.sp
+                )
+            }
             Icon(
-                imageVector = icon,
-                contentDescription = title,
-                tint = accentColor,
-                modifier = Modifier.size(22.dp)
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = if (isDark) Color.White else Color(0xFF0F172A),
-                maxLines = 1
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-                fontSize = 9.sp,
-                maxLines = 1
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = null,
+                tint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                modifier = Modifier.size(14.dp)
             )
         }
     }
@@ -1426,55 +1753,6 @@ private fun cleanDisplayName(rawName: String?): String {
     return noDigits.split(" ")
         .filter { it.isNotBlank() }
         .joinToString(" ") { word -> word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }
-}
-
-/**
- * Intelligent contextual Nova AI message generator based on student state and language preference.
- */
-private fun generateContextualNovaMessage(
-    user: UserProfile?,
-    nextTask: StudyPlanItem?,
-    pendingTasksCount: Int,
-    completedTasksCount: Int,
-    todayFocusMins: Int
-): String {
-    val lang = user?.languagePreference ?: "English"
-    val isHindi = lang.equals("Hindi", ignoreCase = true) || lang.equals("Hinglish", ignoreCase = true)
-    val exam = user?.examName?.ifBlank { "your target exam" } ?: "your target exam"
-    val student = cleanDisplayName(user?.name)
-
-    if (nextTask != null) {
-        return if (isHindi) {
-            "Namaste $student! Aaj $exam ke liye '${nextTask.subject}: ${nextTask.topic}' ka ${nextTask.targetMinutes}-minute focused session plan kiya hai. Shuru karein?"
-        } else {
-            "Hey $student! You have a ${nextTask.targetMinutes}-minute session for ${nextTask.subject} (${nextTask.topic}) scheduled next for $exam. Let's make it count!"
-        }
-    }
-
-    if (completedTasksCount > 0 && pendingTasksCount == 0) {
-        return if (isHindi) {
-            "Shabash $student! Aaj ke saare scheduled study tasks complete ho chuke hain. Chahe toh ek quick 10-minute quiz revise kar lo!"
-        } else {
-            "Great job, $student! You've completed all scheduled tasks for today. Feel free to do a quick mock test or ask me any doubts!"
-        }
-    }
-
-    if (todayFocusMins > 0) {
-        val h = todayFocusMins / 60
-        val m = todayFocusMins % 60
-        val timeStr = if (h > 0) "${h}h ${m}m" else "${m}m"
-        return if (isHindi) {
-            "Aaj aapne $timeStr focused study complete ki hai $exam ke liye. Consistency hi aapko top score dilayegi!"
-        } else {
-            "You've logged $timeStr of focused study today for $exam. Fantastic momentum — keep pushing forward!"
-        }
-    }
-
-    return if (isHindi) {
-        "Namaste $student! $exam ki taiyari ke liye aaj ka mission ready hai. Koi bhi doubt ya question ho, mujhse poochho."
-    } else {
-        "Welcome back, $student! Your $exam preparation dashboard is calibrated. Ready to start your focused study session?"
-    }
 }
 
 /**

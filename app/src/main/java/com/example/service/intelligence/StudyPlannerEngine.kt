@@ -423,6 +423,127 @@ object StudyPlannerEngine {
     }
 
     /**
+     * Generates study sessions matching explicit subject time allocations specified by the user.
+     */
+    fun generatePlanFromSubjectAllocations(
+        examContext: ExamContext,
+        subjectAllocations: Map<String, Int>,
+        startHour: Int = 8,
+        startMinute: Int = 0,
+        breakMinutes: Int = 5,
+        topicMasteries: List<TopicMastery> = emptyList(),
+        mistakes: List<MistakeItem> = emptyList(),
+        flashcards: List<FlashcardItem> = emptyList(),
+        userPreferences: UserStudyPreferences,
+        scheduledDateMillis: Long = System.currentTimeMillis()
+    ): List<StudyPlanItem> {
+        val resultSessions = mutableListOf<StudyPlanItem>()
+        val cal = Calendar.getInstance().apply {
+            timeInMillis = scheduledDateMillis
+            set(Calendar.HOUR_OF_DAY, startHour)
+            set(Calendar.MINUTE, startMinute)
+            set(Calendar.SECOND, 0)
+        }
+        val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
+
+        val chaptersMap = examContext.chapters.associateBy { it.id }
+        val subjectsMap = examContext.subjects.associateBy { it.id }
+        val masteryMap = topicMasteries.associateBy { it.topicId.ifBlank { "${it.subject.lowercase()}_${it.topic.lowercase()}" } }
+        val mistakesByTopic = mistakes.filter { !it.isMastered }.groupBy { it.topicId.ifBlank { "${it.subject.lowercase()}_${it.topic.lowercase()}" } }
+
+        for ((subjectName, allocatedMinutes) in subjectAllocations) {
+            if (allocatedMinutes <= 0) continue
+
+            // Find matching subject in examContext or by name
+            val examSub = examContext.subjects.find { it.name.equals(subjectName, ignoreCase = true) }
+            val subTopics = if (examSub != null) {
+                examContext.topics.filter { it.subjectId == examSub.id }
+            } else {
+                examContext.topics.filter { topic ->
+                    val s = subjectsMap[topic.subjectId]
+                    s?.name.equals(subjectName, ignoreCase = true)
+                }
+            }
+
+            // Rank topics by priority / weak mastery
+            val rankedTopics = subTopics.map { topic ->
+                val key = topic.id.ifBlank { "${subjectName.lowercase()}_${topic.name.lowercase()}" }
+                val mastery = masteryMap[key] ?: topicMasteries.find { it.topic.equals(topic.name, ignoreCase = true) }
+                val topicMistakes = mistakesByTopic[key]?.size ?: 0
+                val (score, type, reason, prio) = calculateCandidateScore(
+                    topic = topic,
+                    subjectName = subjectName,
+                    mastery = mastery,
+                    mistakesCount = topicMistakes,
+                    revisionsCount = 0,
+                    subjectPriority = "HIGH",
+                    examDaysRemaining = null
+                )
+                Triple(topic, type, reason)
+            }.sortedByDescending { (if (it.first.isHighYield) 100 else 0) - it.first.orderIndex }
+
+            var remainingSubMinutes = allocatedMinutes
+            var topicIndex = 0
+
+            while (remainingSubMinutes > 0) {
+                val candidateTuple = rankedTopics.getOrNull(if (rankedTopics.isNotEmpty()) topicIndex % rankedTopics.size else 0)
+                val targetTopic = candidateTuple?.first
+                val sessionType = candidateTuple?.second ?: "PRACTICE"
+                val reason = candidateTuple?.third ?: "Targeted focus session for $subjectName"
+
+                val sessionMinutes = when {
+                    remainingSubMinutes >= 90 -> 60
+                    remainingSubMinutes >= 60 -> 60
+                    else -> remainingSubMinutes
+                }
+
+                val startTimeStr = timeFormat.format(cal.time)
+                cal.add(Calendar.MINUTE, sessionMinutes)
+                val endTimeStr = timeFormat.format(cal.time)
+
+                val chapter = if (targetTopic != null) chaptersMap[targetTopic.chapterId]?.name ?: "Core Concepts" else "Core Concepts"
+                val topicTitle = targetTopic?.name ?: "$subjectName Core Practice"
+
+                resultSessions.add(
+                    StudyPlanItem(
+                        userId = userPreferences.userId,
+                        examId = examContext.examId,
+                        subjectId = targetTopic?.subjectId ?: (examSub?.id ?: ""),
+                        chapterId = targetTopic?.chapterId ?: "",
+                        topicId = targetTopic?.id ?: "",
+                        subject = subjectName,
+                        chapter = chapter,
+                        topic = topicTitle,
+                        targetMinutes = sessionMinutes,
+                        isCompleted = false,
+                        scheduledDateMillis = scheduledDateMillis,
+                        startTimeFormatted = startTimeStr,
+                        endTimeFormatted = endTimeStr,
+                        sessionType = sessionType,
+                        sessionState = "PLANNED",
+                        priority = PlanPriority.HIGH,
+                        aiRecommendationReason = reason,
+                        isAiGenerated = true
+                    )
+                )
+
+                remainingSubMinutes -= sessionMinutes
+                topicIndex++
+
+                if (breakMinutes > 0 && remainingSubMinutes > 0) {
+                    cal.add(Calendar.MINUTE, breakMinutes)
+                }
+            }
+
+            if (breakMinutes > 0) {
+                cal.add(Calendar.MINUTE, breakMinutes)
+            }
+        }
+
+        return resultSessions
+    }
+
+    /**
      * Smart Rescheduling for Missed Sessions without overloading the student.
      */
     fun evaluateMissedSessionRecovery(

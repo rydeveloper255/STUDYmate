@@ -185,12 +185,14 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val isDarkTheme by viewModel.isDarkTheme.collectAsStateWithLifecycle()
     val notifPrefs by viewModel.notificationPrefs.collectAsStateWithLifecycle()
     val studentMasterContext by viewModel.studentMasterContext.collectAsStateWithLifecycle()
+    val allCatalogExams by viewModel.allCatalogExams.collectAsStateWithLifecycle()
 
     val allExamObjectives by viewModel.allExamObjectives.collectAsStateWithLifecycle()
     val activeExamObjective by viewModel.activeExamObjective.collectAsStateWithLifecycle()
     val allTopicMasteries by viewModel.allTopicMasteries.collectAsStateWithLifecycle()
     val studentSessionHistory by viewModel.studentSessionHistory.collectAsStateWithLifecycle()
     val latestIntelligenceSnapshot by viewModel.latestIntelligenceSnapshot.collectAsStateWithLifecycle()
+    val allFocusSessions by viewModel.allFocusSessions.collectAsStateWithLifecycle()
 
     val subjectProgressSummaries by viewModel.subjectProgressSummaries.collectAsStateWithLifecycle()
     val examReadinessScore by viewModel.examReadinessScore.collectAsStateWithLifecycle()
@@ -224,6 +226,8 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val isLearningContentLoading by viewModel.isLearningContentLoading.collectAsStateWithLifecycle()
     val novaDoubtResponse by viewModel.novaDoubtResponse.collectAsStateWithLifecycle()
     val isNovaDoubtThinking by viewModel.isNovaDoubtThinking.collectAsStateWithLifecycle()
+    val novaProgressAnalysis by viewModel.novaProgressAnalysis.collectAsStateWithLifecycle()
+    val isNovaProgressAnalyzing by viewModel.isNovaProgressAnalyzing.collectAsStateWithLifecycle()
     val allLearningBookmarks by viewModel.allLearningBookmarks.collectAsStateWithLifecycle()
     val smartNotes by viewModel.allSmartNotes.collectAsStateWithLifecycle()
 
@@ -322,7 +326,22 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     onTestBreakReminder = { viewModel.testBreakReminder() },
                     onTestFocusStarted = { viewModel.testFocusStartedNotification() },
                     onTestFocusCompleted = { viewModel.testFocusCompletedNotification() },
-                    onTestDailyMotivation = { viewModel.testDailyMotivationalNotification() }
+                    onTestDailyMotivation = { viewModel.testDailyMotivationalNotification() },
+                    catalogExams = allCatalogExams,
+                    onChangeExam = { examId ->
+                        viewModel.changeSelectedExam(examId = examId, refreshStudyPlan = true)
+                    },
+                    onOpenStudyPlanner = {
+                        showProfileSettings = false
+                        onSelectTab(AppNavTab.STUDY)
+                    },
+                    onResetActiveExamData = {
+                        viewModel.resetActiveExamPreparationData()
+                    },
+                    isAiThinkingMode = useThinkingMode,
+                    onSetAiThinkingMode = { viewModel.setThinkingMode(it) },
+                    tutorPersona = tutorPersona,
+                    onSetTutorPersona = { viewModel.setTutorPersona(it) }
                 )
             } else if (showExamReadinessCenter) {
                 ExamReadinessCenterScreen(
@@ -489,6 +508,21 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                                                 userPreferences = userStudyPreferences,
                                                 onSavePreferences = { prefs -> viewModel.saveUserPreferences(prefs) },
                                                 activeExamContext = activeExamContext ?: ExamContext(),
+                                                topicMasteries = allTopicMasteries,
+                                                focusSessions = allFocusSessions,
+                                                onApplySubjectAllocations = { subMinutes, totalMins, startHr, breakMins ->
+                                                    viewModel.applySubjectTimeAllocations(subMinutes, totalMins, startHr, 0, breakMins)
+                                                },
+                                                onOpenExamSelector = { onSelectTab(AppNavTab.HOME) },
+                                                activeStudySession = activeStudySession,
+                                                sessionRemainingSeconds = sessionRemainingSeconds,
+                                                isSessionTimerRunning = isSessionTimerRunning,
+                                                isSessionPaused = isSessionPaused,
+                                                activeSessionActualMinutes = activeSessionActualMinutes,
+                                                onPauseTimer = { viewModel.pauseStudySession() },
+                                                onResumeTimer = { viewModel.resumeStudySession() },
+                                                onFinishSession = { notes -> viewModel.finishStudySession(notes) },
+                                                onCancelSession = { viewModel.cancelStudySession() },
                                                 onAddFlashcard = { subject, topic, front, back, hint, difficulty, sourceDoc ->
                                                     viewModel.addFlashcard(subject, topic, front, back, hint, difficulty, sourceDoc)
                                                 },
@@ -610,7 +644,22 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onStartFocus = { sub, top, mins -> viewModel.startFocusSession(sub, top, mins) },
                             onTogglePause = { viewModel.toggleFocusPause() },
                             onEndSession = { viewModel.endFocusSession() },
-                            onDismissCelebration = { viewModel.dismissCelebration() }
+                            onDismissCelebration = { viewModel.dismissCelebration() },
+                            activeStudySession = activeStudySession,
+                            dailyStudyPlan = studyPlan,
+                            allFocusSessions = allFocusSessions,
+                            userProfile = userProfile,
+                            activeExamContext = activeExamContext,
+                            onStartNextSession = { item -> viewModel.startStudySession(item) },
+                            onAskNova = { sub, ch, top, prompt -> viewModel.askNovaTopicDoubt(sub, ch, top, prompt, userProfile?.languagePreference ?: "English") },
+                            onSaveNote = { sub, top, text -> viewModel.saveSessionNote(sub, top, text) },
+                            onQuickRevision = { sub, top ->
+                                onSelectTab(AppNavTab.STUDY)
+                            },
+                            onStartBreak = { mins -> viewModel.startBreakTimer(mins) },
+                            onEndBreak = { viewModel.endBreakTimer() },
+                            novaDoubtResponse = novaDoubtResponse,
+                            isNovaDoubtThinking = isNovaDoubtThinking
                         )
 
                         AppNavTab.PROGRESS -> ProgressDashboardScreen(
@@ -621,6 +670,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             examObjective = activeExamObjective,
                             topicMasteries = allTopicMasteries,
                             sessionHistory = studentSessionHistory,
+                            allFocusSessions = allFocusSessions,
                             snapshot = latestIntelligenceSnapshot,
                             activeTestState = activeTestState,
                             isTestGenerating = isTestGenerating,
@@ -655,7 +705,21 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             dailyPlan = dailyStudyPlan,
                             onSetManualTopicOverride = { sub, top, override -> viewModel.setUserManualTopicOverride(sub, top, override) },
                             onResetPreparationData = { viewModel.resetActiveExamPreparationData() },
-                            onOpenReadinessCenter = { showExamReadinessCenter = true }
+                            onOpenReadinessCenter = { showExamReadinessCenter = true },
+                            onBack = {
+                                if (tabStack.size > 1) {
+                                    tabStack = tabStack.dropLast(1)
+                                } else {
+                                    onSelectTab(AppNavTab.HOME)
+                                }
+                            },
+                            onNavigateToStudy = { onSelectTab(AppNavTab.STUDY) },
+                            activeExamContext = activeExamContext,
+                            novaProgressAnalysis = novaProgressAnalysis,
+                            isNovaProgressAnalyzing = isNovaProgressAnalyzing,
+                            onGenerateNovaProgressAnalysis = { exam, summary, lang ->
+                                viewModel.generateNovaProgressAnalysis(exam, summary, lang)
+                            }
                         )
                     }
                 }

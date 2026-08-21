@@ -36,17 +36,77 @@ enum class NovaScreenTab(val title: String, val icon: String) {
     NOVA_SETTINGS("Settings & Privacy", "⚙️")
 }
 
+data class NovaConversationSession(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val messages: List<NovaChatMessage>,
+    val examContext: String = ""
+)
+
+enum class QuizScreenStage {
+    CONFIGURING,
+    BRIEFING,
+    ACTIVE,
+    FINISHED
+}
+
+data class SubjectAccuracyStats(
+    val total: Int = 0,
+    val correct: Int = 0,
+    val accuracyPercent: Float = 0f
+)
+
 data class InteractiveQuizState(
-    val subject: String = "Physics",
+    val selectedExam: String = "",
+    val subject: String = "All Subjects",
     val topic: String = "All Topics",
+    val language: String = "English", // "English" or "हिंदी"
+    val questionCount: Int = 10,
+    val durationMinutes: Int = 15,
+    val isCustomDuration: Boolean = false,
+    val difficulty: String = "Mixed", // "Easy", "Medium", "Hard", "Mixed"
+    val questionMode: String = "Practice", // "Practice", "Mock Test", "Previous-Year Style", "Current Affairs", "Revision"
+    val availableSubjects: List<String> = emptyList(),
+    val availableTopics: List<String> = emptyList(),
+
+    val screenStage: QuizScreenStage = QuizScreenStage.CONFIGURING,
+
+    // Active session state
     val questions: List<Question> = emptyList(),
     val currentIndex: Int = 0,
     val selectedOptionIndex: Int? = null,
+    val userAnswers: Map<Int, Int> = emptyMap(),
+    val markedForReview: Set<Int> = emptySet(),
     val isAnswerSubmitted: Boolean = false,
-    val score: Int = 0,
-    val isQuizFinished: Boolean = false,
+    val immediateChecked: Map<Int, Boolean> = emptyMap(),
+    val timeRemainingSeconds: Int = 0,
+    val totalDurationSeconds: Int = 0,
+    val isTimerRunning: Boolean = false,
     val isGenerating: Boolean = false,
-    val explanation: String = ""
+    val generationStatus: String = "",
+    val errorMessage: String? = null,
+    val explanation: String = "",
+
+    // Post-Test Results & AI Intelligence
+    val isQuizFinished: Boolean = false,
+    val score: Int = 0,
+    val totalQuestions: Int = 0,
+    val earnedMarks: Float = 0f,
+    val maxMarks: Float = 0f,
+    val accuracyPercent: Float = 0f,
+    val timeSpentSeconds: Int = 0,
+    val correctCount: Int = 0,
+    val incorrectCount: Int = 0,
+    val unansweredCount: Int = 0,
+    val markedCount: Int = 0,
+    val markingScheme: String = "+1 / -0.25",
+    val subjectBreakdown: Map<String, SubjectAccuracyStats> = emptyMap(),
+    val weakTopicsIdentified: List<String> = emptyList(),
+    val strongTopicsIdentified: List<String> = emptyList(),
+    val novaAiAnalysis: String = "",
+    val isAnalyzingResult: Boolean = false,
+    val isResultSaved: Boolean = false
 )
 
 data class NovaAnalyticsData(
@@ -69,6 +129,10 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
     val voiceManager = NovaVoiceManager(application)
     val notificationEngine = NovaNotificationEngine(application)
 
+    private val examCatalogRepository = com.example.data.repository.ExamCatalogRepository(db.examCatalogDao())
+    private val examQuestionBankRepository = com.example.data.repository.ExamQuestionBankRepository()
+    private var quizTimerJob: kotlinx.coroutines.Job? = null
+
     private val _currentTab = MutableStateFlow(NovaScreenTab.DASHBOARD)
     val currentTab: StateFlow<NovaScreenTab> = _currentTab.asStateFlow()
 
@@ -83,6 +147,9 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _attachedImageUri = MutableStateFlow<Uri?>(null)
     val attachedImageUri: StateFlow<Uri?> = _attachedImageUri.asStateFlow()
+
+    private val _savedConversations = MutableStateFlow<List<NovaConversationSession>>(emptyList())
+    val savedConversations: StateFlow<List<NovaConversationSession>> = _savedConversations.asStateFlow()
 
     private val _settings = MutableStateFlow(NovaSettings())
     val settings: StateFlow<NovaSettings> = _settings.asStateFlow()
@@ -117,11 +184,57 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
     val allExamUpdates: StateFlow<List<ExamUpdateItem>> = studyRepository.allExamUpdates
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // Current Affairs & Exam Radar UI States
+    private val _isRefreshingCurrentAffairs = MutableStateFlow(false)
+    val isRefreshingCurrentAffairs: StateFlow<Boolean> = _isRefreshingCurrentAffairs.asStateFlow()
+
+    private val _currentAffairsFilterCategory = MutableStateFlow("All")
+    val currentAffairsFilterCategory: StateFlow<String> = _currentAffairsFilterCategory.asStateFlow()
+
+    private val _currentAffairsSearchQuery = MutableStateFlow("")
+    val currentAffairsSearchQuery: StateFlow<String> = _currentAffairsSearchQuery.asStateFlow()
+
+    private val _currentAffairsLanguage = MutableStateFlow("English")
+    val currentAffairsLanguage: StateFlow<String> = _currentAffairsLanguage.asStateFlow()
+
+    private val _selectedAffairForNova = MutableStateFlow<CurrentAffairsItem?>(null)
+    val selectedAffairForNova: StateFlow<CurrentAffairsItem?> = _selectedAffairForNova.asStateFlow()
+
+    private val _novaAffairAnalysis = MutableStateFlow<String?>(null)
+    val novaAffairAnalysis: StateFlow<String?> = _novaAffairAnalysis.asStateFlow()
+
+    private val _isAnalyzingAffair = MutableStateFlow(false)
+    val isAnalyzingAffair: StateFlow<Boolean> = _isAnalyzingAffair.asStateFlow()
+
+    private val _currentAffairsError = MutableStateFlow<String?>(null)
+    val currentAffairsError: StateFlow<String?> = _currentAffairsError.asStateFlow()
+
+    private val _lastRefreshedTime = MutableStateFlow(System.currentTimeMillis())
+    val lastRefreshedTime: StateFlow<Long> = _lastRefreshedTime.asStateFlow()
+
     private val _smartSearchResult = MutableStateFlow<SmartSearchResult?>(null)
     val smartSearchResult: StateFlow<SmartSearchResult?> = _smartSearchResult.asStateFlow()
 
     private val _isSmartSearching = MutableStateFlow(false)
     val isSmartSearching: StateFlow<Boolean> = _isSmartSearching.asStateFlow()
+
+    private val _searchError = MutableStateFlow<String?>(null)
+    val searchError: StateFlow<String?> = _searchError.asStateFlow()
+
+    private val _searchLanguage = MutableStateFlow("English")
+    val searchLanguage: StateFlow<String> = _searchLanguage.asStateFlow()
+
+    private val _searchSubject = MutableStateFlow("General Science")
+    val searchSubject: StateFlow<String> = _searchSubject.asStateFlow()
+
+    private val _searchHistory = MutableStateFlow<List<NovaSearchHistoryItem>>(
+        listOf(
+            NovaSearchHistoryItem("Newton's Laws of Motion & Momentum", "General Science", System.currentTimeMillis() - 3600000),
+            NovaSearchHistoryItem("Ohm's Law & Circuit Formulas", "General Science", System.currentTimeMillis() - 7200000),
+            NovaSearchHistoryItem("Photosynthesis Light vs Dark Reaction", "Biology", System.currentTimeMillis() - 86400000)
+        )
+    )
+    val searchHistory: StateFlow<List<NovaSearchHistoryItem>> = _searchHistory.asStateFlow()
 
     val studentMasterContext: StateFlow<StudentMasterContext?> = combine(
         studyRepository.userProfile,
@@ -181,6 +294,7 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         loadInitialData()
         observeStudyContext()
         observeAnalytics()
+        initQuizConfig()
     }
 
     fun setTab(tab: NovaScreenTab) {
@@ -625,111 +739,595 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun startQuizSession(subject: String, topic: String) {
-        _currentTab.value = NovaScreenTab.INTERACTIVE_STUDY_QUIZ
-        _quizState.value = InteractiveQuizState(
-            subject = subject,
-            topic = topic,
-            isGenerating = true
-        )
-
+    fun initQuizConfig() {
         viewModelScope.launch {
-            val result = geminiRepository.generateMockTestQuestions(
-                subject = subject,
-                chapter = topic,
-                difficulty = "Medium",
-                count = 5
-            )
+            val user = db.userDao().getUserProfileOnce()
+            val examName = user?.examName ?: "RRB NTPC"
+            val activeObjective = db.examObjectiveDao().getActiveExamObjectiveOnce()
+            val actualExam = activeObjective?.examName ?: examName
 
-            result.onSuccess { questions ->
-                _quizState.value = InteractiveQuizState(
-                    subject = subject,
-                    topic = topic,
-                    questions = questions,
-                    currentIndex = 0,
-                    isGenerating = false
-                )
-            }.onFailure {
-                val fallbackList = listOf(
-                    Question(
-                        id = "q1",
-                        questionText = "Which law states that the induced electromotive force in any closed circuit is equal to the negative rate of change of magnetic flux?",
-                        options = listOf("Faraday's Law", "Ampere's Circuital Law", "Coulomb's Law", "Biot-Savart Law"),
-                        correctOptionIndex = 0,
-                        explanation = "Faraday's Law of Induction states EMF = -dΦ/dt (Lenz's Law gives the negative sign).",
-                        subject = subject,
-                        topic = topic
-                    ),
-                    Question(
-                        id = "q2",
-                        questionText = "What is the SI unit of Magnetic Flux?",
-                        options = listOf("Tesla", "Weber (Wb)", "Henry", "Gauss"),
-                        correctOptionIndex = 1,
-                        explanation = "The SI unit of magnetic flux is Weber (1 Wb = 1 T·m²).",
-                        subject = subject,
-                        topic = topic
-                    ),
-                    Question(
-                        id = "q3",
-                        questionText = "When a dielectric slab is inserted between the plates of an isolated charged capacitor, what happens to its capacitance?",
-                        options = listOf("Decreases", "Increases", "Remains constant", "Becomes zero"),
-                        correctOptionIndex = 1,
-                        explanation = "Capacitance increases by factor K (C = K·C0) due to dielectric polarization.",
-                        subject = subject,
-                        topic = topic
-                    )
-                )
-                _quizState.value = InteractiveQuizState(
-                    subject = subject,
-                    topic = topic,
-                    questions = fallbackList,
-                    currentIndex = 0,
-                    isGenerating = false
+            val subjectsEntities = db.examCatalogDao().getSubjectsForExamOnce(actualExam)
+            val subjectNames = if (subjectsEntities.isNotEmpty()) {
+                listOf("All Subjects") + subjectsEntities.map { it.name }
+            } else {
+                listOf("All Subjects", "General Awareness", "Mathematics", "General Intelligence & Reasoning", "General Science")
+            }
+
+            val firstSub = subjectNames.getOrNull(1) ?: "All Subjects"
+            val topics = loadTopicsForSubject(actualExam, firstSub)
+
+            _quizState.update { current ->
+                val count = current.questionCount
+                val estDuration = calculateEstimatedDuration(count, actualExam)
+                current.copy(
+                    selectedExam = actualExam,
+                    subject = "All Subjects",
+                    topic = "All Topics",
+                    availableSubjects = subjectNames,
+                    availableTopics = listOf("All Topics") + topics,
+                    language = user?.languagePreference?.ifBlank { "English" } ?: "English",
+                    durationMinutes = if (!current.isCustomDuration) estDuration else current.durationMinutes
                 )
             }
         }
     }
 
-    fun selectQuizOption(index: Int) {
-        if (_quizState.value.isAnswerSubmitted) return
-        _quizState.update { it.copy(selectedOptionIndex = index) }
+    private fun calculateEstimatedDuration(questionCount: Int, examName: String): Int {
+        return when (questionCount) {
+            10 -> 12
+            20 -> 25
+            50 -> 60
+            100 -> 90
+            else -> (questionCount * 1.2f).toInt().coerceAtLeast(5)
+        }
     }
 
-    fun submitQuizAnswer() {
-        val current = _quizState.value
-        val question = current.questions.getOrNull(current.currentIndex) ?: return
-        val isCorrect = current.selectedOptionIndex == question.correctOptionIndex
-        val newScore = if (isCorrect) current.score + 1 else current.score
+    private suspend fun loadTopicsForSubject(examName: String, subjectName: String): List<String> {
+        return withContext(Dispatchers.IO) {
+            val allTopics = db.examCatalogDao().getTopicsForExam(examName).firstOrNull() ?: emptyList()
+            val filtered = allTopics.filter { it.subjectId.contains(subjectName, ignoreCase = true) || it.name.contains(subjectName, ignoreCase = true) }.map { it.name }
+            if (filtered.isNotEmpty()) return@withContext filtered
 
+            when {
+                subjectName.contains("Math", ignoreCase = true) -> listOf("Number System", "Percentages", "Ratio & Proportion", "Time & Work", "Speed, Distance & Time", "Algebra", "Geometry & Mensuration", "Simple & Compound Interest", "Profit & Loss")
+                subjectName.contains("Reasoning", ignoreCase = true) || subjectName.contains("Intelligence", ignoreCase = true) -> listOf("Analogies", "Coding-Decoding", "Syllogism", "Blood Relations", "Venn Diagrams", "Data Sufficiency", "Series Completion", "Statement & Conclusions")
+                subjectName.contains("Science", ignoreCase = true) || subjectName.contains("Physics", ignoreCase = true) -> listOf("Kinematics & Laws of Motion", "Work, Energy & Power", "Optics & Light", "Electricity & Magnetism", "Thermodynamics", "Sound & Waves")
+                subjectName.contains("Chemistry", ignoreCase = true) -> listOf("Atomic Structure", "Periodic Classification", "Acids, Bases & Salts", "Metals & Non-Metals", "Chemical Reactions", "Organic Chemistry Basics")
+                subjectName.contains("Current", ignoreCase = true) || subjectName.contains("General Awareness", ignoreCase = true) -> listOf("National News & Government Schemes", "International Summits & Treaties", "Science, Tech & Space (ISRO)", "Awards, Honors & Books", "Sports & Tournaments", "Indian Polity & Constitution", "Indian History & Freedom Struggle", "Indian Geography & Environment")
+                else -> listOf("Core Fundamentals", "Important Formulas", "High-Yield Applications", "Previous Exam Trends")
+            }
+        }
+    }
+
+    fun updateQuizExam(examName: String) {
+        viewModelScope.launch {
+            val subjectsEntities = db.examCatalogDao().getSubjectsForExamOnce(examName)
+            val subjectNames = if (subjectsEntities.isNotEmpty()) {
+                listOf("All Subjects") + subjectsEntities.map { it.name }
+            } else {
+                listOf("All Subjects", "General Awareness", "Mathematics", "General Intelligence & Reasoning", "General Science")
+            }
+            val topics = loadTopicsForSubject(examName, "All Subjects")
+            _quizState.update {
+                it.copy(
+                    selectedExam = examName,
+                    subject = "All Subjects",
+                    topic = "All Topics",
+                    availableSubjects = subjectNames,
+                    availableTopics = listOf("All Topics") + topics,
+                    durationMinutes = if (!it.isCustomDuration) calculateEstimatedDuration(it.questionCount, examName) else it.durationMinutes
+                )
+            }
+        }
+    }
+
+    fun updateQuizSubject(subject: String) {
+        val exam = _quizState.value.selectedExam
+        viewModelScope.launch {
+            val topics = if (subject == "All Subjects") emptyList() else loadTopicsForSubject(exam, subject)
+            _quizState.update {
+                it.copy(
+                    subject = subject,
+                    topic = "All Topics",
+                    availableTopics = listOf("All Topics") + topics
+                )
+            }
+        }
+    }
+
+    fun updateQuizTopic(topic: String) {
+        _quizState.update { it.copy(topic = topic) }
+    }
+
+    fun updateQuizLanguage(language: String) {
+        _quizState.update { it.copy(language = language) }
+    }
+
+    fun updateQuizQuestionCount(count: Int) {
+        _quizState.update {
+            val estDuration = calculateEstimatedDuration(count, it.selectedExam)
+            it.copy(
+                questionCount = count,
+                durationMinutes = if (!it.isCustomDuration) estDuration else it.durationMinutes
+            )
+        }
+    }
+
+    fun updateQuizDuration(minutes: Int, isCustom: Boolean) {
+        _quizState.update { it.copy(durationMinutes = minutes.coerceIn(3, 180), isCustomDuration = isCustom) }
+    }
+
+    fun updateQuizDifficulty(difficulty: String) {
+        _quizState.update { it.copy(difficulty = difficulty) }
+    }
+
+    fun updateQuizMode(mode: String) {
+        _quizState.update { it.copy(questionMode = mode) }
+    }
+
+    fun prepareQuizBriefing() {
+        _quizState.update { it.copy(screenStage = QuizScreenStage.BRIEFING) }
+    }
+
+    fun backToQuizConfig() {
+        stopQuizTimer()
+        _quizState.update { it.copy(screenStage = QuizScreenStage.CONFIGURING, isQuizFinished = false) }
+    }
+
+    fun startGeneratedQuiz() {
+        val current = _quizState.value
         _quizState.update {
             it.copy(
+                isGenerating = true,
+                generationStatus = "Preparing ${current.questionCount} syllabus-grounded questions for ${current.selectedExam}...",
+                errorMessage = null
+            )
+        }
+
+        viewModelScope.launch {
+            val examName = current.selectedExam.ifBlank { _studyContext.value.targetExam }
+            val subject = current.subject
+            val topic = current.topic
+            val count = current.questionCount
+            val language = current.language
+            val difficulty = current.difficulty
+            val mode = current.questionMode
+
+            var groundedContext = ""
+            if (mode == "Current Affairs") {
+                val news = db.currentAffairsDao().getAllCurrentAffairs().firstOrNull() ?: emptyList()
+                groundedContext = news.take(10).joinToString("\n- ") { "${it.title}: ${it.summary}" }
+            } else if (mode == "Revision") {
+                val weak = _studyContext.value.weakTopics.joinToString(", ")
+                groundedContext = "Student weak areas: $weak"
+            }
+
+            val result = geminiRepository.generateComprehensiveExamQuiz(
+                examName = examName,
+                subject = subject,
+                topic = topic,
+                difficulty = difficulty,
+                count = count,
+                language = language,
+                mode = mode,
+                groundedContextText = groundedContext
+            )
+
+            var questionsList = result.getOrNull() ?: emptyList()
+
+            // Fallback to local verified bank if empty or error
+            if (questionsList.isEmpty()) {
+                val bankQuestions = examQuestionBankRepository.getQuestionsForTest(
+                    examName = examName,
+                    subject = subject,
+                    topic = topic,
+                    difficulty = difficulty,
+                    language = language,
+                    desiredCount = count
+                )
+                if (bankQuestions.isNotEmpty()) {
+                    questionsList = bankQuestions
+                } else {
+                    questionsList = geminiRepository.getDefaultQuestions(if (subject == "All Subjects") "General Awareness" else subject)
+                }
+            }
+
+            // Set up active test
+            val totalSeconds = current.durationMinutes * 60
+            _quizState.update {
+                it.copy(
+                    questions = questionsList,
+                    currentIndex = 0,
+                    selectedOptionIndex = null,
+                    userAnswers = emptyMap(),
+                    markedForReview = emptySet(),
+                    immediateChecked = emptyMap(),
+                    isAnswerSubmitted = false,
+                    isGenerating = false,
+                    generationStatus = "",
+                    screenStage = QuizScreenStage.ACTIVE,
+                    isQuizFinished = false,
+                    totalDurationSeconds = totalSeconds,
+                    timeRemainingSeconds = totalSeconds,
+                    score = 0,
+                    explanation = ""
+                )
+            }
+
+            startQuizTimer(totalSeconds)
+        }
+    }
+
+    fun startQuizSession(subject: String, topic: String) {
+        _currentTab.value = NovaScreenTab.INTERACTIVE_STUDY_QUIZ
+        _quizState.update {
+            it.copy(
+                subject = subject,
+                topic = topic,
+                screenStage = QuizScreenStage.CONFIGURING
+            )
+        }
+        prepareQuizBriefing()
+    }
+
+    private fun startQuizTimer(durationSeconds: Int) {
+        quizTimerJob?.cancel()
+        _quizState.update {
+            it.copy(
+                timeRemainingSeconds = durationSeconds,
+                totalDurationSeconds = durationSeconds,
+                isTimerRunning = true
+            )
+        }
+        quizTimerJob = viewModelScope.launch {
+            while (_quizState.value.isTimerRunning && _quizState.value.timeRemainingSeconds > 0) {
+                kotlinx.coroutines.delay(1000)
+                _quizState.update {
+                    it.copy(timeRemainingSeconds = (it.timeRemainingSeconds - 1).coerceAtLeast(0))
+                }
+            }
+            if (_quizState.value.timeRemainingSeconds <= 0 && _quizState.value.screenStage == QuizScreenStage.ACTIVE) {
+                submitQuizSession()
+            }
+        }
+    }
+
+    private fun stopQuizTimer() {
+        quizTimerJob?.cancel()
+        _quizState.update { it.copy(isTimerRunning = false) }
+    }
+
+    fun selectQuizOption(index: Int) {
+        val current = _quizState.value
+        if (current.screenStage != QuizScreenStage.ACTIVE) return
+        val currentQIndex = current.currentIndex
+        // In practice mode, if already checked, don't allow changing answer
+        if (current.questionMode == "Practice" && current.immediateChecked[currentQIndex] == true) return
+
+        _quizState.update {
+            val newAnswers = it.userAnswers.toMutableMap()
+            newAnswers[currentQIndex] = index
+            it.copy(
+                userAnswers = newAnswers,
+                selectedOptionIndex = index
+            )
+        }
+    }
+
+    fun toggleMarkForReview() {
+        val current = _quizState.value
+        val idx = current.currentIndex
+        _quizState.update {
+            val newSet = it.markedForReview.toMutableSet()
+            if (newSet.contains(idx)) {
+                newSet.remove(idx)
+            } else {
+                newSet.add(idx)
+            }
+            it.copy(markedForReview = newSet)
+        }
+    }
+
+    fun checkImmediateAnswer() {
+        val current = _quizState.value
+        val idx = current.currentIndex
+        val question = current.questions.getOrNull(idx) ?: return
+        val selectedOpt = current.userAnswers[idx] ?: return
+
+        val isCorrect = selectedOpt == question.correctOptionIndex
+        _quizState.update {
+            val newChecked = it.immediateChecked.toMutableMap()
+            newChecked[idx] = true
+            it.copy(
+                immediateChecked = newChecked,
                 isAnswerSubmitted = true,
-                score = newScore,
                 explanation = question.explanation
             )
         }
 
-        // Voice audio response on answer submit if voice enabled
         if (_settings.value.voiceEnabled) {
-            val audioMsg = if (isCorrect) "Correct answer Boss! Well done." else "Incorrect. Let's review the explanation."
-            voiceManager.speak(audioMsg, if (isCorrect) NovaVoiceEmotion.HAPPY_ACHIEVEMENT else NovaVoiceEmotion.GENTLE_MOTIVATION)
+            val msg = if (isCorrect) "Correct answer Boss! Well done." else "Incorrect. Let's study the concept explanation."
+            voiceManager.speak(msg, if (isCorrect) NovaVoiceEmotion.HAPPY_ACHIEVEMENT else NovaVoiceEmotion.GENTLE_MOTIVATION)
+        }
+    }
+
+    fun submitQuizAnswer() {
+        // Backwards compatible method
+        checkImmediateAnswer()
+    }
+
+    fun jumpToQuestion(index: Int) {
+        val current = _quizState.value
+        if (index in current.questions.indices) {
+            val question = current.questions[index]
+            val isChecked = current.immediateChecked[index] == true
+            _quizState.update {
+                it.copy(
+                    currentIndex = index,
+                    selectedOptionIndex = it.userAnswers[index],
+                    isAnswerSubmitted = isChecked,
+                    explanation = if (isChecked) question.explanation else ""
+                )
+            }
         }
     }
 
     fun nextQuizQuestion() {
         val current = _quizState.value
         if (current.currentIndex + 1 < current.questions.size) {
-            _quizState.update {
-                it.copy(
-                    currentIndex = it.currentIndex + 1,
-                    selectedOptionIndex = null,
-                    isAnswerSubmitted = false,
-                    explanation = ""
-                )
-            }
-        } else {
-            _quizState.update { it.copy(isQuizFinished = true) }
+            jumpToQuestion(current.currentIndex + 1)
         }
+    }
+
+    fun previousQuizQuestion() {
+        val current = _quizState.value
+        if (current.currentIndex > 0) {
+            jumpToQuestion(current.currentIndex - 1)
+        }
+    }
+
+    fun submitQuizSession() {
+        stopQuizTimer()
+        val current = _quizState.value
+        val questions = current.questions
+        val userAnswers = current.userAnswers
+        val totalQuestions = questions.size
+
+        var correctCount = 0
+        var incorrectCount = 0
+        var unansweredCount = 0
+        val mistakesToRecord = mutableListOf<Question>()
+
+        val subjectStatsMap = mutableMapOf<String, Pair<Int, Int>>() // subject -> (total, correct)
+
+        questions.forEachIndexed { idx, q ->
+            val sub = q.subject.ifBlank { "General Awareness" }
+            val existing = subjectStatsMap.getOrDefault(sub, Pair(0, 0))
+            val selected = userAnswers[idx]
+
+            if (selected == null) {
+                unansweredCount++
+                subjectStatsMap[sub] = Pair(existing.first + 1, existing.second)
+            } else if (selected == q.correctOptionIndex) {
+                correctCount++
+                subjectStatsMap[sub] = Pair(existing.first + 1, existing.second + 1)
+            } else {
+                incorrectCount++
+                mistakesToRecord.add(q)
+                subjectStatsMap[sub] = Pair(existing.first + 1, existing.second)
+            }
+        }
+
+        val accuracyPercent = if (totalQuestions > 0) (correctCount.toFloat() / totalQuestions) * 100f else 0f
+        val timeSpent = current.totalDurationSeconds - current.timeRemainingSeconds
+
+        // Marks calculation
+        val earnedMarks = (correctCount * 1.0f) - (incorrectCount * 0.25f)
+        val maxMarks = totalQuestions * 1.0f
+
+        val breakdown = subjectStatsMap.mapValues { (_, pair) ->
+            SubjectAccuracyStats(
+                total = pair.first,
+                correct = pair.second,
+                accuracyPercent = if (pair.first > 0) (pair.second.toFloat() / pair.first) * 100f else 0f
+            )
+        }
+
+        // Identify weak / strong topics
+        val weakTopics = questions.filterIndexed { idx, q ->
+            val ans = userAnswers[idx]
+            ans != null && ans != q.correctOptionIndex
+        }.map { it.topic }.distinct()
+
+        val strongTopics = questions.filterIndexed { idx, q ->
+            val ans = userAnswers[idx]
+            ans == q.correctOptionIndex
+        }.map { it.topic }.distinct()
+
+        _quizState.update {
+            it.copy(
+                screenStage = QuizScreenStage.FINISHED,
+                isQuizFinished = true,
+                score = correctCount,
+                totalQuestions = totalQuestions,
+                earnedMarks = earnedMarks,
+                maxMarks = maxMarks,
+                accuracyPercent = accuracyPercent,
+                timeSpentSeconds = timeSpent,
+                correctCount = correctCount,
+                incorrectCount = incorrectCount,
+                unansweredCount = unansweredCount,
+                markedCount = it.markedForReview.size,
+                subjectBreakdown = breakdown,
+                weakTopicsIdentified = weakTopics,
+                strongTopicsIdentified = strongTopics,
+                isAnalyzingResult = true,
+                isResultSaved = true
+            )
+        }
+
+        // Persist attempt & mistakes to Room Database
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                studyRepository.recordMockTestAttempt(
+                    title = "${current.selectedExam} ${current.questionMode} Practice Test",
+                    subject = current.subject,
+                    score = earnedMarks.toInt(),
+                    totalQuestions = totalQuestions,
+                    timeSpentSeconds = timeSpent,
+                    weakTopics = weakTopics,
+                    strongTopics = strongTopics,
+                    aiRecommendation = if (weakTopics.isNotEmpty()) "Focus on weak topics: ${weakTopics.take(3).joinToString()}" else "Great performance across all tested topics!",
+                    examName = current.selectedExam.ifBlank { "Practice Quiz" },
+                    topic = current.topic,
+                    difficulty = current.difficulty,
+                    correctCount = correctCount,
+                    incorrectCount = incorrectCount,
+                    skippedCount = unansweredCount,
+                    avgTimePerQuestionSeconds = if (totalQuestions > 0) timeSpent.toFloat() / totalQuestions else 0f,
+                    markingScheme = current.markingScheme,
+                    totalTimeAllowedSeconds = current.durationMinutes * 60
+                )
+
+                // Record mistakes
+                mistakesToRecord.forEach { q ->
+                    val userAnsText = q.options.getOrNull(userAnswers[questions.indexOf(q)] ?: -1) ?: "No Answer"
+                    studyRepository.recordMistake(
+                        questionText = q.questionText,
+                        studentAnswer = userAnsText,
+                        correctAnswer = q.options.getOrNull(q.correctOptionIndex) ?: "",
+                        subject = q.subject,
+                        topic = q.topic,
+                        explanation = q.explanation
+                    )
+                }
+
+                // Update Topic Mastery in Room
+                val user = db.userDao().getUserProfileOnce()
+                val targetExam = user?.examName ?: current.selectedExam
+                questions.groupBy { it.topic }.forEach { (top, qList) ->
+                    val c = qList.count { userAnswers[questions.indexOf(it)] == it.correctOptionIndex }
+                    val acc = (c.toFloat() / qList.size) * 100f
+                    val existing = db.topicMasteryDao().getTopicMasteryOnce(qList.first().subject, top)
+                    val newScore = if (existing != null) (existing.masteryScore * 0.7f + acc * 0.3f).toInt() else acc.toInt()
+                    db.topicMasteryDao().insertOrUpdateTopicMastery(
+                        (existing ?: TopicMastery(
+                            subject = qList.first().subject,
+                            topic = top,
+                            examId = targetExam
+                        )).copy(
+                            masteryScore = newScore.coerceIn(0, 100),
+                            practiceAttempts = (existing?.practiceAttempts ?: 0) + qList.size,
+                            practiceCorrect = (existing?.practiceCorrect ?: 0) + c,
+                            practiceAccuracyPercent = acc,
+                            lastTestedMillis = System.currentTimeMillis()
+                        )
+                    )
+                }
+
+                // Request Gemini AI Diagnostic Analysis
+                val incorrectSummary = mistakesToRecord.take(5).joinToString("\n") {
+                    "- [${it.subject} / ${it.topic}]: ${it.questionText} (Correct: ${it.options.getOrNull(it.correctOptionIndex)})"
+                }
+
+                val aiResult = geminiRepository.generateNovaQuizDiagnostic(
+                    examName = current.selectedExam,
+                    subject = current.subject,
+                    score = correctCount,
+                    totalQuestions = totalQuestions,
+                    accuracyPercent = accuracyPercent,
+                    timeSpentSeconds = timeSpent,
+                    weakTopics = weakTopics,
+                    strongTopics = strongTopics,
+                    incorrectSummary = incorrectSummary,
+                    language = current.language
+                )
+
+                _quizState.update {
+                    it.copy(
+                        novaAiAnalysis = aiResult.getOrNull() ?: "",
+                        isAnalyzingResult = false
+                    )
+                }
+            } catch (e: Exception) {
+                _quizState.update { it.copy(isAnalyzingResult = false) }
+            }
+        }
+
+        if (_settings.value.voiceEnabled) {
+            val speech = if (accuracyPercent >= 70f) {
+                "Test completed! Outstanding performance Boss, you scored ${earnedMarks.toInt()} marks with ${accuracyPercent.toInt()}% accuracy."
+            } else {
+                "Test finished Boss. You achieved ${accuracyPercent.toInt()}% accuracy. Let's analyze your weak areas and revise."
+            }
+            voiceManager.speak(speech, if (accuracyPercent >= 70f) NovaVoiceEmotion.HAPPY_ACHIEVEMENT else NovaVoiceEmotion.GENTLE_MOTIVATION)
+        }
+    }
+
+    fun restartQuizSession() {
+        stopQuizTimer()
+        _quizState.update {
+            it.copy(
+                screenStage = QuizScreenStage.CONFIGURING,
+                isQuizFinished = false,
+                questions = emptyList(),
+                userAnswers = emptyMap(),
+                markedForReview = emptySet(),
+                immediateChecked = emptyMap(),
+                score = 0,
+                isResultSaved = false
+            )
+        }
+    }
+
+    fun practiceWeakTopicsQuiz() {
+        val current = _quizState.value
+        val weak = current.weakTopicsIdentified.firstOrNull() ?: current.topic
+        _quizState.update {
+            it.copy(
+                topic = weak,
+                questionMode = "Revision",
+                questionCount = 10,
+                screenStage = QuizScreenStage.CONFIGURING
+            )
+        }
+        prepareQuizBriefing()
+    }
+
+    fun saveMistakeToNotebook(question: Question, studentAnswer: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            studyRepository.recordMistake(
+                questionText = question.questionText,
+                studentAnswer = studentAnswer,
+                correctAnswer = question.options.getOrNull(question.correctOptionIndex) ?: "",
+                subject = question.subject,
+                topic = question.topic,
+                explanation = question.explanation
+            )
+            _snackbarMessage.emit("Saved to Mistake Notebook 📖")
+        }
+    }
+
+    fun saveQuestionAsFlashcard(question: Question) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val correctAns = question.options.getOrNull(question.correctOptionIndex) ?: ""
+            studyRepository.addFlashcard(
+                subject = question.subject,
+                topic = question.topic,
+                front = question.questionText,
+                back = "Answer: $correctAns\n\nExplanation: ${question.explanation}",
+                hint = "Exam: ${question.subject}",
+                difficulty = question.difficulty.ifBlank { "Medium" },
+                sourceDocTitle = "NOVA Quiz Intelligence"
+            )
+            _snackbarMessage.emit("Saved to Flashcards 🎴")
+        }
+    }
+
+    fun askNovaAboutQuestion(question: Question) {
+        val query = "Please explain this question step-by-step for ${question.subject} - ${question.topic}:\n\n${question.questionText}\n\nOptions:\n${question.options.mapIndexed { i, o -> "${('A' + i)}. $o" }.joinToString("\n")}\n\nCorrect Answer: ${question.options.getOrNull(question.correctOptionIndex)}\nExplanation: ${question.explanation}"
+        _currentTab.value = NovaScreenTab.ASSISTANT_CHAT
+        sendMessage(query)
     }
 
     fun setAttachedImage(uri: Uri) {
@@ -855,28 +1453,146 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         sendMessage(prompt)
     }
 
+    fun startNewChat() {
+        val currentMsgs = _messages.value
+        val hasUserMsg = currentMsgs.any { it.sender == NovaSender.USER }
+        if (hasUserMsg) {
+            val firstUserMsg = currentMsgs.firstOrNull { it.sender == NovaSender.USER }?.text ?: "Study Discussion"
+            val title = firstUserMsg.take(40).ifBlank { "Study Session" }
+            val session = NovaConversationSession(
+                title = title,
+                messages = currentMsgs,
+                examContext = _studyContext.value.targetExam
+            )
+            _savedConversations.update { listOf(session) + it }
+        }
+
+        val greeting = getProactiveGreeting()
+        _messages.value = listOf(
+            NovaChatMessage(
+                sender = NovaSender.NOVA,
+                text = greeting,
+                actionType = NovaActionType.NONE
+            )
+        )
+        _attachedImageUri.value = null
+        _attachedImageBitmap.value = null
+        viewModelScope.launch {
+            _snackbarMessage.emit("✨ Started a new chat with NOVA")
+        }
+    }
+
+    fun loadConversation(session: NovaConversationSession) {
+        _messages.value = session.messages
+        _attachedImageUri.value = null
+        _attachedImageBitmap.value = null
+        viewModelScope.launch {
+            _snackbarMessage.emit("Loaded chat: ${session.title}")
+        }
+    }
+
+    fun deleteConversation(sessionId: String) {
+        _savedConversations.update { it.filter { sess -> sess.id != sessionId } }
+        viewModelScope.launch {
+            _snackbarMessage.emit("Deleted saved chat")
+        }
+    }
+
+    fun clearCurrentChat() {
+        _messages.value = emptyList()
+        _attachedImageUri.value = null
+        _attachedImageBitmap.value = null
+        viewModelScope.launch {
+            _snackbarMessage.emit("Chat cleared")
+        }
+    }
+
+    fun toggleLanguageMode() {
+        val currentLang = _settings.value.language
+        val nextLang = when (currentLang) {
+            "Hinglish (Auto)" -> "English"
+            "English" -> "Hindi"
+            else -> "Hinglish (Auto)"
+        }
+        _settings.update { it.copy(language = nextLang) }
+        viewModelScope.launch {
+            _snackbarMessage.emit("🌐 Language set to $nextLang")
+        }
+    }
+
+    fun retryLastMessage() {
+        val msgs = _messages.value
+        val lastUserMsg = msgs.lastOrNull { it.sender == NovaSender.USER }
+        if (lastUserMsg != null) {
+            sendMessage(lastUserMsg.text)
+        }
+    }
+
     // =========================================================================
     // SMART SEARCH & ACADEMIC INTELLIGENCE METHODS
     // =========================================================================
 
-    fun performSmartSearch(query: String, subject: String = "General") {
+    fun setSearchLanguage(lang: String) {
+        _searchLanguage.value = lang
+    }
+
+    fun setSearchSubject(subject: String) {
+        _searchSubject.value = subject
+    }
+
+    fun addToSearchHistory(query: String, subject: String = _searchSubject.value) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return
+        val current = _searchHistory.value.filter { !it.query.equals(trimmed, ignoreCase = true) }
+        _searchHistory.value = listOf(NovaSearchHistoryItem(trimmed, subject, System.currentTimeMillis())) + current.take(9)
+    }
+
+    fun removeSearchHistoryItem(query: String) {
+        _searchHistory.value = _searchHistory.value.filter { !it.query.equals(query, ignoreCase = true) }
+    }
+
+    fun clearSearchHistory() {
+        _searchHistory.value = emptyList()
+    }
+
+    fun performSmartSearch(
+        query: String,
+        subject: String = _searchSubject.value,
+        language: String = _searchLanguage.value
+    ) {
         if (query.isBlank()) return
         viewModelScope.launch {
             _isSmartSearching.value = true
+            _searchError.value = null
+            addToSearchHistory(query, subject)
             val exam = _studyContext.value.targetExam.ifBlank { "Competitive Exam" }
-            val result = geminiRepository.performSmartSearch(query.trim(), exam, subject)
+            val result = geminiRepository.performSmartSearch(
+                query = query.trim(),
+                examName = exam,
+                subject = subject,
+                language = language
+            )
             result.onSuccess {
                 _smartSearchResult.value = it
+                _searchError.value = null
             }
             result.onFailure {
-                _snackbarMessage.emit("Search error: ${it.localizedMessage}")
+                _searchError.value = it.localizedMessage ?: "Unable to complete search"
+                _snackbarMessage.emit("Search notice: ${it.localizedMessage}")
             }
             _isSmartSearching.value = false
         }
     }
 
+    fun askNovaAboutSearchResult(result: SmartSearchResult) {
+        val prompt = "Boss, please give me a deeper study breakdown of \"${result.query}\" with practical problem-solving tips and core insights."
+        sendMessage(prompt)
+        setTab(NovaScreenTab.ASSISTANT_CHAT)
+    }
+
     fun clearSmartSearch() {
         _smartSearchResult.value = null
+        _searchError.value = null
     }
 
     fun saveSearchResultAsSmartNote(result: SmartSearchResult, subject: String = "General") {
@@ -950,6 +1666,154 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateSmartNote(note: SmartNoteItem) {
+        viewModelScope.launch {
+            studyRepository.updateSmartNote(note)
+            _snackbarMessage.emit("📝 Note updated!")
+        }
+    }
+
+    private val _isGeneratingAiNote = MutableStateFlow(false)
+    val isGeneratingAiNote: StateFlow<Boolean> = _isGeneratingAiNote.asStateFlow()
+
+    private val _noteAiAssistanceResult = MutableStateFlow<String?>(null)
+    val noteAiAssistanceResult: StateFlow<String?> = _noteAiAssistanceResult.asStateFlow()
+
+    private val _isNoteAiAssisting = MutableStateFlow(false)
+    val isNoteAiAssisting: StateFlow<Boolean> = _isNoteAiAssisting.asStateFlow()
+
+    fun generateAiSmartNote(
+        subject: String,
+        topic: String,
+        noteType: String = "Quick Revision",
+        language: String = _searchLanguage.value,
+        onSuccess: (SmartNoteItem) -> Unit = {}
+    ) {
+        if (topic.isBlank()) return
+        viewModelScope.launch {
+            _isGeneratingAiNote.value = true
+            val exam = _studyContext.value.targetExam.ifBlank { "Competitive Exam" }
+            val result = geminiRepository.generateSmartNote(
+                examName = exam,
+                subject = subject,
+                topic = topic.trim(),
+                noteType = noteType,
+                language = language
+            )
+            result.onSuccess { generatedNote ->
+                studyRepository.saveSmartNote(generatedNote)
+                _snackbarMessage.emit("✨ NOVA generated note for $topic!")
+                onSuccess(generatedNote)
+            }
+            result.onFailure {
+                _snackbarMessage.emit("Error generating note: ${it.localizedMessage}")
+            }
+            _isGeneratingAiNote.value = false
+        }
+    }
+
+    fun assistWithSmartNote(
+        note: SmartNoteItem,
+        actionType: String,
+        language: String = _searchLanguage.value
+    ) {
+        viewModelScope.launch {
+            _isNoteAiAssisting.value = true
+            _noteAiAssistanceResult.value = null
+            val exam = _studyContext.value.targetExam.ifBlank { "Competitive Exam" }
+            val result = geminiRepository.assistWithSmartNote(
+                note = note,
+                actionType = actionType,
+                examName = exam,
+                language = language
+            )
+            result.onSuccess { text ->
+                _noteAiAssistanceResult.value = text
+            }
+            result.onFailure {
+                _snackbarMessage.emit("AI assistance error: ${it.localizedMessage}")
+            }
+            _isNoteAiAssisting.value = false
+        }
+    }
+
+    fun clearNoteAiAssistance() {
+        _noteAiAssistanceResult.value = null
+    }
+
+    fun convertNoteToFlashcards(note: SmartNoteItem) {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val cards = mutableListOf<FlashcardItem>()
+            
+            note.keyPoints.forEachIndexed { i, kp ->
+                cards.add(
+                    FlashcardItem(
+                        subject = note.subject,
+                        topic = note.topic,
+                        front = "Key Concept (#${i + 1}) from ${note.title}?",
+                        back = kp,
+                        hint = "${note.subject} • ${note.topic}",
+                        difficulty = "Medium",
+                        status = RevisionCategory.REVISE_NOW,
+                        confidence = 2,
+                        intervalDays = 1,
+                        easeFactor = 2.5f,
+                        repetitions = 0,
+                        nextReviewDate = now,
+                        sourceDocTitle = "Smart Note: ${note.title}",
+                        createdAt = now
+                    )
+                )
+            }
+            
+            note.formulas.forEachIndexed { i, f ->
+                cards.add(
+                    FlashcardItem(
+                        subject = note.subject,
+                        topic = note.topic,
+                        front = "Formula / Law for ${note.topic} (#${i + 1})?",
+                        back = f,
+                        hint = "Formula recall for ${note.subject}",
+                        difficulty = "Hard",
+                        status = RevisionCategory.REVISE_NOW,
+                        confidence = 2,
+                        intervalDays = 1,
+                        easeFactor = 2.5f,
+                        repetitions = 0,
+                        nextReviewDate = now,
+                        sourceDocTitle = "Smart Note: ${note.title}",
+                        createdAt = now
+                    )
+                )
+            }
+
+            if (cards.isEmpty()) {
+                cards.add(
+                    FlashcardItem(
+                        subject = note.subject,
+                        topic = note.topic,
+                        front = "What is the core takeaway of ${note.title}?",
+                        back = note.contentMarkdown.take(250),
+                        hint = "${note.subject} key recall",
+                        difficulty = "Medium",
+                        status = RevisionCategory.REVISE_NOW,
+                        confidence = 2,
+                        intervalDays = 1,
+                        easeFactor = 2.5f,
+                        repetitions = 0,
+                        nextReviewDate = now,
+                        sourceDocTitle = "Smart Note: ${note.title}",
+                        createdAt = now
+                    )
+                )
+            }
+
+            studyRepository.insertFlashcardList(cards)
+            _snackbarMessage.emit("🗂️ Added ${cards.size} Flashcards to Spaced Recall!")
+        }
+    }
+
     fun toggleSmartNoteBookmark(id: Long, isBookmarked: Boolean) {
         viewModelScope.launch {
             studyRepository.toggleSmartNoteBookmark(id, isBookmarked)
@@ -972,6 +1836,119 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleCurrentAffairsSaved(id: Long, isSaved: Boolean) {
         viewModelScope.launch {
             studyRepository.toggleCurrentAffairsSaved(id, isSaved)
+            _snackbarMessage.emit(if (isSaved) "🔖 Saved to Revision Feed" else "Removed from Saved")
+        }
+    }
+
+    fun setCurrentAffairsFilter(category: String) {
+        _currentAffairsFilterCategory.value = category
+    }
+
+    fun setCurrentAffairsSearchQuery(query: String) {
+        _currentAffairsSearchQuery.value = query
+    }
+
+    fun setCurrentAffairsLanguage(lang: String) {
+        _currentAffairsLanguage.value = lang
+    }
+
+    fun clearNovaAffairAnalysis() {
+        _selectedAffairForNova.value = null
+        _novaAffairAnalysis.value = null
+        _isAnalyzingAffair.value = false
+    }
+
+    fun askNovaAboutAffair(item: CurrentAffairsItem, questionType: String) {
+        _selectedAffairForNova.value = item
+        _isAnalyzingAffair.value = true
+        _novaAffairAnalysis.value = null
+        viewModelScope.launch {
+            val exam = _studyContext.value.targetExam.ifBlank { "Competitive Exam" }
+            val lang = _currentAffairsLanguage.value
+            val result = geminiRepository.askNovaCurrentAffair(
+                item = item,
+                questionType = questionType,
+                examName = exam,
+                language = lang
+            )
+            _isAnalyzingAffair.value = false
+            result.onSuccess { analysis ->
+                _novaAffairAnalysis.value = analysis
+            }.onFailure { err ->
+                _novaAffairAnalysis.value = "Unable to complete AI analysis: ${err.localizedMessage ?: "Unknown error"}. Please check network connection."
+            }
+        }
+    }
+
+    fun saveAffairAsSmartNote(item: CurrentAffairsItem) {
+        viewModelScope.launch {
+            val note = SmartNoteItem(
+                title = item.title,
+                subject = item.category,
+                topic = "Current Affairs (${item.category})",
+                contentMarkdown = "## ${item.title}\n\n" +
+                        "**Source:** ${item.sourceName} (${item.publishedDate})\n\n" +
+                        "### Executive Summary\n${item.summary}\n\n" +
+                        "### Exam Weightage & Syllabus Link\n${item.examRelevance}",
+                keyPoints = listOf(
+                    item.summary,
+                    item.examRelevance,
+                    "Source: ${item.sourceName} - Published ${item.publishedDate}"
+                ),
+                formulas = emptyList(),
+                importantFacts = listOf(
+                    "Category: ${item.category}",
+                    "Target Exams: ${item.targetExams.joinToString(", ")}"
+                ),
+                sourceUrl = item.sourceUrl,
+                sourceTitle = item.sourceName,
+                isRevised = false,
+                isBookmarked = true,
+                createdAt = System.currentTimeMillis()
+            )
+            studyRepository.saveSmartNote(note)
+            _snackbarMessage.emit("📝 Added to Smart Notes notebook!")
+        }
+    }
+
+    fun refreshCurrentAffairs(forceRefresh: Boolean = false) {
+        if (_isRefreshingCurrentAffairs.value) return
+        viewModelScope.launch {
+            _isRefreshingCurrentAffairs.value = true
+            _currentAffairsError.value = null
+            try {
+                val exam = _studyContext.value.targetExam.ifBlank { "Competitive Exam" }
+                val cat = _currentAffairsFilterCategory.value
+                val lang = _currentAffairsLanguage.value
+                val result = geminiRepository.fetchLiveCurrentAffairs(
+                    examName = exam,
+                    category = cat,
+                    language = lang
+                )
+                result.onSuccess { fetchedItems ->
+                    val existing = allCurrentAffairs.value
+                    val existingSavedIds = existing.filter { it.isSavedForRevision }.map { it.title.trim().lowercase() }.toSet()
+
+                    // Deduplicate and preserve saved status
+                    val deduped = fetchedItems.map { item ->
+                        val isAlreadySaved = existingSavedIds.contains(item.title.trim().lowercase())
+                        if (isAlreadySaved) item.copy(isSavedForRevision = true) else item
+                    }
+
+                    // Merge with any existing user-saved items that weren't in the new batch
+                    val combinedList = (deduped + existing.filter { it.isSavedForRevision && !deduped.any { d -> d.title.equals(it.title, ignoreCase = true) } })
+                    
+                    studyRepository.saveCurrentAffairsList(combinedList)
+                    _lastRefreshedTime.value = System.currentTimeMillis()
+                    _snackbarMessage.emit("✨ Refreshed latest 30-day exam radar")
+                }.onFailure { err ->
+                    _currentAffairsError.value = err.localizedMessage ?: "Failed to refresh feed"
+                }
+            } catch (e: Exception) {
+                _currentAffairsError.value = e.localizedMessage
+            } finally {
+                _isRefreshingCurrentAffairs.value = false
+            }
         }
     }
 

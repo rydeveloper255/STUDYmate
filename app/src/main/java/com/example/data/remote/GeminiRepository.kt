@@ -630,23 +630,147 @@ class GeminiRepository(
         count: Int = 5,
         examName: String = "",
         language: String = "English"
+    ): Result<List<Question>> = generateComprehensiveExamQuiz(
+        examName = examName,
+        subject = subject,
+        topic = chapter,
+        difficulty = difficulty,
+        count = count,
+        language = language,
+        mode = "Practice"
+    )
+
+    suspend fun generateComprehensiveExamQuiz(
+        examName: String,
+        subject: String,
+        topic: String,
+        difficulty: String = "Medium",
+        count: Int = 10,
+        language: String = "English",
+        mode: String = "Practice",
+        groundedContextText: String = ""
     ): Result<List<Question>> = withContext(Dispatchers.IO) {
         try {
+            val isHindi = language.contains("हिंदी", ignoreCase = true) || language.contains("Hindi", ignoreCase = true)
+            val langInstruction = if (isHindi) {
+                "Generate all question texts, 4 options, and explanations in clear, academic HINDI (हिंदी / Devanagari script)."
+            } else {
+                "Generate all question texts, 4 options, and explanations in clear ENGLISH."
+            }
+
+            val modeInstruction = when (mode) {
+                "Previous-Year Style" -> "Style the questions strictly following previous year exam patterns and standard difficulty levels of $examName."
+                "Current Affairs" -> "Base questions strictly on verified recent current affairs, national/international developments, schemes, awards, appointments, and general awareness relevant to $examName. Use this context if provided:\n$groundedContextText"
+                "Revision" -> "Focus questions on high-frequency weak concepts, subtle traps, and core problem-solving steps in $subject - $topic."
+                "Mock Test" -> "Create authentic full-standard mock test questions following the official $examName syllabus distribution."
+                else -> "Create engaging, concept-building practice questions with step-by-step explanatory feedback."
+            }
+
             val prompt = """
-            Generate $count original multiple-choice questions for $subject (Chapter/Topic: $chapter).
-            Target Exam Context: ${examName.ifBlank { "Standard Competitive Exam" }}.
-            Difficulty: $difficulty. Language: $language.
-            Each question must have 4 clear options, correct option index (0 to 3), and an insightful explanation.
-            
-            Return ONLY a valid JSON array of objects with keys:
-            - "id": string (e.g. "q_1")
-            - "questionText": string
-            - "options": array of 4 strings
-            - "correctOptionIndex": integer (0, 1, 2, or 3)
-            - "explanation": string
-            - "subject": string
-            - "topic": string
-            - "difficulty": string
+            You are a top examination expert preparing questions for: $examName.
+            Subject: $subject
+            Topic / Syllabus Scope: $topic
+            Target Difficulty: $difficulty
+            Number of Questions: $count
+            Mode: $mode
+            Language: $language
+
+            $langInstruction
+            $modeInstruction
+
+            Requirements:
+            1. Generate exactly $count high-quality multiple choice questions.
+            2. Each question MUST have exactly 4 options.
+            3. Exactly one option is correct. Indicate this with correctOptionIndex (0, 1, 2, or 3).
+            4. Provide a clear, educational explanation showing why the answer is correct and key takeaway formulas/facts.
+            5. Ensure questions are strictly within the official $examName syllabus.
+
+            Return ONLY a valid JSON array of objects with the exact schema:
+            [
+              {
+                "id": "q_1",
+                "questionText": "...",
+                "options": ["Option A", "Option B", "Option C", "Option D"],
+                "correctOptionIndex": 0,
+                "explanation": "...",
+                "subject": "$subject",
+                "topic": "$topic",
+                "difficulty": "$difficulty"
+              }
+            ]
+            """.trimIndent()
+
+            val request = GenerateContentRequest(
+                contents = listOf(Content(role = "user", parts = listOf(Part(text = prompt)))),
+                generationConfig = GenerationConfig(temperature = 0.4f)
+            )
+
+            val response = apiService.generateContent("gemini-3.5-flash", apiKey, request)
+            val jsonText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: ""
+            val parsed = parseQuestionsJson(jsonText, subject)
+            val validQuestions = com.example.service.intelligence.SmartMockEngine.validateAndFilterQuestions(parsed)
+                .mapIndexed { idx, q ->
+                    q.copy(
+                        id = "ai_q_${System.currentTimeMillis()}_$idx",
+                        source = when (mode) {
+                            "Previous-Year Style" -> QuestionSource.PREVIOUS_YEAR
+                            "Current Affairs" -> QuestionSource.AI_GENERATED
+                            else -> QuestionSource.AI_GENERATED
+                        },
+                        sourceLabel = when (mode) {
+                            "Previous-Year Style" -> "$examName PYQ Pattern"
+                            "Current Affairs" -> "Current Affairs 2024-2025"
+                            "Revision" -> "High-Yield Revision"
+                            else -> "NOVA Intelligence"
+                        },
+                        yearOrTag = examName.ifBlank { "Exam Practice" },
+                        language = if (isHindi) "Hindi" else "English",
+                        generationModel = "gemini-3.5-flash",
+                        generationTimestamp = System.currentTimeMillis()
+                    )
+                }
+
+            val deduplicated = com.example.service.intelligence.SmartMockEngine.deduplicateQuestions(validQuestions)
+
+            if (deduplicated.isNotEmpty()) {
+                Result.success(deduplicated)
+            } else {
+                Result.success(getDefaultQuestions(subject))
+            }
+        } catch (e: Exception) {
+            Result.success(getDefaultQuestions(subject))
+        }
+    }
+
+    suspend fun generateNovaQuizDiagnostic(
+        examName: String,
+        subject: String,
+        score: Int,
+        totalQuestions: Int,
+        accuracyPercent: Float,
+        timeSpentSeconds: Int,
+        weakTopics: List<String>,
+        strongTopics: List<String>,
+        incorrectSummary: String,
+        language: String = "English"
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val isHindi = language.contains("हिंदी", ignoreCase = true) || language.contains("Hindi", ignoreCase = true)
+            val prompt = """
+            Analyze the student's recent test results for $examName ($subject):
+            - Score: $score / $totalQuestions (Accuracy: ${"%.1f".format(accuracyPercent)}%)
+            - Time Spent: ${timeSpentSeconds / 60}m ${timeSpentSeconds % 60}s
+            - Identified Weak Topics: ${weakTopics.joinToString(", ").ifBlank { "None noted" }}
+            - Strong Areas: ${strongTopics.joinToString(", ").ifBlank { "Balanced across topics" }}
+            - Questions with Mistakes:
+            $incorrectSummary
+
+            Language: ${if (isHindi) "Hindi (हिंदी)" else "English"}
+
+            Provide a concise, encouraging, and highly actionable diagnostic summary from NOVA Study AI in 3 bulleted sections:
+            1. 🎯 **Performance Assessment**: (1-2 sentences on accuracy and pacing)
+            2. ⚠️ **Critical Conceptual Pitfalls**: (Briefly highlight the underlying reason for mistakes)
+            3. 🚀 **Next High-Impact Action**: (1 clear, practical study task to do right now, e.g. revise a specific formula or practice 5 questions)
             """.trimIndent()
 
             val request = GenerateContentRequest(
@@ -655,27 +779,15 @@ class GeminiRepository(
             )
 
             val response = apiService.generateContent("gemini-3.5-flash", apiKey, request)
-            val jsonText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: ""
-            val parsed = parseQuestionsJson(jsonText, subject)
-            val validQuestions = com.example.service.intelligence.SmartMockEngine.validateAndFilterQuestions(parsed)
-                .map { q ->
-                    q.copy(
-                        source = QuestionSource.AI_GENERATED,
-                        sourceLabel = "AI Exam Concept",
-                        yearOrTag = examName.ifBlank { "AI Generated" },
-                        language = language,
-                        generationModel = "gemini-3.5-flash",
-                        generationTimestamp = System.currentTimeMillis()
-                    )
-                }
-
-            if (validQuestions.isNotEmpty()) {
-                Result.success(validQuestions)
-            } else {
-                Result.success(getDefaultQuestions(subject))
-            }
+            val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                ?: "Great effort! Review the questions you missed and revise fundamental derivations before your next mock test."
+            Result.success(text)
         } catch (e: Exception) {
-            Result.success(getDefaultQuestions(subject))
+            Result.success(
+                "🎯 **Diagnostic Assessment**: You scored $score/$totalQuestions (${"%.1f".format(accuracyPercent)}% accuracy).\n" +
+                "⚠️ **Focus Areas**: ${weakTopics.joinToString(", ").ifBlank { subject }} needs targeted practice.\n" +
+                "🚀 **Next Step**: Review the explanations for incorrect questions and save them to your Mistakes Notebook."
+            )
         }
     }
 
@@ -824,7 +936,7 @@ class GeminiRepository(
         )
     }
 
-    private fun getDefaultQuestions(subject: String): List<Question> {
+    fun getDefaultQuestions(subject: String): List<Question> {
         return when {
             subject.contains("Physics", ignoreCase = true) -> listOf(
                 Question(
@@ -2630,28 +2742,43 @@ class GeminiRepository(
     suspend fun performSmartSearch(
         query: String,
         examName: String = "Competitive Exam",
-        subject: String = "General"
+        subject: String = "General",
+        language: String = "English"
     ): Result<SmartSearchResult> = withContext(Dispatchers.IO) {
         try {
             if (apiKey.isNotBlank()) {
+                val langInstruction = when (language.lowercase()) {
+                    "hindi", "हिंदी" -> "Respond primarily in clear Hindi with standard academic terms."
+                    "hinglish" -> "Respond in clear natural Hinglish (conversational mix of Hindi & English)."
+                    else -> "Respond in clear, encouraging English with student-friendly terminology."
+                }
+
                 val prompt = """
-                You are StudyMate Smart Search, an intelligent academic search and concept synthesis engine for students preparing for $examName.
+                You are StudyMate Smart Search, an intelligent academic study search and concept synthesis engine for students preparing for $examName.
                 
                 Search Query: "$query"
-                Subject: $subject
-                Target Exam: $examName
+                Subject Context: $subject
+                Target Exam Context: $examName
+                Language Instruction: $langInstruction
                 
-                Please provide a structured, student-friendly academic breakdown with:
-                1. Clear, pedagogical explanation with step-by-step intuition.
-                2. 3-5 high-yield key takeaways.
-                3. Key formulas, equations, or exact definitions.
-                4. Real verified sources / educational authorities (e.g. NCERT, NTA, ISRO, PIB, Standard Academic Texts).
-                5. Check if sources or theories have differing conventions or disagreements.
-                6. 3-4 follow-up questions for deeper understanding.
-                7. 3 high-yield Multiple Choice Practice Questions (MCQs) with options, correct answer index (0-3), and detailed explanation.
+                Intelligent Search Intent & Relevance Analysis:
+                - Analyze user intent: Determine whether this query is an Academic Concept, Formula/Derivation, Exam Syllabus/Update, Real-world Application, Practice Drill, or General Study Query.
+                - If the query is related to $subject or $examName, contextualize the relevance accurately.
+                - If the query is general or different, explain accurately without forcing irrelevant exam context.
+                - Synthesize high-yield pedagogical understanding:
+                  1. Concise, student-friendly explanation with clean markdown formatting, intuitive analogies, and steps.
+                  2. 3-5 high-yield key takeaways.
+                  3. Key formulas, equations, or exact definitions (if applicable, else empty list).
+                  4. Real verified sources / educational authorities (e.g. NCERT, NTA, ISRO, PIB, Standard Academic Curricula, Official portals).
+                  5. Exam relevance summary (e.g. "High relevance for $examName • Frequently tested in $subject").
+                  6. Check if authoritative sources have differing notations or conventions.
+                  7. 3 high-yield Multiple Choice Practice Questions (MCQs) with options, correct answer index (0-3), and detailed explanations.
+                  8. 3-4 intelligent follow-up questions for deeper understanding.
                 
                 Respond in STRICT JSON format matching this schema:
                 {
+                  "intentType": "Academic Concept",
+                  "examRelevance": "High relevance for $examName • Core $subject concept",
                   "studentFriendlyAnswer": "Clear, markdown-formatted student explanation with intuitive analogy and steps...",
                   "keyPoints": [
                     "Point 1...",
@@ -2728,6 +2855,8 @@ class GeminiRepository(
                         val json = JSONObject(cleaned)
 
                         val answer = json.optString("studentFriendlyAnswer", "Concept breakdown synthesized.")
+                        val intentType = json.optString("intentType", "Academic Concept")
+                        val examRelevance = json.optString("examRelevance", "Relevant for $examName ($subject)")
                         val keyPointsJson = json.optJSONArray("keyPoints")
                         val keyPoints = mutableListOf<String>()
                         if (keyPointsJson != null) {
@@ -2821,7 +2950,9 @@ class GeminiRepository(
                                 sourcesDisagree = sourcesDisagree,
                                 disagreementDetails = disagreementDetails,
                                 suggestedQuestions = suggestedQuestions,
-                                generatedPracticeQuestions = practiceQuestions
+                                generatedPracticeQuestions = practiceQuestions,
+                                examRelevance = examRelevance,
+                                intentType = intentType
                             )
                         )
                     } catch (e: Exception) {
@@ -2834,7 +2965,7 @@ class GeminiRepository(
             val fallbackAnswer = "## Concept Overview: $query\n\n" +
                     "**$query** is a foundational topic in **$subject** frequently tested in **$examName**.\n\n" +
                     "### Key Principles:\n" +
-                    "- Understand the underlying physical / mathematical mechanisms before memorizing equations.\n" +
+                    "- Understand the underlying mechanisms before memorizing formulas.\n" +
                     "- Pay close attention to boundary conditions, standard SI units, and sign conventions.\n" +
                     "- Connect the theoretical formulation with typical numerical application patterns."
 
@@ -2845,7 +2976,7 @@ class GeminiRepository(
             )
 
             val fallbackFormulas = listOf(
-                "Standard Formula: Formulated according to standard NCERT / Curriculum reference."
+                "Standard Formulation: Formulated according to standard NCERT / Curriculum reference."
             )
 
             val fallbackSources = listOf(
@@ -2899,9 +3030,561 @@ class GeminiRepository(
                         "What is a standard numerical example for $query?",
                         "What are the most common student mistakes in this topic?"
                     ),
-                    generatedPracticeQuestions = fallbackQuestions
+                    generatedPracticeQuestions = fallbackQuestions,
+                    examRelevance = "High relevance for $examName • Core $subject syllabus",
+                    intentType = "Academic Concept"
                 )
             )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // =========================================================================
+    // SMART NOTES AI GENERATION & NOTE ASSISTANCE ENGINE
+    // =========================================================================
+
+    suspend fun generateSmartNote(
+        examName: String,
+        subject: String,
+        topic: String,
+        noteType: String,
+        language: String
+    ): Result<SmartNoteItem> = withContext(Dispatchers.IO) {
+        try {
+            val langInstruction = when (language.lowercase()) {
+                "hindi", "हिंदी" -> "Respond primarily in clear, academic Hindi with technical terms in English where helpful."
+                "hinglish" -> "Respond in natural Hinglish (conversational student-friendly Hindi-English mix)."
+                else -> "Respond in clear, encouraging academic English with student-friendly explanations."
+            }
+
+            val noteTypeInstruction = when (noteType.lowercase()) {
+                "quick revision" -> "Focus on high-speed recall, core formula summary, and essential bullet points."
+                "detailed explanation" -> "Provide comprehensive conceptual breakdown, derivations, intuition, and real exam examples."
+                "formula sheet" -> "Create an exhaustive formula and theorem catalog with variable definitions and units."
+                "important facts" -> "List high-yield factual points, mnemonics, standard values, and exceptions."
+                "exam notes" -> "Focus strictly on PYQ patterns, high-frequency concepts, and scoring strategies."
+                "mistake notes" -> "Highlight classic trap questions, common calculation errors, and how to avoid them."
+                else -> "Create a structured, high-yield study note."
+            }
+
+            val prompt = """
+                You are NOVA, an expert academic tutor and master note creator for students preparing for $examName.
+                
+                Task: Create a high-yield study note for:
+                - Target Exam: $examName
+                - Subject: $subject
+                - Topic: $topic
+                - Note Style: $noteType ($noteTypeInstruction)
+                - Language: $langInstruction
+
+                Please return a valid JSON object strictly adhering to this schema (no surrounding markdown code fences):
+                {
+                  "title": "Clear and descriptive note title",
+                  "contentMarkdown": "Comprehensive markdown note content with headings (##), bold text, bullet points, and clear formatting.",
+                  "keyPoints": [
+                    "High-yield key takeaway 1",
+                    "High-yield key takeaway 2",
+                    "High-yield key takeaway 3"
+                  ],
+                  "formulas": [
+                    "Key formula or definition 1",
+                    "Key formula or definition 2"
+                  ],
+                  "importantFacts": [
+                    "Crucial exam fact / exception 1",
+                    "Crucial exam fact / exception 2"
+                  ]
+                }
+            """.trimIndent()
+
+            if (apiKey.isNotBlank()) {
+                val response = apiService.generateContent(
+                    model = "gemini-2.5-flash",
+                    apiKey = apiKey,
+                    request = GenerateContentRequest(
+                        contents = listOf(
+                            Content(role = "user", parts = listOf(Part(text = prompt)))
+                        ),
+                        generationConfig = GenerationConfig(temperature = 0.3f)
+                    )
+                )
+
+                val rawText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                if (!rawText.isNullOrBlank()) {
+                    val cleanJson = rawText.trim()
+                        .removePrefix("```json")
+                        .removePrefix("```")
+                        .removeSuffix("```")
+                        .trim()
+
+                    try {
+                        val json = JSONObject(cleanJson)
+                        val title = json.optString("title", "$topic ($noteType)")
+                        val contentMarkdown = json.optString("contentMarkdown", "## $topic\n\nStudy notes for $subject ($examName).")
+                        
+                        val keyPoints = mutableListOf<String>()
+                        val kpArr = json.optJSONArray("keyPoints")
+                        if (kpArr != null) {
+                            for (i in 0 until kpArr.length()) keyPoints.add(kpArr.getString(i))
+                        }
+
+                        val formulas = mutableListOf<String>()
+                        val formArr = json.optJSONArray("formulas")
+                        if (formArr != null) {
+                            for (i in 0 until formArr.length()) formulas.add(formArr.getString(i))
+                        }
+
+                        val importantFacts = mutableListOf<String>()
+                        val factsArr = json.optJSONArray("importantFacts")
+                        if (factsArr != null) {
+                            for (i in 0 until factsArr.length()) importantFacts.add(factsArr.getString(i))
+                        }
+
+                        return@withContext Result.success(
+                            SmartNoteItem(
+                                title = title,
+                                subject = subject,
+                                topic = topic,
+                                contentMarkdown = contentMarkdown,
+                                keyPoints = keyPoints,
+                                formulas = formulas,
+                                importantFacts = importantFacts,
+                                sourceTitle = "NOVA AI Generator • $examName",
+                                isBookmarked = false,
+                                createdAt = System.currentTimeMillis()
+                            )
+                        )
+                    } catch (e: Exception) {
+                        // Fallback below
+                    }
+                }
+            }
+
+            // High Quality Offline fallback note
+            val fallbackTitle = "$topic: $noteType"
+            val fallbackContent = "## $topic Overview\n\n" +
+                    "### Target Exam: $examName • Subject: $subject\n\n" +
+                    "- **Core Concept:** Master foundational definitions and operational rules for $topic.\n" +
+                    "- **Exam Strategy:** Direct questions on $topic carry high weightage in $examName.\n" +
+                    "- **Key Takeaway:** Ensure accurate calculation and systematic application of fundamental laws."
+            
+            Result.success(
+                SmartNoteItem(
+                    title = fallbackTitle,
+                    subject = subject,
+                    topic = topic,
+                    contentMarkdown = fallbackContent,
+                    keyPoints = listOf(
+                        "Core definition and scope of $topic in $subject.",
+                        "Standard problem patterns tested in $examName."
+                    ),
+                    formulas = listOf("Standard representation for $topic"),
+                    importantFacts = listOf("High weightage chapter in $examName $subject syllabus."),
+                    sourceTitle = "NOVA Offline Synthesis",
+                    createdAt = System.currentTimeMillis()
+                )
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun assistWithSmartNote(
+        note: SmartNoteItem,
+        actionType: String,
+        examName: String,
+        language: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val langInstruction = when (language.lowercase()) {
+                "hindi", "हिंदी" -> "Respond in clear Hindi."
+                "hinglish" -> "Respond in natural Hinglish."
+                else -> "Respond in clear English."
+            }
+
+            val prompt = """
+                You are NOVA, personal AI study companion for $examName.
+                Student Note:
+                Title: ${note.title}
+                Subject: ${note.subject} | Topic: ${note.topic}
+                Content:
+                ${note.contentMarkdown}
+
+                Requested Action: $actionType
+                Language: $langInstruction
+
+                Provide a clean, concise, student-friendly response tailored to $examName preparation. Use markdown formatting with clear headings and bullet points.
+            """.trimIndent()
+
+            if (apiKey.isNotBlank()) {
+                val response = apiService.generateContent(
+                    model = "gemini-2.5-flash",
+                    apiKey = apiKey,
+                    request = GenerateContentRequest(
+                        contents = listOf(
+                            Content(role = "user", parts = listOf(Part(text = prompt)))
+                        ),
+                        generationConfig = GenerationConfig(temperature = 0.3f)
+                    )
+                )
+
+                val rawText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                if (!rawText.isNullOrBlank()) {
+                    return@withContext Result.success(rawText.trim())
+                }
+            }
+
+            // Offline Fallback for assistance
+            val fallback = when (actionType.lowercase()) {
+                "summarize" -> "### Summary of ${note.title}\n\n${note.contentMarkdown.take(200)}...\n\n*Key takeaway:* High-yield concepts for ${note.subject} in $examName."
+                "explain simply" -> "### Simple Explanation\n\nThink of ${note.topic} as a fundamental building block in ${note.subject}. The core idea is to connect the theory with daily practice examples for $examName."
+                "generate key points" -> "### Key Points\n\n1. Essential principles of ${note.title}\n2. Core formulas and boundary conditions in ${note.subject}\n3. High-probability exam question patterns."
+                else -> "### NOVA Insight\n\nReview this note regularly using active recall and practice related MCQs for $examName."
+            }
+
+            Result.success(fallback)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // =========================================================================
+    // CURRENT AFFAIRS & EXAM RADAR LIVE AI ENGINE
+    // =========================================================================
+
+    suspend fun fetchLiveCurrentAffairs(
+        examName: String,
+        category: String = "All",
+        language: String = "English"
+    ): Result<List<CurrentAffairsItem>> = withContext(Dispatchers.IO) {
+        try {
+            val langInstruction = when (language.lowercase()) {
+                "hindi", "हिंदी" -> "Write title, summary, and exam relevance in clear academic Hindi with standard English terms where helpful."
+                "hinglish" -> "Write in student-friendly Hinglish (conversational mix of Hindi and English)."
+                else -> "Write in clear, concise, high-yield academic English."
+            }
+
+            val categoryConstraint = if (category.isNotBlank() && category != "All" && category != "Saved") {
+                "Focus on the category: $category."
+            } else {
+                "Cover a balanced mix across National, Science & Tech, Economy, Environment, Polity, International, and Defense."
+            }
+
+            val prompt = """
+                You are NOVA, the Current Affairs & Exam Intelligence engine for competitive examinations including $examName.
+                
+                Task: Generate 8 comprehensive, authentic, high-yield Current Affairs updates spanning the last 30 days relevant to $examName.
+                - Exam Target: $examName
+                - Category Scope: $categoryConstraint
+                - Language: $langInstruction
+                - Temporal distribution: Spread items across Today, Yesterday, This Week, and Earlier This Month.
+
+                Return a strict JSON array of objects with this schema (no surrounding code fences):
+                [
+                  {
+                    "title": "Clear, informative headline",
+                    "summary": "Crisp 2-3 sentence summary explaining what happened, why it matters, and the core factual data points.",
+                    "examRelevance": "High Yield for $examName: GS paper / subject breakdown and question angle",
+                    "category": "National / Science & Tech / Economy / Environment / Polity / International / Defense",
+                    "sourceName": "Reputable official source (e.g. PIB Delhi, ISRO, RBI, The Hindu, MEA)",
+                    "sourceUrl": "https://pib.gov.in",
+                    "publishedDate": "e.g. Today / 2 days ago / May 14, 2024",
+                    "mcqQuestionText": "Sample high-yield MCQ on this event",
+                    "mcqOptions": ["Option A", "Option B", "Option C", "Option D"],
+                    "mcqCorrectIndex": 0,
+                    "mcqExplanation": "Detailed explanation of correct option"
+                  }
+                ]
+            """.trimIndent()
+
+            if (apiKey.isNotBlank()) {
+                val response = apiService.generateContent(
+                    model = "gemini-2.5-flash",
+                    apiKey = apiKey,
+                    request = GenerateContentRequest(
+                        contents = listOf(
+                            Content(role = "user", parts = listOf(Part(text = prompt)))
+                        ),
+                        generationConfig = GenerationConfig(temperature = 0.35f)
+                    )
+                )
+
+                val rawText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                if (!rawText.isNullOrBlank()) {
+                    val cleanJson = rawText.trim()
+                        .removePrefix("```json")
+                        .removePrefix("```")
+                        .removeSuffix("```")
+                        .trim()
+
+                    try {
+                        val jsonArr = JSONArray(cleanJson)
+                        val items = mutableListOf<CurrentAffairsItem>()
+                        val now = System.currentTimeMillis()
+
+                        for (i in 0 until jsonArr.length()) {
+                            val obj = jsonArr.getJSONObject(i)
+                            val title = obj.optString("title", "Important National Update")
+                            val summary = obj.optString("summary", "Key exam development.")
+                            val examRel = obj.optString("examRelevance", "High Yield for $examName")
+                            val cat = obj.optString("category", "National")
+                            val srcName = obj.optString("sourceName", "PIB India")
+                            val srcUrl = obj.optString("sourceUrl", "https://pib.gov.in")
+                            val pubDate = obj.optString("publishedDate", "Recent")
+
+                            val mcqList = mutableListOf<Question>()
+                            val qText = obj.optString("mcqQuestionText", "")
+                            if (qText.isNotBlank()) {
+                                val optsArr = obj.optJSONArray("mcqOptions")
+                                val opts = mutableListOf<String>()
+                                if (optsArr != null) {
+                                    for (k in 0 until optsArr.length()) opts.add(optsArr.getString(k))
+                                }
+                                val correctIdx = obj.optInt("mcqCorrectIndex", 0)
+                                val expl = obj.optString("mcqExplanation", "Official exam standard explanation.")
+
+                                mcqList.add(
+                                    Question(
+                                        id = "ca_mcq_${now}_$i",
+                                        questionText = qText,
+                                        options = if (opts.isNotEmpty()) opts else listOf("Option A", "Option B", "Option C", "Option D"),
+                                        correctOptionIndex = correctIdx,
+                                        explanation = expl,
+                                        subject = "Current Affairs",
+                                        topic = cat,
+                                        difficulty = "Medium",
+                                        source = QuestionSource.AI_GENERATED,
+                                        sourceLabel = "Current Affairs AI",
+                                        yearOrTag = "30-Day Feed"
+                                    )
+                                )
+                            }
+
+                            items.add(
+                                CurrentAffairsItem(
+                                    title = title,
+                                    summary = summary,
+                                    examRelevance = examRel,
+                                    category = cat,
+                                    targetExams = listOf(examName, "General"),
+                                    subject = "Current Affairs",
+                                    sourceName = srcName,
+                                    sourceUrl = srcUrl,
+                                    publishedDate = pubDate,
+                                    mcqs = mcqList,
+                                    isSavedForRevision = false,
+                                    createdAt = now - (i * 12 * 3600 * 1000L) // staggered timestamps for 30-day timeline
+                                )
+                            )
+                        }
+
+                        if (items.isNotEmpty()) {
+                            return@withContext Result.success(items)
+                        }
+                    } catch (e: Exception) {
+                        // Fallback below
+                    }
+                }
+            }
+
+            // High-Yield 30-Day Curated Fallback
+            val now = System.currentTimeMillis()
+            val day = 24 * 3600 * 1000L
+            val fallbackItems = listOf(
+                CurrentAffairsItem(
+                    title = "ISRO Gaganyaan Pad Abort & Crew Escape System Tests Validated",
+                    summary = "ISRO executed mission-critical abort validation sequences demonstrating crew module separation and high-altitude drogue parachute stability for the upcoming human spaceflight mission.",
+                    examRelevance = "High Yield for $examName (Science & Tech, Space Missions, GS-3)",
+                    category = "Science & Tech",
+                    targetExams = listOf(examName, "UPSC", "SSC", "State PSC"),
+                    sourceName = "ISRO Official / PIB Delhi",
+                    sourceUrl = "https://isro.gov.in",
+                    publishedDate = "Today",
+                    mcqs = listOf(
+                        Question(
+                            id = "ca_fb_1",
+                            questionText = "Which launch vehicle configuration is specifically designated for the ISRO Gaganyaan human spaceflight mission?",
+                            options = listOf("LVM3 (Human-Rated HLVM3)", "PSLV-XL", "SSLV-D2", "GSLV Mk II"),
+                            correctOptionIndex = 0,
+                            explanation = "The LVM3 launch vehicle has been human-rated as HLVM3 with enhanced redundancy for Gaganyaan.",
+                            subject = "Current Affairs",
+                            topic = "Science & Tech",
+                            difficulty = "Medium"
+                        )
+                    ),
+                    isSavedForRevision = true,
+                    createdAt = now - (2 * 3600 * 1000L)
+                ),
+                CurrentAffairsItem(
+                    title = "RBI MPC Maintains Benchmark Policy Repo Rate at 6.50%",
+                    summary = "The Monetary Policy Committee voted with majority to align headline CPI inflation with the durable 4.0% target while sustaining resilient GDP growth projections.",
+                    examRelevance = "Crucial for $examName (Economy, Monetary Policy, Inflation Targeting)",
+                    category = "Economy",
+                    targetExams = listOf(examName, "Banking", "UPSC", "SSC"),
+                    sourceName = "Reserve Bank of India",
+                    sourceUrl = "https://rbi.org.in",
+                    publishedDate = "Yesterday",
+                    mcqs = listOf(
+                        Question(
+                            id = "ca_fb_2",
+                            questionText = "Under the RBI Act 1934, what is the statutory inflation target band mandated for the Monetary Policy Committee?",
+                            options = listOf("4% (+/- 2%)", "3% (+/- 1%)", "5% (+/- 2%)", "6% (+/- 1.5%)"),
+                            correctOptionIndex = 0,
+                            explanation = "The Flexible Inflation Targeting (FIT) framework sets CPI inflation target at 4% with a tolerance band of +/- 2% (2% to 6%).",
+                            subject = "Current Affairs",
+                            topic = "Economy",
+                            difficulty = "Medium"
+                        )
+                    ),
+                    isSavedForRevision = false,
+                    createdAt = now - (1 * day)
+                ),
+                CurrentAffairsItem(
+                    title = "India Expands Unified Payments Interface (UPI) Linkages Globally",
+                    summary = "National Payments Corporation of India (NPCI) expanded cross-border QR code and real-time digital payment integrations across key Southeast Asian and Gulf partner economies.",
+                    examRelevance = "Important for $examName (International Relations, Fintech, Bilateral Agreements)",
+                    category = "International",
+                    targetExams = listOf(examName, "UPSC", "SSC", "Banking"),
+                    sourceName = "Ministry of External Affairs / PIB",
+                    sourceUrl = "https://pib.gov.in",
+                    publishedDate = "3 days ago",
+                    isSavedForRevision = false,
+                    createdAt = now - (3 * day)
+                ),
+                CurrentAffairsItem(
+                    title = "MoEFCC Declares New Wildlife Corridors & Tiger Reserve Buffer Expansions",
+                    summary = "Ministry of Environment, Forest and Climate Change notified enhanced ecological buffer zones and wildlife connectivity corridors under the Project Tiger conservation architecture.",
+                    examRelevance = "High Probability in $examName (Environment, Biodiversity, National Parks)",
+                    category = "Environment",
+                    targetExams = listOf(examName, "UPSC", "State PSC", "Forest Service"),
+                    sourceName = "MoEFCC / PIB India",
+                    sourceUrl = "https://moef.gov.in",
+                    publishedDate = "5 days ago",
+                    isSavedForRevision = false,
+                    createdAt = now - (5 * day)
+                ),
+                CurrentAffairsItem(
+                    title = "Supreme Court Constitutional Bench Verdict on Electoral Transparency & Digital Rights",
+                    summary = "A five-judge Constitution Bench reaffirmed right to information principles under Article 19(1)(a) while balancing data protection regulations and electoral accountability.",
+                    examRelevance = "Core Indian Polity for $examName (Constitutional Law, Fundamental Rights GS-2)",
+                    category = "Polity",
+                    targetExams = listOf(examName, "UPSC", "Law Entrance", "State PSC"),
+                    sourceName = "Supreme Court of India",
+                    sourceUrl = "https://sci.gov.in",
+                    publishedDate = "12 days ago",
+                    isSavedForRevision = false,
+                    createdAt = now - (12 * day)
+                ),
+                CurrentAffairsItem(
+                    title = "DRDO Successfully Tests Next-Generation Indigenous Air Defense Missile System",
+                    summary = "Defence Research and Development Organisation conducted successful flight trials of the VL-SRSAM surface-to-air missile system against high-speed aerial targets.",
+                    examRelevance = "High Yield in $examName (Defense Technology, Indigenization, Security)",
+                    category = "Defense",
+                    targetExams = listOf(examName, "NDA", "CDS", "UPSC", "SSC"),
+                    sourceName = "DRDO / Ministry of Defence",
+                    sourceUrl = "https://drdo.gov.in",
+                    publishedDate = "18 days ago",
+                    isSavedForRevision = false,
+                    createdAt = now - (18 * day)
+                ),
+                CurrentAffairsItem(
+                    title = "NITI Aayog Releases State Energy and Climate Index (SECI) Performance Rankings",
+                    summary = "The comprehensive composite index evaluated state-level clean energy transition, discom financial viability, energy efficiency milestones, and renewable grid integration.",
+                    examRelevance = "Important for $examName (Government Reports & Indices, Sustainable Energy)",
+                    category = "Economy",
+                    targetExams = listOf(examName, "UPSC", "State PSC", "SSC"),
+                    sourceName = "NITI Aayog Official",
+                    sourceUrl = "https://niti.gov.in",
+                    publishedDate = "24 days ago",
+                    isSavedForRevision = false,
+                    createdAt = now - (24 * day)
+                ),
+                CurrentAffairsItem(
+                    title = "Cabinet Approves National Green Hydrogen Mission Sub-Schemes and Hubs",
+                    summary = "The Union Cabinet sanctioned capital outlays for strategic pilot projects in green steel production, heavy mobility corridors, and port shipping bunkering hubs.",
+                    examRelevance = "High Exam Yield for $examName (Renewable Energy, Green Transition, GS-3)",
+                    category = "Environment",
+                    targetExams = listOf(examName, "UPSC", "State PSC", "Engineering Exams"),
+                    sourceName = "Cabinet Committee on Economic Affairs (CCEA)",
+                    sourceUrl = "https://pib.gov.in",
+                    publishedDate = "28 days ago",
+                    isSavedForRevision = false,
+                    createdAt = now - (28 * day)
+                )
+            )
+
+            Result.success(fallbackItems)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun askNovaCurrentAffair(
+        item: CurrentAffairsItem,
+        questionType: String,
+        examName: String,
+        language: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val langInstruction = when (language.lowercase()) {
+                "hindi", "हिंदी" -> "Respond in clear, encouraging academic Hindi."
+                "hinglish" -> "Respond in student-friendly Hinglish (mix of Hindi & English)."
+                else -> "Respond in clear, structured academic English."
+            }
+
+            val actionGoal = when (questionType.lowercase()) {
+                "exam angle", "how it is asked" -> "Analyze how questions on this topic are typically asked in $examName (prelims MCQs, mains analytical questions, key factual trap points)."
+                "mcqs", "practice questions" -> "Generate 3 high-yield exam standard MCQs with detailed explanations based on this event."
+                "simple explanation" -> "Explain this development simply with real-world context and background for a student."
+                "revision points" -> "Provide 4-5 bulleted crisp revision takeaways and memory hooks."
+                else -> "Provide deep exam-oriented insights for $examName."
+            }
+
+            val prompt = """
+                You are NOVA, the AI Study Companion and Current Affairs Mentor for $examName.
+                
+                Current Affairs Topic:
+                Title: ${item.title}
+                Category: ${item.category}
+                Summary: ${item.summary}
+                Exam Relevance: ${item.examRelevance}
+                Source: ${item.sourceName}
+
+                Student Request: $actionGoal
+                Language: $langInstruction
+
+                Format your response with clean markdown headings (##, ###), bold key concepts, bullet points, and high exam-yield clarity. Keep it engaging, precise, and practical.
+            """.trimIndent()
+
+            if (apiKey.isNotBlank()) {
+                val response = apiService.generateContent(
+                    model = "gemini-2.5-flash",
+                    apiKey = apiKey,
+                    request = GenerateContentRequest(
+                        contents = listOf(
+                            Content(role = "user", parts = listOf(Part(text = prompt)))
+                        ),
+                        generationConfig = GenerationConfig(temperature = 0.35f)
+                    )
+                )
+
+                val rawText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                if (!rawText.isNullOrBlank()) {
+                    return@withContext Result.success(rawText.trim())
+                }
+            }
+
+            val fallback = "### 🎯 Exam Insight: ${item.title}\n\n" +
+                    "**Target Exam:** $examName • **Category:** ${item.category}\n\n" +
+                    "#### 💡 Why This Matters for Your Exam:\n" +
+                    "- **Core Subject Link:** Directly linked to **${item.category}** syllabus weightage.\n" +
+                    "- **Question Angle:** ${item.examRelevance}\n" +
+                    "- **High-Yield Factual Points:** Remember official source (${item.sourceName}), date timeline, and key operational bodies involved.\n\n" +
+                    "#### 📝 Key Takeaway for Revision:\n" +
+                    "- ${item.summary}"
+
+            Result.success(fallback)
         } catch (e: Exception) {
             Result.failure(e)
         }

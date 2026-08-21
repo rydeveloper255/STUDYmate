@@ -752,6 +752,12 @@ data class WebSearchSource(
     val publishedDate: String = ""
 )
 
+data class NovaSearchHistoryItem(
+    val query: String,
+    val subject: String = "General",
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 data class SmartSearchResult(
     val query: String,
     val studentFriendlyAnswer: String,
@@ -762,6 +768,8 @@ data class SmartSearchResult(
     val disagreementDetails: String = "",
     val suggestedQuestions: List<String> = emptyList(),
     val generatedPracticeQuestions: List<Question> = emptyList(),
+    val examRelevance: String = "",
+    val intentType: String = "Concept Explanation",
     val timestamp: Long = System.currentTimeMillis()
 )
 

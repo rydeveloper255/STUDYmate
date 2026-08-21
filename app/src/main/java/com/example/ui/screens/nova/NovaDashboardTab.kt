@@ -1,8 +1,6 @@
 package com.example.ui.screens.nova
 
-import android.content.Intent
 import android.net.Uri
-import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -14,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,20 +20,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.model.NovaActionType
-import com.example.data.model.NovaVoiceState
-import com.example.service.NovaUsageStatsHelper
-import com.example.ui.components.GlassCard
-import com.example.ui.components.springClickable
+import com.example.data.model.*
+import com.example.ui.components.*
 import com.example.ui.theme.*
 import com.example.viewmodel.NovaScreenTab
 import com.example.viewmodel.NovaViewModel
-import java.util.Calendar
 
 @Composable
 fun NovaDashboardTab(
@@ -44,18 +40,26 @@ fun NovaDashboardTab(
     onRequestMicPermission: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val isDark = isAppInDarkTheme()
+    val currentTheme = currentThemeMode()
     val context = LocalContext.current
+
     val studyContext by viewModel.studyContext.collectAsState()
     val analytics by viewModel.analyticsData.collectAsState()
     val dailyBriefingText by viewModel.dailyBriefingText.collectAsState()
     val adaptiveRec by viewModel.adaptiveRecommendation.collectAsState()
     val missedAlert by viewModel.missedSessionAlert.collectAsState()
-    val socialNudge by viewModel.socialMediaNudge.collectAsState()
     val voiceState by viewModel.voiceManager.voiceState.collectAsState()
     val audioRms by viewModel.voiceManager.audioLevelRms.collectAsState()
+    val messages by viewModel.messages.collectAsState()
+    val allSmartNotes by viewModel.allSmartNotes.collectAsState()
+    val allCurrentAffairs by viewModel.allCurrentAffairs.collectAsState()
+    val settings by viewModel.settings.collectAsState()
 
     var quickInputText by remember { mutableStateOf("") }
+    var showAllToolsDialog by remember { mutableStateOf(false) }
 
+    // Image Picker Launcher
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -65,16 +69,14 @@ fun NovaDashboardTab(
         }
     }
 
-    val hasUsagePermission = remember(context) {
-        NovaUsageStatsHelper.hasUsageStatsPermission(context)
-    }
-
-    val greetingPrefix = remember {
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    // Dynamic Greeting
+    val greetingTime = remember {
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
         when (hour) {
-            in 5..11 -> "Good morning"
+            in 4..11 -> "Good morning"
             in 12..16 -> "Good afternoon"
-            else -> "Good evening"
+            in 17..21 -> "Good evening"
+            else -> "Late night study"
         }
     }
 
@@ -82,682 +84,988 @@ fun NovaDashboardTab(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // --- 1. Futuristic NOVA Status & Orb Header ---
-        GlassCard(
-            modifier = Modifier.fillMaxWidth(),
-            backgroundColor = DarkSurfaceElevated.copy(alpha = 0.85f),
-            borderColor = NeonCyan.copy(alpha = 0.35f)
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // =========================================================================
+        // 1. COMPACT NOVA HEADER (Avatar/Orb, Title, Online Status, Tools Button)
+        // =========================================================================
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.weight(1f)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(NeonCyan)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "NOVA ACTIVE • PERSONAL AI",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = NeonCyan,
-                            letterSpacing = 1.sp
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "$greetingPrefix, ${studyContext.preferredTitle} 👋",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "${studyContext.targetExam} • ${studyContext.examDaysRemaining} days left",
-                        fontSize = 12.sp,
-                        color = TextSecondary
+                // NOVA Visualizer Avatar
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(if (isDark) Color(0x2538BDF8) else Color(0x186366F1))
+                        .border(1.dp, NeonCyan.copy(alpha = 0.5f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    NovaOrbVisualizer(
+                        voiceState = voiceState,
+                        audioRms = audioRms,
+                        size = 42.dp
                     )
                 }
 
-                NovaOrbVisualizer(
-                    voiceState = voiceState,
-                    audioRms = audioRms,
-                    size = 72.dp
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "✨ NOVA AI",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isDark) Color.White else Color(0xFF0F172A)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(EmeraldSuccess)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "Online • Personal AI Study Assistant",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+            }
+
+            // Quick Tools Button
+            IconButton(
+                onClick = { showAllToolsDialog = true },
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(if (isDark) Color(0x1CFFFFFF) else Color(0x10000000))
+                    .border(0.5.dp, if (isDark) Color(0x33FFFFFF) else Color(0x2064748B), CircleShape)
+                    .testTag("nova_all_tools_header_btn")
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.GridView,
+                    contentDescription = "All NOVA Tools",
+                    tint = if (isDark) NeonCyan else DeepIndigo,
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }
 
-        // --- 2. Context Card: Today's Progress (1h 40m / 3h) ---
+        // =========================================================================
+        // 2. PRIMARY NOVA ACTION (What can I help you with? + Input + Voice/Image/Send)
+        // =========================================================================
         GlassCard(
-            modifier = Modifier.fillMaxWidth(),
-            backgroundColor = DarkSurface.copy(alpha = 0.8f),
-            borderColor = ElectricIndigo.copy(alpha = 0.3f)
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("nova_primary_input_card"),
+            shape = RoundedCornerShape(20.dp),
+            elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 2.dp else 8.dp,
+            borderColor = NeonCyan.copy(alpha = 0.45f)
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Timeline,
-                            contentDescription = null,
-                            tint = NeonCyan,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Today's Progress",
+                            text = "✨ What can I help you with?",
+                            style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = Color.White
+                            color = if (isDark) Color.White else Color(0xFF0F172A)
                         )
                     }
-                    Text(
-                        text = "1h 40m / 3h (55%)",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        color = NeonCyan
-                    )
+                    // Language tag
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (isDark) Color(0x20818CF8) else Color(0x156366F1)
+                    ) {
+                        Text(
+                            text = if (settings.language.contains("hi", ignoreCase = true)) "हिंदी / Hinglish" else "English / Bilingual",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 10.sp,
+                            color = if (isDark) ElectricViolet else DeepIndigo,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Progress Indicator Bar
-                LinearProgressIndicator(
-                    progress = { 0.55f },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(RoundedCornerShape(4.dp)),
-                    color = NeonCyan,
-                    trackColor = Color.White.copy(alpha = 0.1f)
+                // Input Box Container
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isDark) Color(0x22131C2E) else Color(0x12000000),
+                    border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x2564748B)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Image attachment button
+                        IconButton(
+                            onClick = { imagePickerLauncher.launch("image/*") },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .testTag("nova_input_image_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.AddPhotoAlternate,
+                                contentDescription = "Attach Question or Problem Image",
+                                tint = if (isDark) NeonCyan else DeepIndigo,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        // Text Field
+                        TextField(
+                            value = quickInputText,
+                            onValueChange = { quickInputText = it },
+                            placeholder = {
+                                Text(
+                                    text = "Ask NOVA anything about your exam...",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 4.dp)
+                                .testTag("nova_hub_text_input"),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                focusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                                unfocusedTextColor = if (isDark) Color.White else Color(0xFF0F172A)
+                            ),
+                            singleLine = true
+                        )
+
+                        // Voice Mic Button
+                        IconButton(
+                            onClick = {
+                                viewModel.setTab(NovaScreenTab.ASSISTANT_CHAT)
+                                onRequestMicPermission()
+                            },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(if (isDark) Color(0x2038BDF8) else Color(0x156366F1))
+                                .testTag("nova_input_voice_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Mic,
+                                contentDescription = "Voice Input",
+                                tint = if (isDark) NeonCyan else DeepIndigo,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(4.dp))
+
+                        // Send Action Button
+                        IconButton(
+                            onClick = {
+                                if (quickInputText.isNotBlank()) {
+                                    viewModel.askPromptFromDashboard(quickInputText)
+                                    quickInputText = ""
+                                }
+                            },
+                            enabled = quickInputText.isNotBlank(),
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .then(
+                                    if (quickInputText.isNotBlank()) {
+                                        Modifier.background(
+                                            brush = Brush.linearGradient(listOf(NeonCyan, DeepIndigo)),
+                                            shape = CircleShape
+                                        )
+                                    } else {
+                                        Modifier.background(
+                                            color = if (isDark) Color(0x10FFFFFF) else Color(0x0A000000),
+                                            shape = CircleShape
+                                        )
+                                    }
+                                )
+                                .testTag("nova_input_send_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Send",
+                                tint = if (quickInputText.isNotBlank()) Color.White else Color(0xFF64748B),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Fast prompt starter chips
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    PromptSuggestionChip(
+                        label = "💡 Explain a Concept",
+                        isDark = isDark,
+                        onClick = { viewModel.askPromptFromDashboard("Explain the core exam concepts for today's target subject in simple terms.") }
+                    )
+                    PromptSuggestionChip(
+                        label = "🎯 Test My Knowledge",
+                        isDark = isDark,
+                        onClick = { viewModel.setTab(NovaScreenTab.INTERACTIVE_STUDY_QUIZ) }
+                    )
+                    PromptSuggestionChip(
+                        label = "⚡ 30m Focus Session",
+                        isDark = isDark,
+                        onClick = { viewModel.askPromptFromDashboard("Nova, 30 minute ka focused study session start karo") }
+                    )
+                    PromptSuggestionChip(
+                        label = "📊 Check Readiness",
+                        isDark = isDark,
+                        onClick = { viewModel.setTab(NovaScreenTab.ANALYTICS_STRATEGY) }
+                    )
+                }
+            }
+        }
+
+        // =========================================================================
+        // 3. SMART QUICK ACTIONS (2-Column Clean Grid)
+        // =========================================================================
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 2.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "QUICK ACTIONS",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                    letterSpacing = 0.8.sp
                 )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Row 1: Study Help + Smart Search
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                NovaQuickActionCard(
+                    icon = Icons.Outlined.AutoStories,
+                    iconTint = NeonCyan,
+                    title = "📚 Study Help",
+                    subtitle = "Ask concepts, doubts & explanations",
+                    isDark = isDark,
+                    modifier = Modifier.weight(1f),
+                    testTag = "nova_quick_study_help",
+                    onClick = { viewModel.setTab(NovaScreenTab.ASSISTANT_CHAT) }
+                )
+
+                NovaQuickActionCard(
+                    icon = Icons.Outlined.Search,
+                    iconTint = ElectricViolet,
+                    title = "🔎 Smart Search",
+                    subtitle = "Search academic information & citations",
+                    isDark = isDark,
+                    modifier = Modifier.weight(1f),
+                    testTag = "nova_quick_smart_search",
+                    onClick = { viewModel.setTab(NovaScreenTab.SMART_SEARCH) }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Row 2: Smart Notes + Current Affairs
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                NovaQuickActionCard(
+                    icon = Icons.Outlined.EditNote,
+                    iconTint = GoldenSpark,
+                    title = "📝 Smart Notes",
+                    subtitle = "Create & manage revision notes",
+                    isDark = isDark,
+                    modifier = Modifier.weight(1f),
+                    testTag = "nova_quick_smart_notes",
+                    onClick = { viewModel.setTab(NovaScreenTab.SMART_NOTES) }
+                )
+
+                NovaQuickActionCard(
+                    icon = Icons.Outlined.Newspaper,
+                    iconTint = NebulaPurple,
+                    title = "📰 Current Affairs",
+                    subtitle = "Exam Radar & daily awareness",
+                    isDark = isDark,
+                    modifier = Modifier.weight(1f),
+                    testTag = "nova_quick_current_affairs",
+                    onClick = { viewModel.setTab(NovaScreenTab.CURRENT_AFFAIRS) }
+                )
+            }
+        }
+
+        // =========================================================================
+        // 4. TODAY'S NOVA BRIEFING (Dynamic Glass Briefing Card)
+        // =========================================================================
+        GlassCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("nova_daily_briefing_card"),
+            shape = RoundedCornerShape(18.dp),
+            elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 1.dp else 6.dp
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "☀️ TODAY'S AI BRIEFING",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                            letterSpacing = 0.8.sp
+                        )
+                    }
+
+                    // Audio Speak Button
+                    IconButton(
+                        onClick = {
+                            if (voiceState == NovaVoiceState.SPEAKING) {
+                                viewModel.voiceManager.stopSpeaking()
+                            } else {
+                                val textToSpeak = dailyBriefingText ?: "Welcome back ${studyContext.preferredTitle}. You have ${studyContext.examDaysRemaining} days remaining for ${studyContext.targetExam}."
+                                viewModel.voiceManager.speak(textToSpeak)
+                            }
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (voiceState == NovaVoiceState.SPEAKING) Icons.Filled.Stop else Icons.Outlined.VolumeUp,
+                            contentDescription = "Read Briefing Aloud",
+                            tint = if (isDark) NeonCyan else DeepIndigo,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Dynamic Briefing Text
+                if (!dailyBriefingText.isNullOrBlank()) {
+                    Text(
+                        text = dailyBriefingText ?: "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (isDark) Color.White.copy(alpha = 0.92f) else Color(0xFF1E293B),
+                        lineHeight = 20.sp
+                    )
+                } else {
+                    // Fallback structured dynamic briefing from live state
+                    val targetSubject = studyContext.subjects.firstOrNull() ?: "General Studies"
+                    val countdown = studyContext.examDaysRemaining
+                    val exam = studyContext.targetExam.ifBlank { "Competitive Exam" }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "• $greetingTime, ${studyContext.preferredTitle}! You have $countdown days remaining for $exam.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (isDark) Color.White.copy(alpha = 0.92f) else Color(0xFF1E293B)
+                        )
+                        Text(
+                            text = "• NOVA recommends a 30-minute focused session in $targetSubject today to maintain consistent syllabus progress.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155)
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // Action Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    ProgressStatItem(title = "Consistency", value = "${analytics.weeklyConsistencyScore}%", color = EmeraldGreen)
-                    ProgressStatItem(title = "Quiz Accuracy", value = "${analytics.averageQuizAccuracy.toInt()}%", color = NeonCyan)
-                    ProgressStatItem(title = "Streak", value = "${studyContext.currentStreak} Days 🔥", color = AmberGold)
-                }
-            }
-        }
-
-        // --- 3. Primary & Secondary Quick Actions ---
-        Column {
-            Text(
-                text = "Quick Assistant Actions",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextSecondary
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Row 1: [📚 Study] [🧠 Quiz] [🎯 Focus] [📝 Plan]
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                QuickActionButton(
-                    icon = "📚",
-                    title = "Study",
-                    subtitle = "Adaptive Rec",
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        val firstSub = studyContext.subjects.firstOrNull() ?: "Physics"
-                        onNavigateToFocus(firstSub, "Adaptive Concept", 25)
+                    Button(
+                        onClick = {
+                            val sub = studyContext.subjects.firstOrNull() ?: "General Science"
+                            onNavigateToFocus(sub, "Core Syllabus Sprint", 25)
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isDark) Color(0x2838BDF8) else Color(0x186366F1),
+                            contentColor = if (isDark) NeonCyan else DeepIndigo
+                        ),
+                        border = BorderStroke(0.5.dp, if (isDark) NeonCyan.copy(alpha = 0.4f) else DeepIndigo.copy(alpha = 0.3f)),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Start 25m Focus", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                     }
-                )
-                QuickActionButton(
-                    icon = "🧠",
-                    title = "Quiz",
-                    subtitle = "Test Memory",
-                    modifier = Modifier.weight(1f),
-                    onClick = { viewModel.setTab(NovaScreenTab.INTERACTIVE_STUDY_QUIZ) }
-                )
-                QuickActionButton(
-                    icon = "🎯",
-                    title = "Focus",
-                    subtitle = "Shield Active",
-                    modifier = Modifier.weight(1f),
-                    onClick = { onNavigateToFocus("Physics", "Focus Sprint", 25) }
-                )
-                QuickActionButton(
-                    icon = "📝",
-                    title = "Plan",
-                    subtitle = "Syllabus",
-                    modifier = Modifier.weight(1f),
-                    onClick = { onNavigateToPlanner() }
-                )
-            }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Row 2: [🎙️ Talk] [🎓 Voice Notes] [📷 Ask Image] [🧠 Memory]
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                QuickActionButton(
-                    icon = "🎙️",
-                    title = "Talk to NOVA",
-                    subtitle = "Live Voice",
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        viewModel.setTab(NovaScreenTab.ASSISTANT_CHAT)
-                        onRequestMicPermission()
-                    }
-                )
-                QuickActionButton(
-                    icon = "🎓",
-                    title = "Voice Notes",
-                    subtitle = "Lectures AI",
-                    modifier = Modifier.weight(1f),
-                    onClick = { viewModel.setTab(NovaScreenTab.VOICE_NOTES) }
-                )
-                QuickActionButton(
-                    icon = "📷",
-                    title = "Ask Image",
-                    subtitle = "OCR Doubt",
-                    modifier = Modifier.weight(1f),
-                    onClick = { imagePickerLauncher.launch("image/*") }
-                )
-                QuickActionButton(
-                    icon = "🧠",
-                    title = "Memory",
-                    subtitle = "Saved Insights",
-                    modifier = Modifier.weight(1f),
-                    onClick = { viewModel.setTab(NovaScreenTab.MEMORY_CENTER) }
-                )
-            }
-        }
-
-        // --- 4. Missed Session Recovery Alert Banner ---
-        if (missedAlert != null) {
-            val (planItem, message) = missedAlert!!
-            GlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                backgroundColor = CoralPink.copy(alpha = 0.12f),
-                borderColor = CoralPink.copy(alpha = 0.45f)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Recovery",
-                            tint = CoralPink,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                    OutlinedButton(
+                        onClick = onNavigateToPlanner,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(0.5.dp, if (isDark) Color(0x33FFFFFF) else Color(0x2564748B)),
+                        modifier = Modifier.weight(1f)
+                    ) {
                         Text(
-                            text = "Smart Recovery Recommended",
-                            fontWeight = FontWeight.Bold,
-                            color = CoralPink,
-                            fontSize = 14.sp
+                            "View Planner",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (isDark) Color.White else Color(0xFF0F172A)
                         )
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = message,
-                        fontSize = 13.sp,
-                        color = Color.White.copy(alpha = 0.9f)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = {
-                                viewModel.executeAction(NovaActionType.RECOVER_MISSED_SESSION, null)
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = CoralPink),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Start Recovery (20m)", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
-                        }
-                        OutlinedButton(
-                            onClick = { onNavigateToPlanner() },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
-                        ) {
-                            Text("Reschedule", fontSize = 12.sp)
-                        }
                     }
                 }
             }
         }
 
-        // --- 5. Daily Briefing Card ---
-        if (!dailyBriefingText.isNullOrBlank()) {
+        // =========================================================================
+        // 5. RECOMMENDED NEXT ACTION (Adaptive Recommendation Card)
+        // =========================================================================
+        if (adaptiveRec != null) {
+            val rec = adaptiveRec!!
             GlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                backgroundColor = DarkSurface.copy(alpha = 0.8f),
-                borderColor = ElectricIndigo.copy(alpha = 0.35f)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("nova_recommendation_card"),
+                shape = RoundedCornerShape(18.dp),
+                elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 1.dp else 6.dp
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.WbSunny,
-                                contentDescription = "Daily Brief",
-                                tint = AmberGold,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Today's Briefing",
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontSize = 15.sp
+                                text = "✨ NOVA RECOMMENDS",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                                letterSpacing = 0.8.sp
                             )
                         }
 
-                        IconButton(
-                            onClick = {
-                                if (voiceState == NovaVoiceState.SPEAKING) {
-                                    viewModel.voiceManager.stopSpeaking()
-                                } else {
-                                    dailyBriefingText?.let { viewModel.voiceManager.speak(it) }
-                                }
-                            }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isDark) Color(0x2038BDF8) else Color(0x156366F1),
+                            border = BorderStroke(0.5.dp, NeonCyan.copy(alpha = 0.4f))
                         ) {
-                            Icon(
-                                imageVector = if (voiceState == NovaVoiceState.SPEAKING) Icons.Default.Stop else Icons.Default.VolumeUp,
-                                contentDescription = "Speak Briefing",
-                                tint = NeonCyan
+                            Text(
+                                text = rec.urgencyLabel.ifBlank { "Priority Topic" },
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) NeonCyan else DeepIndigo,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                fontSize = 10.sp
                             )
                         }
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = dailyBriefingText ?: "",
-                        fontSize = 13.sp,
-                        color = Color.White.copy(alpha = 0.88f),
-                        lineHeight = 19.sp
-                    )
 
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                val firstSubject = studyContext.subjects.firstOrNull() ?: "Physics"
-                                onNavigateToFocus(firstSubject, "Session 1", 25)
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = NeonCyan
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = DarkCanvas, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Start Focus (25m)", fontWeight = FontWeight.Bold, color = DarkCanvas, fontSize = 12.sp)
-                        }
-
-                        OutlinedButton(
-                            onClick = { onNavigateToPlanner() },
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("View Planner", fontSize = 12.sp, color = NeonCyan)
-                        }
-                    }
-                }
-            }
-        }
-
-        // --- 6. Adaptive Study Recommendation ("What Should I Study Next?") ---
-        if (adaptiveRec != null) {
-            val rec = adaptiveRec!!
-            GlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                backgroundColor = DarkSurfaceElevated.copy(alpha = 0.75f),
-                borderColor = NeonCyan.copy(alpha = 0.3f)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.AutoAwesome,
-                                contentDescription = "Adaptive",
-                                tint = NeonCyan,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "What to Study Next",
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontSize = 15.sp
-                            )
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = NeonCyan.copy(alpha = 0.15f)
-                        ) {
-                            Text(
-                                text = rec.urgencyLabel,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = NeonCyan,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
                     Text(
                         text = "${rec.subject} • ${rec.topic}",
-                        fontSize = 16.sp,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = if (isDark) Color.White else Color(0xFF0F172A)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = rec.reasoning,
-                        fontSize = 13.sp,
-                        color = TextSecondary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
                         lineHeight = 18.sp
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
+
                     Button(
                         onClick = {
                             onNavigateToFocus(rec.subject, rec.topic, rec.targetMinutes)
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = ElectricIndigo),
                         shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DeepIndigo
+                        ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            text = "Start ${rec.targetMinutes}m ${rec.actionType}",
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Start ${rec.targetMinutes}m ${rec.actionType}",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // --- 7. Distracting Social Media & App Usage Monitor ---
+        // =========================================================================
+        // 6. CURRENT AFFAIRS ENTRY (Compact Glass Card)
+        // =========================================================================
         GlassCard(
-            modifier = Modifier.fillMaxWidth(),
-            backgroundColor = DarkSurface.copy(alpha = 0.75f),
-            borderColor = if (socialNudge != null) CoralPink.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.08f)
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("nova_current_affairs_entry"),
+            shape = RoundedCornerShape(18.dp),
+            elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 1.dp else 4.dp,
+            onClick = { viewModel.setTab(NovaScreenTab.CURRENT_AFFAIRS) }
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isDark) Color(0x28A855F7) else Color(0x18A855F7))
+                            .border(0.5.dp, NebulaPurple.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(
-                            imageVector = Icons.Default.Shield,
-                            contentDescription = "Usage Monitor",
-                            tint = if (socialNudge != null) CoralPink else EmeraldGreen,
+                            imageVector = Icons.Outlined.Newspaper,
+                            contentDescription = "Current Affairs",
+                            tint = NebulaPurple,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Column {
+                        Text(
+                            text = "📰 Current Affairs & Exam Radar",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isDark) Color.White else Color(0xFF0F172A)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        val latestUpdate = allCurrentAffairs.firstOrNull()?.title ?: "Realtime exam-relevant news & notifications"
+                        Text(
+                            text = latestUpdate,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (isDark) Color(0x20A855F7) else Color(0x15A855F7),
+                    border = BorderStroke(0.5.dp, NebulaPurple.copy(alpha = 0.4f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "Open",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = NebulaPurple
+                        )
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = NebulaPurple,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // =========================================================================
+        // 7. RECENT NOVA ACTIVITY (Compact Recent Qs / Notes)
+        // =========================================================================
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = "RECENT ACTIVITY",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.ExtraBold,
+                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                letterSpacing = 0.8.sp
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            val userMessages = remember(messages) {
+                messages.filter { it.sender == NovaSender.USER }.takeLast(3).reversed()
+            }
+
+            if (userMessages.isNotEmpty()) {
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 1.dp else 4.dp
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        userMessages.forEachIndexed { index, msg ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        viewModel.setTab(NovaScreenTab.ASSISTANT_CHAT)
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.ChatBubbleOutline,
+                                        contentDescription = null,
+                                        tint = if (isDark) NeonCyan else DeepIndigo,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = msg.text,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isDark) Color.White else Color(0xFF0F172A),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = "Open Chat",
+                                    tint = if (isDark) Color(0xFF64748B) else Color(0xFF94A3B8),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                            if (index < userMessages.size - 1) {
+                                HorizontalDivider(
+                                    thickness = 0.5.dp,
+                                    color = if (isDark) Color(0x1FFFFFFF) else Color(0x12000000)
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Empty state
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    elevation = 1.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.History,
+                            contentDescription = null,
+                            tint = if (isDark) Color(0xFF64748B) else Color(0xFF94A3B8),
                             modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "App Usage Awareness",
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            fontSize = 14.sp
-                        )
-                    }
-
-                    if (!hasUsagePermission) {
-                        TextButton(
-                            onClick = {
-                                context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-                            }
-                        ) {
-                            Text("Enable Access ⚙️", fontSize = 11.sp, color = NeonCyan)
+                        Column {
+                            Text(
+                                text = "No recent activity",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155)
+                            )
+                            Text(
+                                text = "Ask NOVA your first question above to get started.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isDark) Color(0xFF64748B) else Color(0xFF94A3B8),
+                                fontSize = 10.sp
+                            )
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(8.dp))
-                if (hasUsagePermission) {
-                    if (socialNudge != null) {
-                        Text(
-                            text = socialNudge ?: "",
-                            fontSize = 13.sp,
-                            color = CoralPink,
-                            lineHeight = 18.sp
-                        )
-                    } else {
-                        Text(
-                            text = "Distracting app usage is healthy and within bounds. Focus Shield is ready when you begin studying.",
-                            fontSize = 13.sp,
-                            color = TextSecondary
-                        )
-                    }
-                } else {
-                    Text(
-                        text = "Grant Usage Access so NOVA can gently remind you when social media usage delays your study plans.",
-                        fontSize = 12.sp,
-                        color = TextSecondary
-                    )
-                }
             }
         }
 
-        // --- 8. Quick Voice Prompts Chips ---
-        Column {
-            Text(
-                text = "Quick Voice Prompts",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextSecondary
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                QuickPromptChip(
-                    text = "Aaj kya padhna hai?",
-                    onClick = { viewModel.askPromptFromDashboard("Nova, aaj mujhe kya padhna chahiye?") }
-                )
-                QuickPromptChip(
-                    text = "30 min focus mode laga do",
-                    onClick = { viewModel.askPromptFromDashboard("Nova, 30 minute ka focus session start karo") }
-                )
-                QuickPromptChip(
-                    text = "Physics ka quiz lo",
-                    onClick = { viewModel.askPromptFromDashboard("Nova, Physics ka ek quick test lo") }
-                )
-                QuickPromptChip(
-                    text = "Meri progress batao",
-                    onClick = { viewModel.askPromptFromDashboard("Nova, meri overall progress aur consistency kaisi hai?") }
-                )
-            }
-        }
-
-        // --- 9. Bottom Quick "Ask NOVA..." Input Bar ---
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = DarkSurfaceElevated,
-            border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.35f)),
-            modifier = Modifier.fillMaxWidth()
+        // =========================================================================
+        // 8. ALL NOVA TOOLS BUTTON (View All NOVA Tools →)
+        // =========================================================================
+        GlassCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("view_all_nova_tools_card"),
+            shape = RoundedCornerShape(18.dp),
+            elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 1.dp else 4.dp,
+            onClick = { showAllToolsDialog = true }
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Attach Image Button
-                IconButton(
-                    onClick = { imagePickerLauncher.launch("image/*") },
-                    modifier = Modifier.size(36.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.AddPhotoAlternate,
-                        contentDescription = "Attach Question Image",
-                        tint = NeonCyan,
+                        imageVector = Icons.Outlined.GridView,
+                        contentDescription = null,
+                        tint = if (isDark) NeonCyan else DeepIndigo,
                         modifier = Modifier.size(20.dp)
                     )
-                }
-
-                // Text Input Field
-                TextField(
-                    value = quickInputText,
-                    onValueChange = { quickInputText = it },
-                    placeholder = {
+                    Column {
                         Text(
-                            text = "Ask NOVA a doubt, concept or task...",
-                            fontSize = 13.sp,
-                            color = TextSecondary
+                            text = "View All NOVA Tools",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isDark) Color.White else Color(0xFF0F172A)
                         )
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 4.dp),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
-                    ),
-                    singleLine = true
+                        Text(
+                            text = "Quiz Intelligence, Voice Notes, Strategy & Memory",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = "Open Tools",
+                    tint = if (isDark) NeonCyan else DeepIndigo,
+                    modifier = Modifier.size(16.dp)
                 )
-
-                // Voice Mic Button
-                IconButton(
-                    onClick = {
-                        viewModel.setTab(NovaScreenTab.ASSISTANT_CHAT)
-                        onRequestMicPermission()
-                    },
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.08f))
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "Voice Input",
-                        tint = NeonCyan,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(4.dp))
-
-                // Send Button
-                IconButton(
-                    onClick = {
-                        if (quickInputText.isNotBlank()) {
-                            viewModel.askPromptFromDashboard(quickInputText)
-                            quickInputText = ""
-                        }
-                    },
-                    enabled = quickInputText.isNotBlank(),
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(if (quickInputText.isNotBlank()) ElectricIndigo else Color.White.copy(alpha = 0.05f))
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Send",
-                        tint = if (quickInputText.isNotBlank()) Color.White else Color.White.copy(alpha = 0.3f),
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
             }
+        }
+
+        Spacer(modifier = Modifier.height(96.dp))
+    }
+
+    // =========================================================================
+    // ALL TOOLS MODAL DIALOG
+    // =========================================================================
+    if (showAllToolsDialog) {
+        NovaAllToolsModal(
+            isDark = isDark,
+            onDismiss = { showAllToolsDialog = false },
+            onSelectTab = { tab ->
+                viewModel.setTab(tab)
+                showAllToolsDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun NovaQuickActionCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    isDark: Boolean,
+    modifier: Modifier = Modifier,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    GlassCard(
+        modifier = modifier.testTag(testTag),
+        shape = RoundedCornerShape(16.dp),
+        elevation = 2.dp,
+        onClick = onClick
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(iconTint.copy(alpha = if (isDark) 0.22f else 0.14f))
+                    .border(0.5.dp, iconTint.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = iconTint,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = if (isDark) Color.White else Color(0xFF0F172A),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                lineHeight = 14.sp
+            )
         }
     }
 }
 
 @Composable
-private fun ProgressStatItem(
-    title: String,
-    value: String,
-    color: Color
-) {
-    Column {
-        Text(text = title, fontSize = 11.sp, color = TextSecondary)
-        Text(text = value, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = color)
-    }
-}
-
-@Composable
-private fun QuickActionButton(
-    icon: String,
-    title: String,
-    subtitle: String,
-    modifier: Modifier = Modifier,
+private fun PromptSuggestionChip(
+    label: String,
+    isDark: Boolean,
     onClick: () -> Unit
 ) {
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = DarkSurfaceElevated,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.10f)),
-        modifier = modifier.springClickable { onClick() }
+        color = if (isDark) Color(0x18FFFFFF) else Color(0x0A000000),
+        border = BorderStroke(0.5.dp, if (isDark) Color(0x25FFFFFF) else Color(0x2064748B)),
+        modifier = Modifier.springClickable { onClick() }
     ) {
-        Column(
-            modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(icon, fontSize = 20.sp)
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(title, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            Text(subtitle, fontSize = 10.sp, color = TextSecondary)
-        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+        )
     }
 }
 
 @Composable
-private fun QuickPromptChip(
-    text: String,
-    onClick: () -> Unit
+private fun NovaAllToolsModal(
+    isDark: Boolean,
+    onDismiss: () -> Unit,
+    onSelectTab: (NovaScreenTab) -> Unit
 ) {
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = DarkSurfaceElevated,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
-        modifier = Modifier.springClickable { onClick() }
+    val allTools = listOf(
+        Triple(NovaScreenTab.ASSISTANT_CHAT, "🤖 Voice & Chat", "Multi-turn tutor, voice AI & doubt scanner"),
+        Triple(NovaScreenTab.SMART_SEARCH, "🔍 Smart Search", "Web-verified citations & academic explorer"),
+        Triple(NovaScreenTab.SMART_NOTES, "📝 Smart Notes", "Structured markdown notes & formula cheatsheets"),
+        Triple(NovaScreenTab.CURRENT_AFFAIRS, "📰 Current Affairs", "Exam radar, daily updates & awareness feeds"),
+        Triple(NovaScreenTab.INTERACTIVE_STUDY_QUIZ, "🎯 Quiz Intelligence", "Adaptive tests & concept remediations"),
+        Triple(NovaScreenTab.VOICE_NOTES, "🎙️ Voice Notes", "Lecture transcriber & voice audio summary"),
+        Triple(NovaScreenTab.ANALYTICS_STRATEGY, "📊 Study Strategy", "Consistency tracking, weakness & time analytics"),
+        Triple(NovaScreenTab.MEMORY_CENTER, "🧠 Memory Center", "Learner context facts & persistent preferences"),
+        Triple(NovaScreenTab.NOVA_SETTINGS, "⚙️ Settings & Privacy", "AI Voice rate, language & personalization")
+    )
+
+    GlassDialog(
+        onDismissRequest = onDismiss,
+        title = "✨ All NOVA Tools",
+        subtitle = "Select any tool to assist your exam preparation",
+        dismissText = "Close"
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 420.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(Icons.Default.Mic, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(14.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(text = text, fontSize = 12.sp, color = Color.White)
+            allTools.forEach { (tab, title, desc) ->
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    elevation = 1.dp,
+                    onClick = { onSelectTab(tab) }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = title,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) Color.White else Color(0xFF0F172A)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = desc,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = if (isDark) NeonCyan else DeepIndigo,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }

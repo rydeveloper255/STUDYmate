@@ -1,15 +1,20 @@
 package com.example.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
@@ -31,63 +36,95 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.ui.theme.*
 
-// --- Liquid Glass Modifiers ---
+// =========================================================================
+// 1. LIQUID GLASS MODIFIERS & INTERACTION SYSTEM
+// =========================================================================
 
+/**
+ * Applies a consistent liquid glass styling:
+ * - Controlled translucency adapted for Dark, Light, and AMOLED modes.
+ * - Subtle ambient depth shadow.
+ * - Refined glowing translucent gradient border.
+ */
 @Composable
 fun Modifier.glassEffect(
     shape: Shape = RoundedCornerShape(20.dp),
     borderWidth: Dp = 1.dp,
-    elevation: Dp = 8.dp,
+    elevation: Dp = 6.dp,
     fillAlpha: Float = 0.65f
 ): Modifier {
     val isDark = isAppInDarkTheme()
-    val backgroundColor = if (isDark) {
-        Color(0xFF131C2E).copy(alpha = fillAlpha)
-    } else {
-        Color(0xFFFFFFFF).copy(alpha = (fillAlpha + 0.25f).coerceAtMost(0.95f))
+    val themeMode = currentThemeMode()
+
+    val backgroundColor = when (themeMode) {
+        AppThemeMode.AMOLED_BLACK -> AmoledCardSurface.copy(alpha = 0.85f)
+        AppThemeMode.GLASS_LIGHT -> SurfaceLight.copy(alpha = (fillAlpha + 0.25f).coerceAtMost(0.95f))
+        AppThemeMode.NOVA_DARK -> CardSurfaceDark.copy(alpha = fillAlpha)
     }
-    val borderBrush = if (isDark) {
-        Brush.linearGradient(
+
+    val borderBrush = when (themeMode) {
+        AppThemeMode.AMOLED_BLACK -> Brush.linearGradient(
+            listOf(
+                Color(0x30FFFFFF),
+                Color(0x10FFFFFF),
+                Color(0x2038BDF8)
+            )
+        )
+        AppThemeMode.GLASS_LIGHT -> Brush.linearGradient(
+            listOf(
+                Color(0x80CBD5E1),
+                Color(0x3594A3B8),
+                Color(0x406366F1)
+            )
+        )
+        AppThemeMode.NOVA_DARK -> Brush.linearGradient(
             listOf(
                 Color(0x4DFFFFFF),
                 Color(0x15FFFFFF),
                 Color(0x3538BDF8)
             )
         )
-    } else {
-        Brush.linearGradient(
-            listOf(
-                Color(0x70CBD5E1),
-                Color(0x3594A3B8),
-                Color(0x406366F1)
-            )
-        )
+    }
+
+    val spotColor = when (themeMode) {
+        AppThemeMode.AMOLED_BLACK -> Color.Transparent
+        AppThemeMode.GLASS_LIGHT -> Color(0x180F172A)
+        AppThemeMode.NOVA_DARK -> Color(0x3338BDF8)
     }
 
     return this
-        .shadow(elevation, shape, clip = false, spotColor = if (isDark) Color(0x3338BDF8) else Color(0x200F172A))
+        .shadow(if (themeMode == AppThemeMode.AMOLED_BLACK) 0.dp else elevation, shape, clip = false, spotColor = spotColor)
         .clip(shape)
         .background(backgroundColor, shape)
         .border(borderWidth, borderBrush, shape)
 }
 
+/**
+ * Spring-based interaction feedback on click, ensuring 48dp touch accessibility
+ * with smooth scaling and bounded ripple.
+ */
 @Composable
 fun Modifier.springClickable(
+    enabled: Boolean = true,
     testTag: String? = null,
     onClick: () -> Unit
 ): Modifier {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.96f else 1f,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f),
-        label = "click_scale"
+        targetValue = if (isPressed && enabled) 0.96f else 1f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = 420f),
+        label = "spring_click_scale"
     )
 
     var mod = this
@@ -95,6 +132,7 @@ fun Modifier.springClickable(
         .clickable(
             interactionSource = interactionSource,
             indication = ripple(bounded = true),
+            enabled = enabled,
             onClick = onClick
         )
     if (testTag != null) {
@@ -103,37 +141,59 @@ fun Modifier.springClickable(
     return mod
 }
 
-// --- Glass Card ---
+// =========================================================================
+// 2. GLASS CARD COMPONENT
+// =========================================================================
 
+/**
+ * Universal Liquid Glass Container for cards and sections.
+ * Clean, lightweight, calm, and responsive across themes.
+ */
 @Composable
 fun GlassCard(
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(22.dp),
+    shape: Shape = RoundedCornerShape(20.dp),
     borderWidth: Dp = 1.dp,
     elevation: Dp = 6.dp,
     fillAlpha: Float = 0.65f,
     backgroundColor: Color? = null,
     borderColor: Color? = null,
+    contentPadding: PaddingValues = PaddingValues(16.dp),
     onClick: (() -> Unit)? = null,
     testTag: String? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
     val isDark = isAppInDarkTheme()
-    val finalBg = backgroundColor ?: if (isDark) {
-        Color(0xFF131C2E).copy(alpha = fillAlpha)
-    } else {
-        Color(0xFFFFFFFF).copy(alpha = (fillAlpha + 0.25f).coerceAtMost(0.95f))
+    val themeMode = currentThemeMode()
+
+    val finalBg = backgroundColor ?: when (themeMode) {
+        AppThemeMode.AMOLED_BLACK -> AmoledCardSurface.copy(alpha = 0.85f)
+        AppThemeMode.GLASS_LIGHT -> SurfaceLight.copy(alpha = (fillAlpha + 0.25f).coerceAtMost(0.95f))
+        AppThemeMode.NOVA_DARK -> CardSurfaceDark.copy(alpha = fillAlpha)
     }
+
     val finalBorderBrush = if (borderColor != null) {
-        Brush.linearGradient(listOf(borderColor, borderColor.copy(alpha = 0.4f)))
-    } else if (isDark) {
-        Brush.linearGradient(listOf(Color(0x4DFFFFFF), Color(0x15FFFFFF), Color(0x3538BDF8)))
-    } else {
-        Brush.linearGradient(listOf(Color(0x70CBD5E1), Color(0x3594A3B8), Color(0x406366F1)))
+        Brush.linearGradient(listOf(borderColor, borderColor.copy(alpha = 0.35f)))
+    } else when (themeMode) {
+        AppThemeMode.AMOLED_BLACK -> Brush.linearGradient(
+            listOf(Color(0x30FFFFFF), Color(0x10FFFFFF), Color(0x2038BDF8))
+        )
+        AppThemeMode.GLASS_LIGHT -> Brush.linearGradient(
+            listOf(Color(0x80CBD5E1), Color(0x3594A3B8), Color(0x406366F1))
+        )
+        AppThemeMode.NOVA_DARK -> Brush.linearGradient(
+            listOf(Color(0x4DFFFFFF), Color(0x15FFFFFF), Color(0x3538BDF8))
+        )
+    }
+
+    val spotColor = when (themeMode) {
+        AppThemeMode.AMOLED_BLACK -> Color.Transparent
+        AppThemeMode.GLASS_LIGHT -> Color(0x180F172A)
+        AppThemeMode.NOVA_DARK -> Color(0x3338BDF8)
     }
 
     var cardModifier = modifier
-        .shadow(elevation, shape, clip = false, spotColor = if (isDark) Color(0x3338BDF8) else Color(0x200F172A))
+        .shadow(if (themeMode == AppThemeMode.AMOLED_BLACK) 0.dp else elevation, shape, clip = false, spotColor = spotColor)
         .clip(shape)
         .background(finalBg, shape)
         .border(borderWidth, finalBorderBrush, shape)
@@ -145,13 +205,19 @@ fun GlassCard(
     }
 
     Box(
-        modifier = cardModifier.padding(16.dp),
+        modifier = cardModifier.padding(contentPadding),
         content = content
     )
 }
 
-// --- Glass Button ---
+// =========================================================================
+// 3. BUTTON SYSTEM (Primary, Secondary, GlassButton, IconButtons)
+// =========================================================================
 
+/**
+ * Universal GlassButton supporting Primary and Secondary styling, loading state,
+ * and custom color overrides while maintaining full backward compatibility.
+ */
 @Composable
 fun GlassButton(
     text: String,
@@ -160,36 +226,74 @@ fun GlassButton(
     icon: ImageVector? = null,
     isPrimary: Boolean = true,
     isLoading: Boolean = false,
-    loadingText: String = "Signing in...",
+    enabled: Boolean = true,
+    loadingText: String = "Please wait...",
+    containerColor: Color? = null,
+    contentColor: Color? = null,
     testTag: String = "glass_button"
 ) {
+    val isDark = isAppInDarkTheme()
+    val themeMode = currentThemeMode()
     val shape = RoundedCornerShape(16.dp)
-    val backgroundBrush = if (isPrimary) {
-        Brush.linearGradient(
-            colors = listOf(NeonCyan, ElectricViolet, NebulaPurple)
-        )
+
+    val backgroundBrush = if (containerColor != null) {
+        Brush.linearGradient(listOf(containerColor, containerColor))
+    } else if (isPrimary) {
+        when (themeMode) {
+            AppThemeMode.GLASS_LIGHT -> Brush.linearGradient(
+                listOf(DeepIndigo, ElectricViolet)
+            )
+            else -> Brush.linearGradient(
+                listOf(NeonCyan, ElectricViolet, NebulaPurple)
+            )
+        }
     } else {
-        Brush.linearGradient(
-            colors = listOf(Color(0x331E293B), Color(0x221E293B))
-        )
+        when (themeMode) {
+            AppThemeMode.GLASS_LIGHT -> Brush.linearGradient(
+                listOf(Color(0xFFE2E8F0).copy(alpha = 0.8f), Color(0xFFCBD5E1).copy(alpha = 0.6f))
+            )
+            AppThemeMode.AMOLED_BLACK -> Brush.linearGradient(
+                listOf(Color(0x33262626), Color(0x22171717))
+            )
+            AppThemeMode.NOVA_DARK -> Brush.linearGradient(
+                listOf(Color(0x331E293B), Color(0x221E293B))
+            )
+        }
     }
 
-    val contentColor = if (isPrimary) Color(0xFF070B19) else Color.White
+    val finalContentColor = contentColor ?: if (isPrimary) {
+        if (themeMode == AppThemeMode.GLASS_LIGHT) Color.White else Color(0xFF070B19)
+    } else {
+        if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFF0F172A) else Color.White
+    }
+
+    val borderBrush = if (isPrimary) {
+        Brush.linearGradient(listOf(Color.White.copy(alpha = 0.6f), Color.Transparent))
+    } else {
+        if (themeMode == AppThemeMode.GLASS_LIGHT) {
+            Brush.linearGradient(listOf(Color(0x60CBD5E1), Color(0x3094A3B8)))
+        } else {
+            Brush.linearGradient(listOf(Color(0x40FFFFFF), Color(0x15FFFFFF)))
+        }
+    }
+
+    val shadowElevation = if (!enabled) 0.dp else if (isPrimary) 8.dp else 1.dp
+    val spotColor = if (isPrimary && isDark) NeonCyan else Color.Transparent
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(52.dp)
-            .shadow(if (isPrimary) 8.dp else 2.dp, shape, spotColor = if (isPrimary) NeonCyan else Color.Transparent)
+            .heightIn(min = 48.dp)
+            .shadow(shadowElevation, shape, spotColor = spotColor)
             .clip(shape)
             .background(backgroundBrush)
-            .border(
-                1.dp,
-                if (isPrimary) Brush.linearGradient(listOf(Color.White.copy(alpha = 0.6f), Color.Transparent))
-                else Brush.linearGradient(listOf(Color(0x40FFFFFF), Color(0x15FFFFFF))),
-                shape
+            .border(1.dp, borderBrush, shape)
+            .springClickable(
+                enabled = enabled && !isLoading,
+                testTag = testTag,
+                onClick = onClick
             )
-            .springClickable(testTag = testTag, onClick = { if (!isLoading) onClick() }),
+            .padding(horizontal = 20.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center
     ) {
         if (isLoading) {
@@ -199,14 +303,14 @@ fun GlassButton(
             ) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(20.dp),
-                    color = contentColor,
+                    color = finalContentColor,
                     strokeWidth = 2.5.dp
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
                     text = loadingText,
                     style = MaterialTheme.typography.labelLarge,
-                    color = contentColor,
+                    color = finalContentColor,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -219,7 +323,7 @@ fun GlassButton(
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        tint = contentColor,
+                        tint = finalContentColor,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -227,16 +331,736 @@ fun GlassButton(
                 Text(
                     text = text,
                     style = MaterialTheme.typography.labelLarge,
-                    color = contentColor,
-                    fontWeight = FontWeight.Bold
+                    color = finalContentColor,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
                 )
             }
         }
     }
 }
 
-// --- Liquid Progress Ring ---
+/**
+ * Dedicated high-emphasis Primary Action Button.
+ */
+@Composable
+fun PrimaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    isLoading: Boolean = false,
+    enabled: Boolean = true,
+    loadingText: String = "Please wait...",
+    testTag: String = "primary_button"
+) {
+    GlassButton(
+        text = text,
+        onClick = onClick,
+        modifier = modifier,
+        icon = icon,
+        isPrimary = true,
+        isLoading = isLoading,
+        enabled = enabled,
+        loadingText = loadingText,
+        testTag = testTag
+    )
+}
 
+/**
+ * Dedicated translucent Secondary Action Button.
+ */
+@Composable
+fun SecondaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    isLoading: Boolean = false,
+    enabled: Boolean = true,
+    loadingText: String = "Please wait...",
+    testTag: String = "secondary_button"
+) {
+    GlassButton(
+        text = text,
+        onClick = onClick,
+        modifier = modifier,
+        icon = icon,
+        isPrimary = false,
+        isLoading = isLoading,
+        enabled = enabled,
+        loadingText = loadingText,
+        testTag = testTag
+    )
+}
+
+/**
+ * Circular / Rounded Glass Icon Button with touch target safety (min 48dp).
+ */
+@Composable
+fun GlassIconButton(
+    icon: ImageVector,
+    contentDescription: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    size: Dp = 44.dp,
+    iconSize: Dp = 20.dp,
+    tint: Color? = null,
+    backgroundColor: Color? = null,
+    borderColor: Color? = null,
+    shape: Shape = CircleShape,
+    testTag: String? = null
+) {
+    val isDark = isAppInDarkTheme()
+    val themeMode = currentThemeMode()
+
+    val finalBg = backgroundColor ?: when (themeMode) {
+        AppThemeMode.AMOLED_BLACK -> Color(0x30262626)
+        AppThemeMode.GLASS_LIGHT -> Color(0xFFF1F5F9).copy(alpha = 0.9f)
+        AppThemeMode.NOVA_DARK -> Color(0x331E293B)
+    }
+
+    val finalBorder = borderColor ?: when (themeMode) {
+        AppThemeMode.AMOLED_BLACK -> Color(0x25FFFFFF)
+        AppThemeMode.GLASS_LIGHT -> Color(0x60CBD5E1)
+        AppThemeMode.NOVA_DARK -> Color(0x3538BDF8)
+    }
+
+    val finalTint = tint ?: when (themeMode) {
+        AppThemeMode.GLASS_LIGHT -> Color(0xFF0F172A)
+        else -> Color.White
+    }
+
+    Box(
+        modifier = modifier
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .wrapContentSize(Alignment.Center)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(size)
+                .clip(shape)
+                .background(finalBg)
+                .border(1.dp, finalBorder, shape)
+                .springClickable(testTag = testTag, onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = finalTint,
+                modifier = Modifier.size(iconSize)
+            )
+        }
+    }
+}
+
+/**
+ * Quick Glass Close / Dismiss Action.
+ */
+@Composable
+fun GlassCloseButton(
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+    testTag: String = "close_button"
+) {
+    GlassIconButton(
+        icon = Icons.Filled.Close,
+        contentDescription = "Close",
+        onClick = onClose,
+        modifier = modifier,
+        testTag = testTag
+    )
+}
+
+// =========================================================================
+// 4. GLASS INPUT FIELD
+// =========================================================================
+
+/**
+ * Standardized Liquid Glass Input Field with refined glowing focus border,
+ * clear label, hint, leading & trailing slots, and error handling.
+ */
+@Composable
+fun GlassInput(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    label: String? = null,
+    placeholder: String? = null,
+    leadingIcon: ImageVector? = null,
+    trailingIcon: (@Composable () -> Unit)? = null,
+    isError: Boolean = false,
+    errorMessage: String? = null,
+    singleLine: Boolean = true,
+    maxLines: Int = 1,
+    readOnly: Boolean = false,
+    enabled: Boolean = true,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
+    testTag: String = "glass_input"
+) {
+    val isDark = isAppInDarkTheme()
+    val themeMode = currentThemeMode()
+
+    val surfaceColor = when (themeMode) {
+        AppThemeMode.AMOLED_BLACK -> Color(0xFF0F0F0F)
+        AppThemeMode.GLASS_LIGHT -> Color(0xFFFFFFFF)
+        AppThemeMode.NOVA_DARK -> Color(0xFF0D1424)
+    }
+
+    val unfocusedBorderColor = when (themeMode) {
+        AppThemeMode.AMOLED_BLACK -> Color(0x30334155)
+        AppThemeMode.GLASS_LIGHT -> Color(0xFFCBD5E1)
+        AppThemeMode.NOVA_DARK -> Color(0x3538BDF8)
+    }
+
+    val focusedBorderColor = if (themeMode == AppThemeMode.GLASS_LIGHT) DeepIndigo else NeonCyan
+    val textColor = if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFF0F172A) else Color.White
+    val placeholderColor = if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFF94A3B8) else Color(0xFF64748B)
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        if (label != null) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFF475569) else Color(0xFF94A3B8),
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+            )
+        }
+
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(testTag),
+            shape = RoundedCornerShape(16.dp),
+            singleLine = singleLine,
+            maxLines = maxLines,
+            readOnly = readOnly,
+            enabled = enabled,
+            visualTransformation = visualTransformation,
+            keyboardOptions = keyboardOptions,
+            keyboardActions = keyboardActions,
+            isError = isError,
+            placeholder = if (placeholder != null) {
+                { Text(placeholder, color = placeholderColor, style = MaterialTheme.typography.bodyMedium) }
+            } else null,
+            leadingIcon = if (leadingIcon != null) {
+                {
+                    Icon(
+                        imageVector = leadingIcon,
+                        contentDescription = null,
+                        tint = if (isError) CoralRose else focusedBorderColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            } else null,
+            trailingIcon = trailingIcon,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = surfaceColor,
+                unfocusedContainerColor = surfaceColor.copy(alpha = 0.85f),
+                disabledContainerColor = surfaceColor.copy(alpha = 0.5f),
+                errorContainerColor = surfaceColor,
+                focusedBorderColor = if (isError) CoralRose else focusedBorderColor,
+                unfocusedBorderColor = if (isError) CoralRose.copy(alpha = 0.6f) else unfocusedBorderColor,
+                focusedTextColor = textColor,
+                unfocusedTextColor = textColor,
+                cursorColor = focusedBorderColor
+            )
+        )
+
+        if (isError && !errorMessage.isNullOrBlank()) {
+            Text(
+                text = errorMessage,
+                style = MaterialTheme.typography.labelSmall,
+                color = CoralRose,
+                modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+            )
+        }
+    }
+}
+
+// =========================================================================
+// 5. GLASS CHIP
+// =========================================================================
+
+/**
+ * Filter / Status / Tag Chip with responsive glass styling.
+ */
+@Composable
+fun GlassChip(
+    label: String,
+    selected: Boolean = false,
+    onClick: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    selectedColor: Color? = null,
+    testTag: String? = null
+) {
+    val isDark = isAppInDarkTheme()
+    val themeMode = currentThemeMode()
+    val shape = RoundedCornerShape(12.dp)
+
+    val activeColor = selectedColor ?: if (themeMode == AppThemeMode.GLASS_LIGHT) DeepIndigo else NeonCyan
+
+    val bgColor = if (selected) {
+        activeColor.copy(alpha = if (themeMode == AppThemeMode.GLASS_LIGHT) 0.16f else 0.22f)
+    } else {
+        when (themeMode) {
+            AppThemeMode.AMOLED_BLACK -> Color(0x30202020)
+            AppThemeMode.GLASS_LIGHT -> Color(0xFFF1F5F9)
+            AppThemeMode.NOVA_DARK -> Color(0x281E293B)
+        }
+    }
+
+    val borderBrush = if (selected) {
+        Brush.linearGradient(listOf(activeColor, activeColor.copy(alpha = 0.5f)))
+    } else {
+        when (themeMode) {
+            AppThemeMode.AMOLED_BLACK -> Brush.linearGradient(listOf(Color(0x25FFFFFF), Color(0x10FFFFFF)))
+            AppThemeMode.GLASS_LIGHT -> Brush.linearGradient(listOf(Color(0x60CBD5E1), Color(0x3094A3B8)))
+            AppThemeMode.NOVA_DARK -> Brush.linearGradient(listOf(Color(0x30FFFFFF), Color(0x15FFFFFF)))
+        }
+    }
+
+    val textColor = if (selected) {
+        if (themeMode == AppThemeMode.GLASS_LIGHT) DeepIndigo else Color.White
+    } else {
+        if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFF475569) else Color(0xFF94A3B8)
+    }
+
+    var chipMod = modifier
+        .clip(shape)
+        .background(bgColor)
+        .border(1.dp, borderBrush, shape)
+
+    if (onClick != null) {
+        chipMod = chipMod.springClickable(testTag = testTag, onClick = onClick)
+    } else if (testTag != null) {
+        chipMod = chipMod.testTag(testTag)
+    }
+
+    Row(
+        modifier = chipMod.padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (selected) activeColor else textColor,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = textColor
+        )
+    }
+}
+
+// =========================================================================
+// 6. SECTION HEADER
+// =========================================================================
+
+/**
+ * Standardized Section Title with optional icon, subtitle, and action link.
+ */
+@Composable
+fun SectionHeader(
+    title: String,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    icon: ImageVector? = null,
+    actionText: String? = null,
+    onActionClick: (() -> Unit)? = null,
+    actionTestTag: String? = null
+) {
+    val isDark = isAppInDarkTheme()
+    val themeMode = currentThemeMode()
+
+    val primaryTextColor = if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFF0F172A) else Color.White
+    val secondaryTextColor = if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFF64748B) else Color(0xFF94A3B8)
+    val accentColor = if (themeMode == AppThemeMode.GLASS_LIGHT) DeepIndigo else NeonCyan
+
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (icon != null) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(accentColor.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = accentColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+            }
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = primaryTextColor
+                )
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = secondaryTextColor
+                    )
+                }
+            }
+        }
+
+        if (!actionText.isNullOrBlank() && onActionClick != null) {
+            Text(
+                text = actionText,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = accentColor,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .springClickable(testTag = actionTestTag, onClick = onActionClick)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
+    }
+}
+
+// =========================================================================
+// 7. TOP HEADER
+// =========================================================================
+
+/**
+ * Standardized Top Navigation Bar with safe status bar padding,
+ * title, optional subtitle, back button, and actions slot.
+ */
+@Composable
+fun GlassTopHeader(
+    title: String,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    onBackClick: (() -> Unit)? = null,
+    backTestTag: String = "top_header_back_button",
+    actions: @Composable RowScope.() -> Unit = {}
+) {
+    val isDark = isAppInDarkTheme()
+    val themeMode = currentThemeMode()
+
+    val primaryTextColor = if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFF0F172A) else Color.White
+    val secondaryTextColor = if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFF64748B) else Color(0xFF94A3B8)
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (onBackClick != null) {
+                GlassIconButton(
+                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Navigate Back",
+                    onClick = onBackClick,
+                    size = 40.dp,
+                    testTag = backTestTag
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+            }
+
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = primaryTextColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = secondaryTextColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            content = actions
+        )
+    }
+}
+
+// =========================================================================
+// 8. GLASS MODAL / DIALOG
+// =========================================================================
+
+/**
+ * Standardized Liquid Glass Dialog overlay.
+ */
+@Composable
+fun GlassDialog(
+    onDismissRequest: () -> Unit,
+    title: String,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    icon: ImageVector? = null,
+    confirmText: String? = null,
+    onConfirm: (() -> Unit)? = null,
+    dismissText: String? = "Cancel",
+    confirmTestTag: String = "dialog_confirm_button",
+    dismissTestTag: String = "dialog_dismiss_button",
+    content: @Composable ColumnScope.() -> Unit = {}
+) {
+    val themeMode = currentThemeMode()
+    val primaryTextColor = if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFF0F172A) else Color.White
+    val secondaryTextColor = if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFF64748B) else Color(0xFF94A3B8)
+    val accentColor = if (themeMode == AppThemeMode.GLASS_LIGHT) DeepIndigo else NeonCyan
+
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.65f))
+                .padding(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            GlassCard(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 480.dp),
+                shape = RoundedCornerShape(26.dp),
+                elevation = 16.dp,
+                fillAlpha = 0.92f
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (icon != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(accentColor.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = icon,
+                                        contentDescription = null,
+                                        tint = accentColor,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                            }
+                            Column {
+                                Text(
+                                    text = title,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = primaryTextColor
+                                )
+                                if (!subtitle.isNullOrBlank()) {
+                                    Text(
+                                        text = subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = secondaryTextColor
+                                    )
+                                }
+                            }
+                        }
+
+                        GlassCloseButton(onClose = onDismissRequest)
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Body
+                    content()
+
+                    // Action Buttons
+                    if (confirmText != null || dismissText != null) {
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            if (dismissText != null) {
+                                SecondaryButton(
+                                    text = dismissText,
+                                    onClick = onDismissRequest,
+                                    modifier = Modifier.weight(1f),
+                                    testTag = dismissTestTag
+                                )
+                            }
+                            if (confirmText != null && onConfirm != null) {
+                                PrimaryButton(
+                                    text = confirmText,
+                                    onClick = onConfirm,
+                                    modifier = Modifier.weight(1f),
+                                    testTag = confirmTestTag
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =========================================================================
+// 9. GLASS TOGGLE / SWITCH
+// =========================================================================
+
+/**
+ * Refined Material 3 Switch with Liquid Glass styling.
+ */
+@Composable
+fun GlassToggle(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    testTag: String = "glass_toggle"
+) {
+    val themeMode = currentThemeMode()
+    val activeColor = if (themeMode == AppThemeMode.GLASS_LIGHT) DeepIndigo else NeonCyan
+
+    Switch(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        enabled = enabled,
+        modifier = modifier.testTag(testTag),
+        colors = SwitchDefaults.colors(
+            checkedThumbColor = Color.White,
+            checkedTrackColor = activeColor,
+            uncheckedThumbColor = Color(0xFF94A3B8),
+            uncheckedTrackColor = if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFFE2E8F0) else Color(0xFF1E293B),
+            uncheckedBorderColor = if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFFCBD5E1) else Color(0x3538BDF8)
+        )
+    )
+}
+
+// =========================================================================
+// 10. PROGRESS INDICATORS & LIQUID RING
+// =========================================================================
+
+/**
+ * Liquid linear progress bar with glowing gradient fill and smooth animation.
+ */
+@Composable
+fun GlassLinearProgressIndicator(
+    progress: Float, // 0f to 1f
+    modifier: Modifier = Modifier,
+    height: Dp = 8.dp,
+    brush: Brush? = null,
+    trackColor: Color? = null
+) {
+    val themeMode = currentThemeMode()
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
+        label = "linear_progress"
+    )
+
+    val finalBrush = brush ?: if (themeMode == AppThemeMode.GLASS_LIGHT) {
+        Brush.linearGradient(listOf(DeepIndigo, ElectricViolet))
+    } else {
+        Brush.linearGradient(listOf(NeonCyan, ElectricViolet, NebulaPurple))
+    }
+
+    val finalTrack = trackColor ?: if (themeMode == AppThemeMode.GLASS_LIGHT) {
+        Color(0xFFE2E8F0)
+    } else {
+        Color(0x25FFFFFF)
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(RoundedCornerShape(height / 2))
+            .background(finalTrack)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(animatedProgress)
+                .clip(RoundedCornerShape(height / 2))
+                .background(finalBrush)
+        )
+    }
+}
+
+/**
+ * Liquid Circular Indicator for async loading or AI processing.
+ */
+@Composable
+fun GlassCircularProgressIndicator(
+    modifier: Modifier = Modifier,
+    size: Dp = 36.dp,
+    strokeWidth: Dp = 3.dp,
+    color: Color? = null
+) {
+    val themeMode = currentThemeMode()
+    val finalColor = color ?: if (themeMode == AppThemeMode.GLASS_LIGHT) DeepIndigo else NeonCyan
+
+    CircularProgressIndicator(
+        modifier = modifier.size(size),
+        color = finalColor,
+        strokeWidth = strokeWidth,
+        strokeCap = StrokeCap.Round
+    )
+}
+
+/**
+ * Circular Liquid Progress Ring for study goals, mock scores, and daily targets.
+ */
 @Composable
 fun LiquidProgressRing(
     progress: Float, // 0.0 to 1.0
@@ -246,6 +1070,7 @@ fun LiquidProgressRing(
     size: Dp = 130.dp,
     strokeWidth: Dp = 12.dp
 ) {
+    val isDark = isAppInDarkTheme()
     val animatedProgress by animateFloatAsState(
         targetValue = progress.coerceIn(0f, 1f),
         animationSpec = tween(durationMillis = 900, easing = FastOutSlowInEasing),
@@ -256,11 +1081,11 @@ fun LiquidProgressRing(
         modifier = modifier.size(size),
         contentAlignment = Alignment.Center
     ) {
-        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
             val sweep = animatedProgress * 360f
             // Background track
             drawArc(
-                color = Color(0x25FFFFFF),
+                color = if (isDark) Color(0x25FFFFFF) else Color(0xFFE2E8F0),
                 startAngle = -90f,
                 sweepAngle = 360f,
                 useCenter = false,
@@ -286,18 +1111,133 @@ fun LiquidProgressRing(
                 text = currentText,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.ExtraBold,
-                color = Color.White
+                color = if (isDark) Color.White else Color(0xFF0F172A)
             )
             Text(
                 text = targetText,
                 style = MaterialTheme.typography.labelSmall,
-                color = Color(0xFF94A3B8)
+                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
             )
         }
     }
 }
 
-// --- Floating Glass Bottom Navigation Bar ---
+// =========================================================================
+// 11. EMPTY STATE & LOADING STATE
+// =========================================================================
+
+/**
+ * Standardized Liquid Glass Empty State container with title, description, and action button.
+ */
+@Composable
+fun GlassEmptyState(
+    icon: ImageVector,
+    title: String,
+    description: String,
+    modifier: Modifier = Modifier,
+    actionText: String? = null,
+    onActionClick: (() -> Unit)? = null,
+    actionTestTag: String = "empty_state_action_button"
+) {
+    val themeMode = currentThemeMode()
+    val primaryTextColor = if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFF0F172A) else Color.White
+    val secondaryTextColor = if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFF64748B) else Color(0xFF94A3B8)
+    val accentColor = if (themeMode == AppThemeMode.GLASS_LIGHT) DeepIndigo else NeonCyan
+
+    GlassCard(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        shape = RoundedCornerShape(20.dp),
+        fillAlpha = 0.5f
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 20.dp, horizontal = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(accentColor.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = accentColor,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = primaryTextColor,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodyMedium,
+                color = secondaryTextColor,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 12.dp)
+            )
+
+            if (!actionText.isNullOrBlank() && onActionClick != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                PrimaryButton(
+                    text = actionText,
+                    onClick = onActionClick,
+                    modifier = Modifier.widthIn(max = 240.dp),
+                    testTag = actionTestTag
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Standardized Glass Loading State with pulse animation.
+ */
+@Composable
+fun GlassLoadingState(
+    message: String = "Loading...",
+    modifier: Modifier = Modifier
+) {
+    val themeMode = currentThemeMode()
+    val secondaryTextColor = if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFF64748B) else Color(0xFF94A3B8)
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        GlassCircularProgressIndicator(size = 40.dp)
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = secondaryTextColor,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+// =========================================================================
+// 12. FLOATING GLASS BOTTOM NAVIGATION BAR
+// =========================================================================
 
 enum class AppNavTab(val title: String, val icon: ImageVector, val selectedIcon: ImageVector) {
     HOME("Home", Icons.Outlined.Home, Icons.Filled.Home),
@@ -390,8 +1330,9 @@ fun FloatingGlassNavBar(
     }
 }
 
-
-// --- Streak and Header Badges ---
+// =========================================================================
+// 13. STREAK, XP & THEME TOGGLE BADGES
+// =========================================================================
 
 @Composable
 fun StreakBadge(streakDays: Int, modifier: Modifier = Modifier) {
