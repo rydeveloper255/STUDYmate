@@ -68,6 +68,8 @@ fun ProgressDashboardScreen(
     snapshot: IntelligenceSnapshot? = null,
     activeTestState: ActiveTestState,
     isTestGenerating: Boolean,
+    generationError: TestGenerationError? = null,
+    insufficientPyqNotice: InsufficientPyqNotice? = null,
     mistakeDiagnosis: String?,
     onStartTestWithConfig: (MockTestConfig) -> Unit,
     onSelectAnswer: (questionIndex: Int, optionIndex: Int) -> Unit,
@@ -81,11 +83,22 @@ fun ProgressDashboardScreen(
     onExitTest: () -> Unit,
     onReviewPastTest: (MockTestAttempt) -> Unit,
     onRetakeTest: (MockTestAttempt) -> Unit,
+    onRetakeWrongQuestions: (() -> Unit)? = null,
+    onRetryUnanswered: (() -> Unit)? = null,
+    onStartPractice: ((com.example.service.intelligence.SmartPracticeRecommendation) -> Unit)? = null,
     onDeletePastTest: (Long) -> Unit,
     onSaveUserMaterial: (title: String, exam: String, subject: String, topic: String, rawText: String) -> Unit,
     onDeleteUserMaterial: (Long) -> Unit,
     onDiagnoseMistakes: (subject: String) -> Unit,
     onMarkMistakeMastered: (Long, Boolean) -> Unit,
+    onClearGenerationError: () -> Unit = {},
+    onConfirmStartWithAvailablePyqs: () -> Unit = {},
+    onConfirmAddAiToPyqs: () -> Unit = {},
+    onDismissInsufficientPyqNotice: () -> Unit = {},
+    onCancelTestGeneration: () -> Unit = {},
+    onSaveAndNext: (() -> Unit)? = null,
+    onMarkForReviewAndNext: (() -> Unit)? = null,
+    onPreviousQuestion: (() -> Unit)? = null,
     onSaveExamObjective: (ExamObjective) -> Unit = {},
     onStartFocusOnTopic: (subject: String, topic: String) -> Unit = { _, _ -> },
     examReadiness: ExamReadinessScore? = null,
@@ -408,7 +421,13 @@ fun ProgressDashboardScreen(
             onExitTest = onExitTest,
             onRetakeTest = {
                 activeTestState.completedAttempt?.let { onRetakeTest(it) }
-            }
+            },
+            onRetakeWrongQuestions = onRetakeWrongQuestions,
+            onRetryUnanswered = onRetryUnanswered,
+            onStartPractice = onStartPractice,
+            onSaveAndNext = onSaveAndNext,
+            onMarkForReviewAndNext = onMarkForReviewAndNext,
+            onPreviousQuestion = onPreviousQuestion
         )
         return
     }
@@ -1699,21 +1718,21 @@ fun ProgressDashboardScreen(
         )
     }
 
-    // Generating loading indicator
+    // Generating loading indicator with cancellation
     if (isTestGenerating) {
-        Dialog(onDismissRequest = {}) {
+        Dialog(onDismissRequest = onCancelTestGeneration) {
             GlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(24.dp),
+                    .padding(20.dp),
                 shape = RoundedCornerShape(20.dp),
-                fillAlpha = 0.95f
+                fillAlpha = 0.96f
             ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    CircularProgressIndicator(color = NeonCyan, modifier = Modifier.size(36.dp))
+                    CircularProgressIndicator(color = NeonCyan, modifier = Modifier.size(40.dp))
                     Spacer(modifier = Modifier.height(14.dp))
                     Text(
                         text = if (isHindi) "मॉक टेस्ट तैयार हो रहा है..." else "Preparing Your Mock Test...",
@@ -1723,14 +1742,141 @@ fun ProgressDashboardScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (isHindi) "सटीक PYQs और अभ्यास प्रश्न तैयार किए जा रहे हैं" else "Curating authentic PYQs & AI practice questions",
+                        text = if (isHindi) "सटीक PYQs और परीक्षा पैटर्न प्रश्न संकलित किए जा रहे हैं" else "Assembling authentic PYQs & CBT exam drill",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF94A3B8),
                         textAlign = TextAlign.Center
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedButton(
+                        onClick = onCancelTestGeneration,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Color(0x35FFFFFF)),
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Text("Cancel Preparation", color = Color(0xFFCBD5E1), style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
         }
+    }
+
+    // Insufficient PYQ Alert Notice Dialog
+    if (insufficientPyqNotice != null) {
+        val notice = insufficientPyqNotice
+        AlertDialog(
+            onDismissRequest = onDismissInsufficientPyqNotice,
+            containerColor = Color(0xFF131C2E),
+            shape = RoundedCornerShape(22.dp),
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.School, null, tint = GoldenSpark, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("PYQ Availability Notice", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Found ${notice.availableCount} authentic PYQ questions for ${notice.examName} • ${notice.subject} (Requested: ${notice.requestedCount}).",
+                        color = Color(0xFFE2E8F0),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        text = "How would you like to proceed with this test session?",
+                        color = Color(0xFF94A3B8),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            confirmButton = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = onConfirmAddAiToPyqs,
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color(0xFF050814)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Filled.AutoAwesome, null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Add AI Exam Questions (Total ${notice.requestedCount})", fontWeight = FontWeight.Bold)
+                    }
+
+                    if (notice.availableCount > 0) {
+                        OutlinedButton(
+                            onClick = onConfirmStartWithAvailablePyqs,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, GoldenSpark),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Start with ${notice.availableCount} Available PYQs", color = GoldenSpark, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    TextButton(
+                        onClick = onDismissInsufficientPyqNotice,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Change Test Filters", color = Color(0xFF94A3B8))
+                    }
+                }
+            }
+        )
+    }
+
+    // Generation Error Dialog
+    if (generationError != null) {
+        val err = generationError
+        AlertDialog(
+            onDismissRequest = onClearGenerationError,
+            containerColor = Color(0xFF1E1428),
+            shape = RoundedCornerShape(22.dp),
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.ErrorOutline, null, tint = CoralRose, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Test Preparation Notice", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Text(
+                    text = err.userMessage,
+                    color = Color(0xFFCBD5E1),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (err.canRetry) {
+                        Button(
+                            onClick = {
+                                onClearGenerationError()
+                                showSetupDialog = true
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color(0xFF050814)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Retry", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Button(
+                        onClick = {
+                            onClearGenerationError()
+                            showSetupDialog = true
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0x30FFFFFF), contentColor = Color.White),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Configure Test")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onClearGenerationError) {
+                    Text("Dismiss", color = Color(0xFF94A3B8))
+                }
+            }
+        )
     }
 }
 

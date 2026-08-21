@@ -141,11 +141,55 @@ data class FocusSession(
 enum class QuestionSource(val displayName: String, val badgeIcon: String) {
     PREVIOUS_YEAR("Verified Previous-Year Question", "🏷️"),
     VERIFIED_PREVIOUS_YEAR("Verified Previous-Year Question", "🏷️"),
-    USER_PROVIDED("User-Provided Question", "👤"),
-    AI_GENERATED("AI-Generated Concept Question", "✨"),
+    CHAPTER_PRACTICE("AI Practice Question", "✨"),
+    EXAM_PATTERN("Official Pattern Question", "📐"),
     CURRENT_AFFAIRS("Current Affairs Question", "📰"),
-    PRACTICE("Practice Bank Question", "📚")
+    USER_PROVIDED("User-Provided Question", "👤"),
+    AI_GENERATED("AI-Generated Practice Question", "✨"),
+    PRACTICE("Practice Bank Question", "📚"),
+    MIXED("Mixed Question", "🔀")
 }
+
+enum class QuestionSourceType(val displayName: String, val badge: String, val description: String) {
+    PYQ("Previous-Year Questions (PYQs)", "🏷️", "Authentic previous year exam questions with verified year & shift"),
+    CHAPTER_PRACTICE("Chapter Practice", "✨", "Syllabus-grounded practice questions for selected subject/chapter"),
+    EXAM_PATTERN("Official Exam Pattern Mock", "📐", "Full exam blueprint simulation with realistic subject distribution"),
+    CURRENT_AFFAIRS("Current Affairs Practice", "📰", "Questions generated strictly from verified recent Current Affairs"),
+    MIXED("Balanced Mixed Practice", "🔀", "Curated combination of verified PYQs and AI practice questions")
+}
+
+enum class QuestionCbtState(val displayName: String, val labelHindi: String) {
+    NOT_VISITED("Not Visited", "देखा नहीं"),
+    NOT_ANSWERED("Not Answered", "उत्तर नहीं दिया"),
+    ANSWERED("Answered", "उत्तर दिया"),
+    MARKED_FOR_REVIEW("Marked for Review", "समीक्षा हेतु चिह्नित"),
+    ANSWERED_AND_MARKED("Answered & Marked for Review", "उत्तर दिया और समीक्षा हेतु")
+}
+
+data class TestGenerationError(
+    val stage: String,
+    val userMessage: String,
+    val technicalDetails: String = "",
+    val canRetry: Boolean = true,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+data class InsufficientPyqNotice(
+    val availableCount: Int,
+    val requestedCount: Int,
+    val examName: String,
+    val subject: String,
+    val availableQuestions: List<Question>
+)
+
+data class TimeAnalysisResult(
+    val totalTimeSpentSeconds: Int,
+    val avgTimePerQuestionSeconds: Float,
+    val fastestQuestionIndex: Int,
+    val fastestTimeSeconds: Int,
+    val longestQuestionIndex: Int,
+    val longestTimeSeconds: Int
+)
 
 enum class QuestionSourceFilter {
     BALANCED_MIX,
@@ -169,11 +213,14 @@ enum class MockTestType(val displayName: String, val description: String, val ic
 
 data class MockTestConfig(
     val examId: String = "default_exam",
-    val exam: String = "JEE / NEET / Board Exam",
+    val exam: String = "RRB NTPC (Railway)",
     val testType: MockTestType = MockTestType.FULL_MOCK,
+    val questionSource: QuestionSourceType = QuestionSourceType.MIXED,
     val subject: String = "All Subjects",
     val chapter: String = "All Chapters",
     val topic: String = "All Topics",
+    val pyqYear: String = "All Available Years",
+    val pyqShift: String = "All Shifts",
     val difficulty: String = "Medium",
     val language: String = "English",
     val questionCount: Int = 25,
@@ -230,6 +277,11 @@ data class Question(
     val explanation: String,
     val subject: String,
     val topic: String,
+    val chapter: String = "",
+    val examName: String = "",
+    val year: String = "",
+    val shift: String = "",
+    val sourceReference: String = "",
     val difficulty: String = "Medium",
     val source: QuestionSource = QuestionSource.AI_GENERATED,
     val sourceLabel: String = "AI Practice",

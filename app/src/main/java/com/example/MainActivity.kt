@@ -25,6 +25,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Restore
+import com.example.ui.theme.*
 import com.example.ui.components.AppNavTab
 import com.example.ui.components.FloatingGlassNavBar
 import com.example.ui.screens.learning.*
@@ -179,8 +182,11 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val flashcards by viewModel.flashcards.collectAsStateWithLifecycle()
     val isFlashcardGenerating by viewModel.isFlashcardGenerating.collectAsStateWithLifecycle()
     val flashcardMessage by viewModel.flashcardMessage.collectAsStateWithLifecycle()
+    val pendingResumeSession by viewModel.pendingResumeSession.collectAsStateWithLifecycle()
     val activeTestState by viewModel.activeTestState.collectAsStateWithLifecycle()
     val isTestGenerating by viewModel.isTestGenerating.collectAsStateWithLifecycle()
+    val generationError by viewModel.generationError.collectAsStateWithLifecycle()
+    val insufficientPyqNotice by viewModel.insufficientPyqNotice.collectAsStateWithLifecycle()
     val mistakeDiagnosis by viewModel.mistakeDiagnosis.collectAsStateWithLifecycle()
     val isDarkTheme by viewModel.isDarkTheme.collectAsStateWithLifecycle()
     val notifPrefs by viewModel.notificationPrefs.collectAsStateWithLifecycle()
@@ -674,6 +680,8 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             snapshot = latestIntelligenceSnapshot,
                             activeTestState = activeTestState,
                             isTestGenerating = isTestGenerating,
+                            generationError = generationError,
+                            insufficientPyqNotice = insufficientPyqNotice,
                             mistakeDiagnosis = mistakeDiagnosis,
                             onStartTestWithConfig = { config -> viewModel.startMockTestWithConfig(config) },
                             onSelectAnswer = { qIdx, optIdx -> viewModel.selectTestAnswer(qIdx, optIdx) },
@@ -687,7 +695,18 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onExitTest = { viewModel.exitTest() },
                             onReviewPastTest = { attempt -> viewModel.reviewPastTest(attempt) },
                             onRetakeTest = { attempt -> viewModel.retakeMockTest(attempt) },
+                            onRetakeWrongQuestions = { viewModel.retryWrongQuestions() },
+                            onRetryUnanswered = { viewModel.retryUnansweredQuestions() },
+                            onStartPractice = { rec -> viewModel.startTargetedPractice(rec) },
                             onDeletePastTest = { id -> viewModel.deletePastTest(id) },
+                            onClearGenerationError = { viewModel.clearGenerationError() },
+                            onConfirmStartWithAvailablePyqs = { viewModel.confirmStartWithAvailablePyqs() },
+                            onConfirmAddAiToPyqs = { viewModel.confirmAddAiToPyqs() },
+                            onDismissInsufficientPyqNotice = { viewModel.dismissInsufficientPyqNotice() },
+                            onCancelTestGeneration = { viewModel.cancelTestGeneration() },
+                            onSaveAndNext = { viewModel.saveAndNext() },
+                            onMarkForReviewAndNext = { viewModel.markForReviewAndNext() },
+                            onPreviousQuestion = { viewModel.previousQuestion() },
                             onSaveUserMaterial = { title, exam, subject, topic, rawText ->
                                 viewModel.saveUserQuestionMaterial(title, exam, subject, topic, rawText)
                             },
@@ -723,6 +742,77 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                         )
                     }
                 }
+            }
+
+            // Unfinished Test Session Recovery Modal Dialog
+            pendingResumeSession?.let { restored ->
+                AlertDialog(
+                    onDismissRequest = { viewModel.discardPendingTestSession() },
+                    title = {
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = androidx.compose.material.icons.Icons.Filled.Restore,
+                                contentDescription = null,
+                                tint = GoldenSpark,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = "Unfinished Test Session",
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                color = androidx.compose.ui.graphics.Color.White
+                            )
+                        }
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = restored.title,
+                                color = androidx.compose.ui.graphics.Color.White,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                                fontSize = 15.sp
+                            )
+                            Text(
+                                text = "${restored.questions.size} Questions • ${restored.selectedAnswers.size} Answered",
+                                color = androidx.compose.ui.graphics.Color(0xFF94A3B8),
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                text = "Time Remaining: ${String.format("%02d:%02d", restored.remainingSeconds / 60, restored.remainingSeconds % 60)}",
+                                color = NeonCyan,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "Would you like to resume your active test session or discard it?",
+                                color = androidx.compose.ui.graphics.Color(0xFFCBD5E1),
+                                fontSize = 12.sp
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = { viewModel.resumePendingTestSession() },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = NeonCyan,
+                                contentColor = androidx.compose.ui.graphics.Color(0xFF050814)
+                            ),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Resume Test", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = { viewModel.discardPendingTestSession() }
+                        ) {
+                            Text("Discard", color = CoralRose)
+                        }
+                    },
+                    containerColor = androidx.compose.ui.graphics.Color(0xFF0F172A),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
+                )
             }
         }
     }

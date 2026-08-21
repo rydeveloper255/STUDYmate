@@ -75,7 +75,8 @@ object SmartMockEngine {
         val maxMarks = (correctCount + incorrectCount + skippedCount) * marksPerCorrect
 
         val percentage = if (maxMarks > 0) ((earnedMarks / maxMarks) * 100f).coerceIn(0f, 100f) else 0f
-        val schemeLabel = if (negativePenalty > 0) "+${marksPerCorrect.toInt()} / -${"%.2f".format(negativePenalty)} (Negative Marking)" else "+${marksPerCorrect.toInt()} / 0 (No Negative)"
+        val formattedPenalty = String.format(java.util.Locale.US, "%.2f", negativePenalty)
+        val schemeLabel = if (negativePenalty > 0) "+${marksPerCorrect.toInt()} / -$formattedPenalty (Negative Marking)" else "+${marksPerCorrect.toInt()} / 0 (No Negative)"
 
         return Triple(earnedMarks, percentage, schemeLabel)
     }
@@ -320,4 +321,351 @@ object SmartMockEngine {
         val sorted = ranked.sortedByDescending { it.second }.map { it.first }
         return deduplicateQuestions(sorted).take(desiredCount)
     }
+
+    /**
+     * Calculates time analysis metrics: total time, average per question, fastest and longest questions.
+     */
+    fun calculateTimeAnalysis(
+        details: List<QuestionAttemptDetail>,
+        totalAllowedSeconds: Int,
+        remainingSeconds: Int
+    ): TimeAnalysisResult {
+        val totalTimeSpent = (totalAllowedSeconds - remainingSeconds).coerceAtLeast(0)
+        val totalQuestions = details.size
+        val avgTime = if (totalQuestions > 0) totalTimeSpent.toFloat() / totalQuestions else 0f
+
+        var fastestIdx = 0
+        var fastestSecs = Int.MAX_VALUE
+        var longestIdx = 0
+        var longestSecs = 0
+
+        details.forEachIndexed { idx, detail ->
+            val spent = detail.timeSpentSeconds
+            if (spent in 1 until fastestSecs) {
+                fastestSecs = spent
+                fastestIdx = idx
+            }
+            if (spent > longestSecs) {
+                longestSecs = spent
+                longestIdx = idx
+            }
+        }
+
+        if (fastestSecs == Int.MAX_VALUE) fastestSecs = (avgTime.toInt()).coerceAtLeast(1)
+        if (longestSecs == 0) longestSecs = (avgTime.toInt()).coerceAtLeast(1)
+
+        return TimeAnalysisResult(
+            totalTimeSpentSeconds = totalTimeSpent,
+            avgTimePerQuestionSeconds = avgTime,
+            fastestQuestionIndex = fastestIdx,
+            fastestTimeSeconds = fastestSecs,
+            longestQuestionIndex = longestIdx,
+            longestTimeSeconds = longestSecs
+        )
+    }
+
+    /**
+     * Computes complete, multi-dimensional test intelligence result.
+     */
+    fun computeTestIntelligence(
+        attempt: MockTestAttempt,
+        details: List<QuestionAttemptDetail>,
+        testType: MockTestType = MockTestType.FULL_MOCK,
+        language: String = "English"
+    ): TestIntelligenceResult {
+        val totalQuestions = details.size.coerceAtLeast(attempt.totalQuestions)
+        val attempted = details.count { it.selectedIndex != null }
+        val correctCount = details.count { it.isCorrect }
+        val incorrectCount = attempted - correctCount
+        val skippedCount = totalQuestions - attempted
+        val timeSpent = attempt.timeSpentSeconds
+        val avgTime = if (totalQuestions > 0) timeSpent.toFloat() / totalQuestions else 0f
+        val accuracy = if (attempted > 0) (correctCount.toFloat() / attempted) * 100f else 0f
+
+        // 1. Performance Category
+        val category = when {
+            accuracy >= 88f -> PerformanceCategory("Excellent", "Outstanding mastery across tested concepts!", "🏆")
+            accuracy >= 78f -> PerformanceCategory("Strong", "Solid performance! Minor targeted practice will unlock peak scores.", "🌟")
+            accuracy >= 65f -> PerformanceCategory("Good", "Good understanding! Focus on weak topics to boost consistency.", "👍")
+            accuracy >= 50f -> PerformanceCategory("Improving", "Promising progress! Clear solutions step-by-step to build speed.", "📈")
+            else -> PerformanceCategory("Needs Practice", "Great starting baseline. Focus on core concepts to build confidence.", "📚")
+        }
+
+        // 2. Subject-wise Analysis
+        val subjectGroups = details.groupBy { it.question.subject.ifBlank { attempt.subject }.ifBlank { "General" } }
+        val subjectPerformances = subjectGroups.map { (subName, qList) ->
+            val subAtt = qList.count { it.selectedIndex != null }
+            val subCorr = qList.count { it.isCorrect }
+            val subIncorr = subAtt - subCorr
+            val subUnans = qList.size - subAtt
+            val subAcc = if (subAtt > 0) (subCorr.toFloat() / subAtt) * 100f else 0f
+            val subTime = qList.sumOf { it.timeSpentSeconds }
+            val subAvgTime = if (qList.isNotEmpty()) subTime.toFloat() / qList.size else 0f
+            val subScore = (subCorr * 4f) - (subIncorr * 1f)
+
+            SubjectPerformance(
+                subject = subName,
+                totalQuestions = qList.size,
+                attempted = subAtt,
+                correct = subCorr,
+                incorrect = subIncorr,
+                unanswered = subUnans,
+                accuracyPercent = subAcc,
+                score = subScore,
+                timeSpentSeconds = subTime,
+                avgTimePerQuestionSeconds = subAvgTime
+            )
+        }
+
+        // 3. Chapter / Topic-wise Analysis
+        val chapterGroups = details.groupBy {
+            val q = it.question
+            if (q.chapter.isNotBlank()) q.chapter else if (q.topic.isNotBlank()) q.topic else "General Concepts"
+        }
+        val chapterPerformances = chapterGroups.map { (chapName, qList) ->
+            val chapSub = qList.firstOrNull()?.question?.subject ?: attempt.subject
+            val chapTopic = qList.firstOrNull()?.question?.topic ?: chapName
+            val chapAtt = qList.count { it.selectedIndex != null }
+            val chapCorr = qList.count { it.isCorrect }
+            val chapIncorr = chapAtt - chapCorr
+            val chapUnans = qList.size - chapAtt
+            val chapAcc = if (chapAtt > 0) (chapCorr.toFloat() / chapAtt) * 100f else 0f
+            val hasSufficientData = qList.size >= 2
+
+            ChapterPerformance(
+                chapter = chapName,
+                topic = chapTopic,
+                subject = chapSub,
+                totalQuestions = qList.size,
+                attempted = chapAtt,
+                correct = chapCorr,
+                incorrect = chapIncorr,
+                unanswered = chapUnans,
+                accuracyPercent = chapAcc,
+                hasSufficientData = hasSufficientData
+            )
+        }
+
+        // 4. Weak Area & Strong Area Detection
+        val weakTopicsList = mutableListOf<String>()
+        val strongTopicsList = mutableListOf<String>()
+
+        chapterPerformances.forEach { cp ->
+            if (cp.hasSufficientData) {
+                if (cp.accuracyPercent < 65f || cp.incorrect >= 2) {
+                    weakTopicsList.add(cp.chapter)
+                } else if (cp.accuracyPercent >= 75f) {
+                    strongTopicsList.add(cp.chapter)
+                }
+            } else {
+                if (cp.incorrect > 0 && cp.totalQuestions < 3) {
+                    // Note limited data
+                    weakTopicsList.add("${cp.chapter} (Limited data — practice more)")
+                }
+            }
+        }
+
+        if (weakTopicsList.isEmpty() && attempt.weakTopics.isNotEmpty()) {
+            weakTopicsList.addAll(attempt.weakTopics)
+        }
+        if (strongTopicsList.isEmpty() && attempt.strongTopics.isNotEmpty()) {
+            strongTopicsList.addAll(attempt.strongTopics)
+        }
+
+        // 5. Time + Accuracy Matrix Analysis
+        var highTimeWrong = 0
+        var lowTimeWrong = 0
+        var highTimeCorrect = 0
+        var lowTimeCorrect = 0
+        var fastestIdx = 0
+        var fastestSecs = Int.MAX_VALUE
+        var longestIdx = 0
+        var longestSecs = 0
+
+        details.forEachIndexed { idx, detail ->
+            val spent = detail.timeSpentSeconds
+            val isSlow = spent > (avgTime * 1.25f)
+            val isFast = spent < (avgTime * 0.5f)
+
+            if (spent in 1 until fastestSecs) {
+                fastestSecs = spent
+                fastestIdx = idx
+            }
+            if (spent > longestSecs) {
+                longestSecs = spent
+                longestIdx = idx
+            }
+
+            if (detail.selectedIndex != null) {
+                if (!detail.isCorrect) {
+                    if (isSlow) highTimeWrong++
+                    if (isFast) lowTimeWrong++
+                } else {
+                    if (isSlow) highTimeCorrect++
+                    if (isFast) lowTimeCorrect++
+                }
+            }
+        }
+
+        if (fastestSecs == Int.MAX_VALUE) fastestSecs = (avgTime.toInt()).coerceAtLeast(1)
+        if (longestSecs == 0) longestSecs = (avgTime.toInt()).coerceAtLeast(1)
+
+        val neutralAdvice = when {
+            lowTimeWrong > 1 -> "This pattern indicates a few quick choices resulted in errors. Rechecking steps before submitting can catch simple errors."
+            highTimeWrong > 1 -> "Certain complex questions required extra time without yielding correct answers. Targeted practice on foundational concepts will build solving efficiency."
+            highTimeCorrect > 1 -> "You solved several questions correctly but required extra time. Regular formula practice will increase your solving pace."
+            else -> "Your speed and accuracy were well balanced throughout the test questions."
+        }
+
+        val timeMatrix = TimeAccuracyPatternMatrix(
+            highTimeWrongCount = highTimeWrong,
+            lowTimeWrongCount = lowTimeWrong,
+            highTimeCorrectCount = highTimeCorrect,
+            lowTimeCorrectCount = lowTimeCorrect,
+            fastestQuestionIndex = fastestIdx,
+            fastestTimeSeconds = fastestSecs,
+            longestQuestionIndex = longestIdx,
+            longestTimeSeconds = longestSecs,
+            neutralAdvice = neutralAdvice
+        )
+
+        // 6. NOVA Post-Test Insight (Deterministic Fallback)
+        val isHindi = language.equals("Hindi", ignoreCase = true)
+        val strongTopicsStr = strongTopicsList.take(2).joinToString(", ")
+        val weakTopicsStr = weakTopicsList.take(3).joinToString(", ")
+
+        val whatWentWell = if (isHindi) {
+            listOf(
+                "Aapne overall test mein ${accuracy.toInt()}% accuracy achieve ki.",
+                if (strongTopicsList.isNotEmpty()) "Strong control over $strongTopicsStr." else "Pace aur attempt ratio balanced raha."
+            )
+        } else {
+            listOf(
+                "Achieved an overall accuracy rate of ${accuracy.toInt()}%.",
+                if (strongTopicsList.isNotEmpty()) "Strong performance in $strongTopicsStr." else "Maintained a steady solving pace across questions."
+            )
+        }
+
+        val cleanWeak = weakTopicsList.map { it.replace(" (Limited data — practice more)", "") }.distinct()
+        val cleanWeakStr = cleanWeak.take(3).joinToString(", ")
+        val whatNeedsPractice = if (isHindi) {
+            if (cleanWeak.isNotEmpty()) listOf("$cleanWeakStr topics par targeted practice zaroori hai.") else listOf("Complex numerical problem solving mein clarity badhayein.")
+        } else {
+            if (cleanWeak.isNotEmpty()) listOf("Targeted practice recommended for $cleanWeakStr.") else listOf("Practice multi-step numerical calculation speed.")
+        }
+
+        val topWeakTopic = cleanWeak.firstOrNull() ?: attempt.topic.ifBlank { "Core Concepts" }
+        val recommendedNext = if (isHindi) {
+            "Suggested: Try a 15-question practice set on $topWeakTopic."
+        } else {
+            "Suggested: Try a 15-question practice set on $topWeakTopic."
+        }
+
+        val novaInsight = NovaPostTestInsight(
+            whatWentWell = whatWentWell,
+            whatNeedsPractice = whatNeedsPractice,
+            recommendedNextStep = recommendedNext,
+            language = language,
+            isAiGenerated = false
+        )
+
+        // 7. Smart Recommendations (Max 3)
+        val recommendationsList = mutableListOf<SmartPracticeRecommendation>()
+
+        // Rec 1: Weak topics
+        recommendationsList.add(
+            SmartPracticeRecommendation(
+                id = "rec_weak_1",
+                title = "Practice Weak Topics",
+                subtitle = "Focus set on $topWeakTopic",
+                priority = 1,
+                targetExam = attempt.examName,
+                targetSubject = subjectPerformances.firstOrNull { it.accuracyPercent < 70f }?.subject ?: attempt.subject,
+                targetChapter = topWeakTopic,
+                targetTopic = topWeakTopic,
+                recommendedQuestionCount = 15,
+                recommendedDifficulty = attempt.difficulty,
+                recommendedType = MockTestType.WEAK_AREAS
+            )
+        )
+
+        // Rec 2: Retry incorrect
+        if (incorrectCount > 0) {
+            recommendationsList.add(
+                SmartPracticeRecommendation(
+                    id = "rec_retry_incorrect",
+                    title = "Retry Incorrect Questions",
+                    subtitle = "Re-solve $incorrectCount questions missed in this test",
+                    priority = 2,
+                    targetExam = attempt.examName,
+                    targetSubject = attempt.subject,
+                    targetChapter = topWeakTopic,
+                    targetTopic = topWeakTopic,
+                    recommendedQuestionCount = incorrectCount,
+                    recommendedDifficulty = attempt.difficulty,
+                    recommendedType = MockTestType.PREVIOUS_MISTAKES
+                )
+            )
+        }
+
+        // Rec 3: Skipped questions or Revision set
+        if (skippedCount > 0) {
+            recommendationsList.add(
+                SmartPracticeRecommendation(
+                    id = "rec_retry_unanswered",
+                    title = "Retry Unanswered Questions",
+                    subtitle = "Complete $skippedCount unattempted questions",
+                    priority = 3,
+                    targetExam = attempt.examName,
+                    targetSubject = attempt.subject,
+                    targetChapter = "Skipped",
+                    targetTopic = "Skipped",
+                    recommendedQuestionCount = skippedCount,
+                    recommendedDifficulty = attempt.difficulty,
+                    recommendedType = MockTestType.REVISION_TEST
+                )
+            )
+        } else {
+            recommendationsList.add(
+                SmartPracticeRecommendation(
+                    id = "rec_revision",
+                    title = "Revision & Formula Recall",
+                    subtitle = "Consolidate learning for ${attempt.subject}",
+                    priority = 4,
+                    targetExam = attempt.examName,
+                    targetSubject = attempt.subject,
+                    targetChapter = "Revision",
+                    targetTopic = "All Topics",
+                    recommendedQuestionCount = 20,
+                    recommendedDifficulty = attempt.difficulty,
+                    recommendedType = MockTestType.REVISION_TEST
+                )
+            )
+        }
+
+        return TestIntelligenceResult(
+            examName = attempt.examName,
+            title = attempt.title,
+            testType = testType,
+            score = attempt.rawScoreEarned.ifZero(attempt.score.toFloat()),
+            totalQuestions = totalQuestions,
+            accuracyPercent = accuracy,
+            correctCount = correctCount,
+            incorrectCount = incorrectCount,
+            skippedCount = skippedCount,
+            timeSpentSeconds = timeSpent,
+            avgTimePerQuestionSeconds = avgTime,
+            performanceCategory = category,
+            subjectPerformances = subjectPerformances,
+            chapterPerformances = chapterPerformances,
+            weakTopics = cleanWeak,
+            strongTopics = strongTopicsList.distinct(),
+            timeMatrix = timeMatrix,
+            novaInsight = novaInsight,
+            recommendations = recommendationsList.take(3)
+        )
+    }
+
+    private fun Float.ifZero(defaultVal: Float): Float = if (this == 0f) defaultVal else this
 }
+

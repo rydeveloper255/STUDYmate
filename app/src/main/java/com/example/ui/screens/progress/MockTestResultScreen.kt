@@ -12,7 +12,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.MockTestAttempt
 import com.example.data.model.QuestionAttemptDetail
+import com.example.service.intelligence.SmartPracticeRecommendation
+import com.example.service.intelligence.TestIntelligenceResult
 import com.example.ui.components.GlassButton
 import com.example.ui.components.GlassCard
 import com.example.ui.components.springClickable
@@ -37,12 +38,18 @@ import com.example.ui.theme.*
 fun MockTestResultScreen(
     attempt: MockTestAttempt,
     detailedQuestions: List<QuestionAttemptDetail>,
+    testIntelligence: TestIntelligenceResult? = null,
+    isNovaAnalyzing: Boolean = false,
     onExitToDashboard: () -> Unit,
-    onRetake: () -> Unit
+    onRetake: () -> Unit,
+    onRetryIncorrect: (() -> Unit)? = null,
+    onRetryUnanswered: (() -> Unit)? = null,
+    onStartPractice: ((SmartPracticeRecommendation) -> Unit)? = null
 ) {
     val context = LocalContext.current
     var selectedFilter by remember { mutableIntStateOf(0) } // 0: All, 1: Incorrect, 2: Correct, 3: Skipped
-    var expandedQuestionIndex by remember { mutableStateOf<Int?>(null) }
+    var selectedSubjectTab by remember { mutableStateOf<String?>(null) }
+    var isSolutionsExpanded by remember { mutableStateOf(true) }
 
     fun exportAndSharePdf() {
         try {
@@ -58,12 +65,16 @@ fun MockTestResultScreen(
         }
     }
 
-    val filteredDetails = remember(detailedQuestions, selectedFilter) {
+    val filteredDetails = remember(detailedQuestions, selectedFilter, selectedSubjectTab) {
+        var list = detailedQuestions
+        if (selectedSubjectTab != null) {
+            list = list.filter { it.question.subject == selectedSubjectTab }
+        }
         when (selectedFilter) {
-            1 -> detailedQuestions.filter { it.selectedIndex != null && !it.isCorrect }
-            2 -> detailedQuestions.filter { it.isCorrect }
-            3 -> detailedQuestions.filter { it.selectedIndex == null }
-            else -> detailedQuestions
+            1 -> list.filter { it.selectedIndex != null && !it.isCorrect }
+            2 -> list.filter { it.isCorrect }
+            3 -> list.filter { it.selectedIndex == null }
+            else -> list
         }
     }
 
@@ -76,45 +87,62 @@ fun MockTestResultScreen(
         modifier = Modifier
             .fillMaxSize()
             .testTag("mock_test_result_screen"),
-        contentPadding = PaddingValues(bottom = 80.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Result Header & Score Card
+        // 1. RESULT HEADER & OVERALL SCORE DASHBOARD
         item {
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
-                fillAlpha = 0.9f
+                shape = RoundedCornerShape(24.dp),
+                fillAlpha = 0.92f
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
+                        .padding(18.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    // Top row badge + Export PDF
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = NeonCyan.copy(alpha = 0.15f)
-                        ) {
-                            Text(
-                                text = attempt.examName,
-                                color = NeonCyan,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = NeonCyan.copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.3f))
+                            ) {
+                                Text(
+                                    text = attempt.examName.ifBlank { "Full Mock Test" },
+                                    color = NeonCyan,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                            if (attempt.language.isNotBlank()) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0x20FFFFFF)
+                                ) {
+                                    Text(
+                                        text = attempt.language,
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
                         }
 
-                        // Export PDF Action
                         IconButton(
                             onClick = { exportAndSharePdf() },
                             modifier = Modifier
-                                .size(36.dp)
+                                .size(38.dp)
                                 .clip(CircleShape)
                                 .background(Color(0x2238BDF8))
                                 .testTag("export_pdf_top_btn")
@@ -123,57 +151,67 @@ fun MockTestResultScreen(
                                 imageVector = Icons.Filled.PictureAsPdf,
                                 contentDescription = "Export PDF Report",
                                 tint = NeonCyan,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Performance Category Trophy Icon & Badge
+                    val category = testIntelligence?.performanceCategory
+                    val categoryBadgeColor = when (category?.level) {
+                        "Excellent" -> GoldenSpark
+                        "Strong" -> EmeraldSuccess
+                        "Good" -> NeonCyan
+                        "Improving" -> ElectricViolet
+                        else -> CoralRose
+                    }
 
                     Box(
                         modifier = Modifier
-                            .size(52.dp)
+                            .size(56.dp)
                             .clip(CircleShape)
                             .background(
-                                if (attempt.accuracyPercent >= 75) Brush.linearGradient(listOf(GoldenSpark, NeonCyan))
-                                else Brush.linearGradient(listOf(CoralRose, ElectricViolet))
-                            ),
+                                Brush.linearGradient(
+                                    listOf(categoryBadgeColor.copy(alpha = 0.8f), Color(0xFF050814))
+                                )
+                            )
+                            .border(2.dp, categoryBadgeColor, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = if (attempt.accuracyPercent >= 75) Icons.Filled.EmojiEvents else Icons.Filled.Psychology,
-                            contentDescription = null,
-                            tint = Color(0xFF050814),
-                            modifier = Modifier.size(28.dp)
+                        Text(
+                            text = category?.emoji ?: if (attempt.accuracyPercent >= 75) "🏆" else "📈",
+                            fontSize = 28.sp
                         )
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
-                        text = if (attempt.accuracyPercent >= 80) "Exceptional Performance! 🎉"
-                        else if (attempt.accuracyPercent >= 50) "Good Effort! Keep Pushing 🚀"
-                        else "Needs Targeted Practice 📚",
+                        text = "Performance: ${category?.level ?: if (attempt.accuracyPercent >= 75) "Strong" else "Improving"}",
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.ExtraBold,
                         color = Color.White
                     )
 
                     Text(
-                        text = attempt.title,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF94A3B8)
+                        text = category?.description ?: "Keep practicing to master all core exam concepts!",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFCBD5E1),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Metrics Row
+                    // Score Metrics Grid (Marks, Accuracy, Time Taken, Avg/Question)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         ScoreMetricBadge(
-                            label = "Marks",
+                            label = "Score",
                             value = "${attempt.score}",
                             color = NeonCyan,
                             modifier = Modifier.weight(1f)
@@ -185,7 +223,7 @@ fun MockTestResultScreen(
                             modifier = Modifier.weight(1f)
                         )
                         ScoreMetricBadge(
-                            label = "Time Taken",
+                            label = "Time Used",
                             value = formattedTotalTime,
                             color = GoldenSpark,
                             modifier = Modifier.weight(1f)
@@ -198,9 +236,9 @@ fun MockTestResultScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    // Breakdown Bars: Correct / Incorrect / Skipped
+                    // Breakdown Row: Correct / Incorrect / Unanswered / Total
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -228,59 +266,302 @@ fun MockTestResultScreen(
             }
         }
 
-        // 2. AI Recommendation & Topic Diagnosis Card
+        // 2. NOVA AI POST-TEST INSIGHT CARD
         item {
+            val novaInsight = testIntelligence?.novaInsight
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                fillAlpha = 0.85f
+                shape = RoundedCornerShape(20.dp),
+                fillAlpha = 0.88f
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.AutoAwesome, null, tint = GoldenSpark, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "AI Performance Evaluation",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = GoldenSpark
-                        )
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.AutoAwesome, null, tint = GoldenSpark, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "NOVA Study Coach Insights",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = GoldenSpark
+                            )
+                        }
+
+                        if (isNovaAnalyzing) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = GoldenSpark.copy(alpha = 0.15f)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(12.dp),
+                                        color = GoldenSpark,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Analyzing...",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = GoldenSpark
+                                    )
+                                }
+                            }
+                        } else if (novaInsight?.isAiGenerated == true) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = EmeraldSuccess.copy(alpha = 0.15f)
+                            ) {
+                                Text(
+                                    text = "AI Enhanced",
+                                    color = EmeraldSuccess,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
+                    // What Went Well
                     Text(
-                        text = attempt.aiRecommendation,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFFE2E8F0),
-                        lineHeight = 20.sp
+                        text = "What Went Well 🎉",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = EmeraldSuccess
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    (novaInsight?.whatWentWell ?: listOf("Good effort in completing the test under time limits.")).forEach { point ->
+                        Row(
+                            modifier = Modifier.padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Text("• ", color = EmeraldSuccess, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = point,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFFE2E8F0)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Needs Practice
+                    Text(
+                        text = "Needs Practice 🎯",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = CoralRose
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    (novaInsight?.whatNeedsPractice ?: listOf("Targeted revision on incorrect topics recommended.")).forEach { point ->
+                        Row(
+                            modifier = Modifier.padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Text("• ", color = CoralRose, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = point,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFFE2E8F0)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Recommended Action Banner
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = NeonCyan.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.3f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Filled.Lightbulb, null, tint = NeonCyan, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Recommended Next Action",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeonCyan
+                                )
+                                Text(
+                                    text = novaInsight?.recommendedNextStep ?: "Try a 15-question targeted set on weak areas.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. SUBJECT-WISE & CHAPTER-WISE PERFORMANCE ANALYSIS
+        val subjectPerformances = testIntelligence?.subjectPerformances ?: emptyList()
+        val chapterPerformances = testIntelligence?.chapterPerformances ?: emptyList()
+
+        if (subjectPerformances.isNotEmpty()) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Subject & Chapter Performance",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
                     )
 
-                    if (attempt.weakTopics.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = "Weak Topics Identified (Added to Mistake Book):",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = CoralRose
-                        )
-                        Row(
+                    subjectPerformances.forEach { sub ->
+                        GlassCard(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                .springClickable {
+                                    selectedSubjectTab = if (selectedSubjectTab == sub.subject) null else sub.subject
+                                },
+                            shape = RoundedCornerShape(16.dp),
+                            fillAlpha = if (selectedSubjectTab == sub.subject) 0.95f else 0.8f
                         ) {
-                            attempt.weakTopics.take(3).forEach { topic ->
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = CoralRose.copy(alpha = 0.15f),
-                                    border = BorderStroke(1.dp, CoralRose.copy(alpha = 0.4f))
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = sub.subject,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                        if (selectedSubjectTab == sub.subject) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = NeonCyan.copy(alpha = 0.2f)
+                                            ) {
+                                                Text(
+                                                    text = "Filtered",
+                                                    color = NeonCyan,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Text(
+                                        text = "${sub.accuracyPercent.toInt()}% Accuracy",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (sub.accuracyPercent >= 70) EmeraldSuccess else CoralRose
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                // Progress bar
+                                LinearProgressIndicator(
+                                    progress = { (sub.accuracyPercent / 100f).coerceIn(0f, 1f) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(8.dp)
+                                        .clip(CircleShape),
+                                    color = if (sub.accuracyPercent >= 70) EmeraldSuccess else CoralRose,
+                                    trackColor = Color(0x20FFFFFF)
+                                )
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(
-                                        text = topic,
-                                        color = CoralRose,
+                                        text = "Correct: ${sub.correct} / ${sub.totalQuestions}",
                                         style = MaterialTheme.typography.labelSmall,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        color = EmeraldSuccess
+                                    )
+                                    Text(
+                                        text = "Incorrect: ${sub.incorrect}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = CoralRose
+                                    )
+                                    Text(
+                                        text = "Avg Time: ${sub.avgTimePerQuestionSeconds.toInt()}s/q",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = GoldenSpark
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Chapter breakdown cards
+                    if (chapterPerformances.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Chapter Level Breakdown",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFCBD5E1)
+                        )
+
+                        chapterPerformances.take(6).forEach { chap ->
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0x12FFFFFF),
+                                border = BorderStroke(1.dp, Color(0x1AFFFFFF))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = chap.chapter,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                        if (!chap.hasSufficientData) {
+                                            Text(
+                                                text = "Limited data — practice more questions on this topic",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = GoldenSpark
+                                            )
+                                        } else {
+                                            Text(
+                                                text = "${chap.correct} correct out of ${chap.totalQuestions} questions",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color(0xFF94A3B8)
+                                            )
+                                        }
+                                    }
+
+                                    Text(
+                                        text = "${chap.accuracyPercent.toInt()}%",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = if (chap.accuracyPercent >= 70) EmeraldSuccess else CoralRose
                                     )
                                 }
                             }
@@ -290,23 +571,273 @@ fun MockTestResultScreen(
             }
         }
 
-        // 3. Question-by-Question Solution Review Section
+        // 4. TIME MANAGEMENT & PATTERN ANALYSIS
+        val timeMatrix = testIntelligence?.timeMatrix
+        if (timeMatrix != null) {
+            item {
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    fillAlpha = 0.85f
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Timer, null, tint = NeonCyan, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Time Management Analysis",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = NeonCyan
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Fast vs Longest Question row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = EmeraldSuccess.copy(alpha = 0.12f),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text("Fastest Question", style = MaterialTheme.typography.labelSmall, color = EmeraldSuccess)
+                                    Text(
+                                        text = "Q${timeMatrix.fastestQuestionIndex + 1} (${timeMatrix.fastestTimeSeconds}s)",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = CoralRose.copy(alpha = 0.12f),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text("Longest Question", style = MaterialTheme.typography.labelSmall, color = CoralRose)
+                                    Text(
+                                        text = "Q${timeMatrix.longestQuestionIndex + 1} (${timeMatrix.longestTimeSeconds}s)",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Pattern Matrix Breakdown
+                        Text(
+                            text = "Solving Speed vs Accuracy Pattern:",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFCBD5E1)
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            PatternCountBadge(
+                                label = "High Time + Wrong",
+                                count = timeMatrix.highTimeWrongCount,
+                                subtitle = "Inflexible solving",
+                                color = CoralRose,
+                                modifier = Modifier.weight(1f)
+                            )
+                            PatternCountBadge(
+                                label = "Low Time + Wrong",
+                                count = timeMatrix.lowTimeWrongCount,
+                                subtitle = "Careless errors",
+                                color = GoldenSpark,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            PatternCountBadge(
+                                label = "High Time + Right",
+                                count = timeMatrix.highTimeCorrectCount,
+                                subtitle = "Time consuming",
+                                color = NeonCyan,
+                                modifier = Modifier.weight(1f)
+                            )
+                            PatternCountBadge(
+                                label = "Low Time + Right",
+                                count = timeMatrix.lowTimeCorrectCount,
+                                subtitle = "Peak efficiency",
+                                color = EmeraldSuccess,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Neutral Advice
+                        Text(
+                            text = timeMatrix.neutralAdvice,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFE2E8F0),
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // 5. SMART PRACTICE LOOPS & NEXT BEST ACTIONS
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Personalized Practice Actions",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+
+                // Recommended Practice Buttons
+                if (onRetryIncorrect != null && attempt.incorrectCount > 0) {
+                    Button(
+                        onClick = onRetryIncorrect,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = GoldenSpark,
+                            contentColor = Color(0xFF050814)
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .testTag("retake_wrong_questions_btn")
+                    ) {
+                        Icon(Icons.Filled.AutoAwesome, null, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Retry Incorrect Questions (${attempt.incorrectCount})",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 15.sp
+                        )
+                    }
+                }
+
+                if (onRetryUnanswered != null && attempt.skippedCount > 0) {
+                    OutlinedButton(
+                        onClick = onRetryUnanswered,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonCyan),
+                        border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.6f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("retry_unanswered_btn")
+                    ) {
+                        Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Solve Skipped Questions (${attempt.skippedCount})",
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                val recommendations = testIntelligence?.recommendations ?: emptyList()
+                recommendations.forEach { rec ->
+                    GlassCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .springClickable { onStartPractice?.invoke(rec) },
+                        shape = RoundedCornerShape(14.dp),
+                        fillAlpha = 0.8f
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.School,
+                                    contentDescription = null,
+                                    tint = GoldenSpark,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = rec.title,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = rec.subtitle,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFFCBD5E1)
+                                    )
+                                }
+                            }
+
+                            Icon(
+                                imageVector = Icons.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = NeonCyan,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 6. QUESTION-BY-QUESTION SOLUTION REVIEW SECTION
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Detailed Solutions Review (${detailedQuestions.size})",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Question Solutions (${filteredDetails.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(
+                        onClick = { isSolutionsExpanded = !isSolutionsExpanded },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isSolutionsExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                            contentDescription = "Toggle solutions",
+                            tint = NeonCyan
+                        )
+                    }
+                }
 
-                // Quick Filter
+                // Quick Filters: All, Wrong, Right, Skipped
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("All", "Wrong", "Right").forEachIndexed { idx, label ->
+                    listOf("All", "Wrong", "Right", "Skipped").forEachIndexed { idx, label ->
                         val isSel = selectedFilter == idx
                         Surface(
                             shape = RoundedCornerShape(8.dp),
@@ -326,142 +857,138 @@ fun MockTestResultScreen(
             }
         }
 
-        // List of question reviews
-        itemsIndexed(filteredDetails) { idx, detail ->
-            val q = detail.question
-            val isExpanded = expandedQuestionIndex == idx
-            val isCorrect = detail.isCorrect
-            val isSkipped = detail.selectedIndex == null
+        if (isSolutionsExpanded) {
+            itemsIndexed(filteredDetails) { idx, detail ->
+                val q = detail.question
+                val isCorrect = detail.isCorrect
+                val isSkipped = detail.selectedIndex == null
 
-            val statusColor = when {
-                isCorrect -> EmeraldSuccess
-                isSkipped -> Color(0xFF94A3B8)
-                else -> CoralRose
-            }
+                val statusColor = when {
+                    isCorrect -> EmeraldSuccess
+                    isSkipped -> Color(0xFF94A3B8)
+                    else -> CoralRose
+                }
 
-            GlassCard(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                fillAlpha = 0.8f
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    // Header: Q Number + Status + Source Tag + Time Spent
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = statusColor.copy(alpha = 0.2f),
-                                border = BorderStroke(1.dp, statusColor.copy(alpha = 0.5f))
-                            ) {
-                                Text(
-                                    text = "Q${idx + 1}: ${if (isCorrect) "Correct (+4)" else if (isSkipped) "Skipped (0)" else "Incorrect (-1)"}",
-                                    color = statusColor,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "${detail.timeSpentSeconds}s",
-                                color = Color(0xFF94A3B8),
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        }
-
-                        // Exact Source Label
-                        QuestionSourceBadge(source = q.source, label = q.sourceLabel, yearOrTag = q.yearOrTag)
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Text(
-                        text = q.questionText,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Options Review
-                    q.options.forEachIndexed { optIdx, optText ->
-                        val isStudentChoice = detail.selectedIndex == optIdx
-                        val isCorrectOption = q.correctOptionIndex == optIdx
-
-                        val optionBg = when {
-                            isCorrectOption -> EmeraldSuccess.copy(alpha = 0.2f)
-                            isStudentChoice && !isCorrect -> CoralRose.copy(alpha = 0.2f)
-                            else -> Color(0x10FFFFFF)
-                        }
-
-                        val optionBorder = when {
-                            isCorrectOption -> EmeraldSuccess
-                            isStudentChoice && !isCorrect -> CoralRose
-                            else -> Color(0x18FFFFFF)
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 3.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(optionBg)
-                                .border(1.dp, optionBorder, RoundedCornerShape(8.dp))
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "${('A' + optIdx)}. $optText",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (isCorrectOption) Color.White else Color(0xFFCBD5E1),
-                                    fontWeight = if (isCorrectOption || isStudentChoice) FontWeight.Bold else FontWeight.Normal,
-                                    modifier = Modifier.weight(1f)
-                                )
-
-                                if (isCorrectOption) {
-                                    Text("✅ Correct", color = EmeraldSuccess, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                } else if (isStudentChoice) {
-                                    Text("❌ Your Answer", color = CoralRose, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-
-                    // Explanation toggle
-                    if (q.explanation.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Surface(
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    fillAlpha = 0.8f
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            color = Color(0x1838BDF8)
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Filled.Lightbulb, null, tint = GoldenSpark, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = statusColor.copy(alpha = 0.2f),
+                                    border = BorderStroke(1.dp, statusColor.copy(alpha = 0.5f))
+                                ) {
                                     Text(
-                                        text = "Step-by-Step Solution & Principle:",
+                                        text = "Q${idx + 1}: ${if (isCorrect) "Correct (+4)" else if (isSkipped) "Skipped (0)" else "Incorrect (-1)"}",
+                                        color = statusColor,
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
-                                        color = GoldenSpark
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
-                                Spacer(modifier = Modifier.height(4.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = q.explanation,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFFE2E8F0),
-                                    lineHeight = 18.sp
+                                    text = "${detail.timeSpentSeconds}s",
+                                    color = Color(0xFF94A3B8),
+                                    style = MaterialTheme.typography.labelSmall
                                 )
+                            }
+
+                            QuestionSourceBadge(source = q.source, label = q.sourceLabel, yearOrTag = q.yearOrTag)
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Text(
+                            text = q.questionText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        q.options.forEachIndexed { optIdx, optText ->
+                            val isStudentChoice = detail.selectedIndex == optIdx
+                            val isCorrectOption = q.correctOptionIndex == optIdx
+
+                            val optionBg = when {
+                                isCorrectOption -> EmeraldSuccess.copy(alpha = 0.2f)
+                                isStudentChoice && !isCorrect -> CoralRose.copy(alpha = 0.2f)
+                                else -> Color(0x10FFFFFF)
+                            }
+
+                            val optionBorder = when {
+                                isCorrectOption -> EmeraldSuccess
+                                isStudentChoice && !isCorrect -> CoralRose
+                                else -> Color(0x18FFFFFF)
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(optionBg)
+                                    .border(1.dp, optionBorder, RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "${('A' + optIdx)}. $optText",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isCorrectOption) Color.White else Color(0xFFCBD5E1),
+                                        fontWeight = if (isCorrectOption || isStudentChoice) FontWeight.Bold else FontWeight.Normal,
+                                        modifier = Modifier.weight(1f)
+                                    )
+
+                                    if (isCorrectOption) {
+                                        Text("✅ Correct", color = EmeraldSuccess, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    } else if (isStudentChoice) {
+                                        Text("❌ Your Answer", color = CoralRose, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+
+                        if (q.explanation.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0x1838BDF8)
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Filled.Lightbulb, null, tint = GoldenSpark, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Step-by-Step Solution & Principle:",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = GoldenSpark
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = q.explanation,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFFE2E8F0),
+                                        lineHeight = 18.sp
+                                    )
+                                }
                             }
                         }
                     }
@@ -469,7 +996,7 @@ fun MockTestResultScreen(
             }
         }
 
-        // 4. Return to Dashboard, Export PDF & Retake Buttons
+        // 7. BOTTOM ACTION BUTTONS
         item {
             Spacer(modifier = Modifier.height(10.dp))
             Column(
@@ -536,16 +1063,26 @@ fun MockTestResultScreen(
 @Composable
 private fun ScoreMetricBadge(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
     Surface(
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(12.dp),
         color = color.copy(alpha = 0.15f),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.3f)),
         modifier = modifier
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(vertical = 8.dp)
+            modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp)
         ) {
-            Text(text = value, color = color, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(text = label, color = Color(0xFFCBD5E1), style = MaterialTheme.typography.labelSmall)
+            Text(
+                text = value,
+                color = color,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold
+            )
+            Text(
+                text = label,
+                color = Color(0xFFCBD5E1),
+                style = MaterialTheme.typography.labelSmall
+            )
         }
     }
 }
@@ -553,15 +1090,15 @@ private fun ScoreMetricBadge(label: String, value: String, color: Color, modifie
 @Composable
 private fun StatusCountChip(label: String, count: Int, color: Color, modifier: Modifier = Modifier) {
     Surface(
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(10.dp),
         color = Color(0x18FFFFFF),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.5f)),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.4f)),
         modifier = modifier
     ) {
         Row(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(vertical = 6.dp)
+            modifier = Modifier.padding(vertical = 8.dp)
         ) {
             Box(
                 modifier = Modifier
@@ -575,6 +1112,49 @@ private fun StatusCountChip(label: String, count: Int, color: Color, modifier: M
                 color = Color.White,
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+private fun PatternCountBadge(
+    label: String,
+    count: Int,
+    subtitle: String,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = color.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.3f)),
+        modifier = modifier
+    ) {
+        Column(modifier = Modifier.padding(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = color,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "$count",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = Color.White,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFF94A3B8),
+                fontSize = 10.sp
             )
         }
     }

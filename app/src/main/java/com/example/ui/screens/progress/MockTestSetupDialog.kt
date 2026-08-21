@@ -44,14 +44,17 @@ fun MockTestSetupDialog(
     val defaultExam = userProfile?.examName?.ifBlank { "RRB NTPC (Railway)" } ?: "RRB NTPC (Railway)"
 
     var selectedExam by remember { mutableStateOf(defaultExam) }
+    var selectedQuestionSource by remember { mutableStateOf(QuestionSourceType.PYQ) }
     var selectedTestType by remember { mutableStateOf(MockTestType.FULL_MOCK) }
     var selectedSubject by remember { mutableStateOf("All Subjects") }
+    var selectedChapter by remember { mutableStateOf("All Chapters") }
     var selectedTopic by remember { mutableStateOf("All Topics") }
-    var selectedLanguage by remember { mutableStateOf("English") }
+    var selectedPyqYear by remember { mutableStateOf("All Years") }
+    var selectedPyqShift by remember { mutableStateOf("All Shifts") }
+    var selectedLanguage by remember { mutableStateOf(userProfile?.languagePreference ?: "English") }
     var selectedDifficulty by remember { mutableStateOf("Medium") }
-    var questionCount by remember { mutableIntStateOf(25) }
-    var timeLimitMinutes by remember { mutableIntStateOf(30) }
-    var selectedSourceFilter by remember { mutableStateOf(QuestionSourceFilter.BALANCED_MIX) }
+    var questionCount by remember { mutableIntStateOf(20) }
+    var timeLimitMinutes by remember { mutableIntStateOf(25) }
     var selectedCustomMaterialId by remember { mutableStateOf<Long?>(null) }
 
     val examOptions = listOf(
@@ -75,15 +78,18 @@ fun MockTestSetupDialog(
         else -> (listOf("All Subjects") + (userProfile?.subjects ?: listOf("Mathematics", "Physics", "General Studies"))).distinct()
     }
 
-    val topicSuggestions = when (selectedSubject) {
-        "Mathematics" -> listOf("All Topics", "Speed, Distance & Time", "Compound Interest", "Time & Work", "Averages & Percentages")
-        "General Intelligence & Reasoning" -> listOf("All Topics", "Analogies", "Coding-Decoding", "Syllogism", "Blood Relations")
-        "General Awareness" -> listOf("All Topics", "Railway GK & History", "Indian Polity & Governance", "General Science - Physics")
-        "Physics" -> listOf("All Topics", "Electrostatics", "Current Electricity", "Mechanics", "Optics")
-        "Chemistry" -> listOf("All Topics", "Coordination Compounds", "Chemical Bonding", "Organic Reactions")
-        "Biology" -> listOf("All Topics", "Cell Structure & Function", "Genetics & Evolution", "Human Physiology")
-        else -> listOf("All Topics", "High Yield Concepts", "Core Syllabus", "Past Exam Questions")
+    val chapterOptions = when (selectedSubject) {
+        "Mathematics", "Quantitative Aptitude" -> listOf("All Chapters", "Number System", "Arithmetic", "Algebra", "Geometry & Mensuration", "Trigonometry")
+        "General Intelligence & Reasoning" -> listOf("All Chapters", "Analogies & Classification", "Coding-Decoding", "Syllogism", "Blood Relations", "Direction Sense")
+        "General Awareness", "General Studies Paper 1" -> listOf("All Chapters", "Modern Indian History", "Indian Polity & Constitution", "Geography", "General Science", "Economy")
+        "Physics" -> listOf("All Chapters", "Electrostatics & Current", "Mechanics & Laws of Motion", "Optics", "Thermodynamics", "Modern Physics")
+        "Chemistry" -> listOf("All Chapters", "Chemical Bonding", "Organic Chemistry Basics", "Coordination Compounds", "Electrochemistry")
+        "Biology" -> listOf("All Chapters", "Genetics & Evolution", "Human Physiology", "Plant Physiology", "Cell Structure & Function")
+        else -> listOf("All Chapters", "Core Concepts", "Previous Year Topics", "High Yield Concepts")
     }
+
+    val pyqYears = listOf("All Years", "2024", "2023", "2022", "2021", "2019", "2018")
+    val pyqShifts = listOf("All Shifts", "Shift 1 (Morning)", "Shift 2 (Afternoon)", "Shift 3 (Evening)")
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -99,7 +105,7 @@ fun MockTestSetupDialog(
             GlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.92f)
+                    .fillMaxHeight(0.94f)
                     .testTag("mock_test_setup_dialog"),
                 shape = RoundedCornerShape(24.dp),
                 fillAlpha = 0.95f
@@ -107,7 +113,7 @@ fun MockTestSetupDialog(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(20.dp)
+                        .padding(18.dp)
                 ) {
                     // Header
                     Row(
@@ -118,23 +124,23 @@ fun MockTestSetupDialog(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
+                                    .size(38.dp)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(Brush.linearGradient(listOf(NeonCyan, ElectricViolet))),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Filled.Quiz, null, tint = Color(0xFF050814), modifier = Modifier.size(20.dp))
+                                Icon(Icons.Filled.Quiz, null, tint = Color(0xFF050814), modifier = Modifier.size(22.dp))
                             }
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Text(
-                                    text = "Configure Mock Test",
+                                    text = "Configure CBT Test",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
                                 Text(
-                                    text = "Timed, authentic exam simulation",
+                                    text = "Authentic PYQs & Timed Exam Drills",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = Color(0xFF94A3B8)
                                 )
@@ -149,356 +155,299 @@ fun MockTestSetupDialog(
                         }
                     }
 
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 12.dp),
-                        color = Color(0x20FFFFFF)
-                    )
+                    HorizontalDivider(color = Color(0x20FFFFFF), modifier = Modifier.padding(vertical = 10.dp))
 
-                    // Scrollable Config Body
+                    // Scrollable Configuration Body
                     Column(
                         modifier = Modifier
                             .weight(1f)
                             .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        // 1. Test Mode & Type Selection
-                        ConfigSectionTitle(icon = Icons.Filled.Psychology, title = "Test Type & Strategy")
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            items(MockTestType.values()) { type ->
-                                val isSel = selectedTestType == type
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = if (isSel) NeonCyan else Color(0x18FFFFFF),
-                                    border = if (isSel) null else BorderStroke(1.dp, Color(0x20FFFFFF)),
-                                    modifier = Modifier.springClickable(testTag = "setup_type_${type.name}") {
-                                        selectedTestType = type
-                                        if (type == MockTestType.FULL_MOCK) {
+                        // 1. Target Exam Selector
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            ConfigSectionTitle(icon = Icons.Filled.School, title = "Target Examination")
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(examOptions) { exam ->
+                                    val isSelected = selectedExam == exam
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isSelected) NeonCyan.copy(alpha = 0.2f) else Color(0x14FFFFFF),
+                                        border = BorderStroke(1.dp, if (isSelected) NeonCyan else Color(0x25FFFFFF)),
+                                        modifier = Modifier.springClickable {
+                                            selectedExam = exam
                                             selectedSubject = "All Subjects"
-                                            selectedTopic = "All Topics"
-                                            questionCount = 30
-                                            timeLimitMinutes = 35
-                                        } else if (type == MockTestType.WEAK_AREAS) {
-                                            questionCount = 15
-                                            timeLimitMinutes = 20
-                                        } else if (type == MockTestType.PREVIOUS_MISTAKES) {
-                                            questionCount = 15
-                                            timeLimitMinutes = 20
-                                        } else if (type == MockTestType.TIMED_TEST) {
-                                            questionCount = 20
-                                            timeLimitMinutes = 15
+                                            selectedChapter = "All Chapters"
                                         }
-                                    }
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                        horizontalAlignment = Alignment.Start
                                     ) {
                                         Text(
-                                            text = type.displayName,
-                                            color = if (isSel) Color(0xFF050814) else Color.White,
+                                            text = exam,
+                                            color = if (isSelected) NeonCyan else Color(0xFFE2E8F0),
                                             style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = type.description,
-                                            color = if (isSel) Color(0xFF1E293B) else Color(0xFF94A3B8),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            maxLines = 1
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                                         )
                                     }
                                 }
                             }
                         }
 
-                        // 2. Language Selection
-                        ConfigSectionTitle(icon = Icons.Filled.Translate, title = "Language")
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            listOf("English", "Hindi", "Bilingual").forEach { lang ->
-                                val isSel = selectedLanguage.equals(lang, ignoreCase = true)
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(36.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(if (isSel) ElectricViolet else Color(0x18FFFFFF))
-                                        .border(1.dp, if (isSel) ElectricViolet else Color(0x20FFFFFF), RoundedCornerShape(10.dp))
-                                        .springClickable(testTag = "setup_lang_$lang") {
-                                            selectedLanguage = lang
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = lang,
-                                        color = Color.White,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
-                                    )
-                                }
+                        // 2. Question Source Engine Selector (PYQ, Chapter Practice, Exam Pattern, Current Affairs, Mixed)
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            ConfigSectionTitle(icon = Icons.Filled.Source, title = "Question Source Engine")
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                QuestionSourceOptionCard(
+                                    title = "🎯 Authentic Previous Year Questions (PYQs)",
+                                    description = "Real, verified exam questions tagged by official year & shift",
+                                    badgeText = "Verified Official",
+                                    isSelected = selectedQuestionSource == QuestionSourceType.PYQ,
+                                    accentColor = GoldenSpark,
+                                    onClick = { selectedQuestionSource = QuestionSourceType.PYQ }
+                                )
+
+                                QuestionSourceOptionCard(
+                                    title = "📖 Chapter-wise Practice Drill",
+                                    description = "Target specific chapters and syllabus topics with structured MCQs",
+                                    badgeText = "Syllabus Focused",
+                                    isSelected = selectedQuestionSource == QuestionSourceType.CHAPTER_PRACTICE,
+                                    accentColor = ElectricViolet,
+                                    onClick = { selectedQuestionSource = QuestionSourceType.CHAPTER_PRACTICE }
+                                )
+
+                                QuestionSourceOptionCard(
+                                    title = "⚡ Full Exam Pattern Simulation",
+                                    description = "Standard exam weightage, section ratio, and real negative marking",
+                                    badgeText = "Real CBT",
+                                    isSelected = selectedQuestionSource == QuestionSourceType.EXAM_PATTERN,
+                                    accentColor = NeonCyan,
+                                    onClick = { selectedQuestionSource = QuestionSourceType.EXAM_PATTERN }
+                                )
+
+                                QuestionSourceOptionCard(
+                                    title = "📰 Current Affairs 2024 & GK",
+                                    description = "Latest national, international, science & sports events for exams",
+                                    badgeText = "2024 Updated",
+                                    isSelected = selectedQuestionSource == QuestionSourceType.CURRENT_AFFAIRS,
+                                    accentColor = Color(0xFF38BDF8),
+                                    onClick = { selectedQuestionSource = QuestionSourceType.CURRENT_AFFAIRS }
+                                )
                             }
                         }
 
-                        // 3. Target Exam
-                        ConfigSectionTitle(icon = Icons.Filled.School, title = "Target Exam")
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            items(examOptions) { exam ->
-                                val isSel = selectedExam == exam
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = if (isSel) NeonCyan else Color(0x18FFFFFF),
-                                    border = if (isSel) null else BorderStroke(1.dp, Color(0x20FFFFFF)),
-                                    modifier = Modifier.springClickable(testTag = "setup_exam_${exam.take(4)}") {
-                                        selectedExam = exam
-                                    }
-                                ) {
-                                    Text(
-                                        text = exam,
-                                        color = if (isSel) Color(0xFF050814) else Color.White,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                                    )
-                                }
-                            }
-                        }
+                        // 3. PYQ Specific Filters (Year & Shift)
+                        if (selectedQuestionSource == QuestionSourceType.PYQ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(GoldenSpark.copy(alpha = 0.08f))
+                                    .border(1.dp, GoldenSpark.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "PYQ Filter: Exam Year & Shift",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = GoldenSpark
+                                )
 
-                        // 2. Subject
-                        ConfigSectionTitle(icon = Icons.Filled.MenuBook, title = "Subject")
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            items(subjectOptions) { sub ->
-                                val isSel = selectedSubject.equals(sub, ignoreCase = true)
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = if (isSel) ElectricViolet else Color(0x18FFFFFF),
-                                    border = if (isSel) null else BorderStroke(1.dp, Color(0x20FFFFFF)),
-                                    modifier = Modifier.springClickable(testTag = "setup_sub_$sub") {
-                                        selectedSubject = sub
-                                    }
-                                ) {
-                                    Text(
-                                        text = sub,
-                                        color = Color.White,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                                    )
-                                }
-                            }
-                        }
-
-                        // 3. Topic / Chapter
-                        ConfigSectionTitle(icon = Icons.Filled.Topic, title = "Chapter / Topic")
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            items(topicSuggestions) { topic ->
-                                val isSel = selectedTopic == topic
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = if (isSel) GoldenSpark else Color(0x18FFFFFF),
-                                    border = if (isSel) null else BorderStroke(1.dp, Color(0x20FFFFFF)),
-                                    modifier = Modifier.springClickable {
-                                        selectedTopic = topic
-                                    }
-                                ) {
-                                    Text(
-                                        text = topic,
-                                        color = if (isSel) Color(0xFF050814) else Color.White,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                                    )
-                                }
-                            }
-                        }
-
-                        // 4. Question Source Selection (CRITICAL)
-                        ConfigSectionTitle(icon = Icons.Filled.Source, title = "Question Source & Authenticity")
-                        Text(
-                            text = "Every question is labeled with its verified origin.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF94A3B8)
-                        )
-
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            QuestionSourceOptionCard(
-                                title = "⚖️ Balanced Mix (Recommended)",
-                                description = "50% authentic Previous-Year Questions + 50% AI Practice questions",
-                                badgeText = "PYQ + AI",
-                                isSelected = selectedSourceFilter == QuestionSourceFilter.BALANCED_MIX,
-                                accentColor = NeonCyan,
-                                onClick = {
-                                    selectedSourceFilter = QuestionSourceFilter.BALANCED_MIX
-                                    selectedCustomMaterialId = null
-                                }
-                            )
-
-                            QuestionSourceOptionCard(
-                                title = "🏛️ Official Previous-Year Questions Only",
-                                description = "Authentic questions from JEE, NEET, CBSE Boards & SAT archives",
-                                badgeText = "Previous Year",
-                                isSelected = selectedSourceFilter == QuestionSourceFilter.PREVIOUS_YEAR_ONLY,
-                                accentColor = GoldenSpark,
-                                onClick = {
-                                    selectedSourceFilter = QuestionSourceFilter.PREVIOUS_YEAR_ONLY
-                                    selectedCustomMaterialId = null
-                                }
-                            )
-
-                            QuestionSourceOptionCard(
-                                title = "🤖 AI-Generated Practice Only",
-                                description = "Tailored exam-pattern questions generated fresh by Gemini AI",
-                                badgeText = "AI Generated",
-                                isSelected = selectedSourceFilter == QuestionSourceFilter.AI_GENERATED_ONLY,
-                                accentColor = EmeraldSuccess,
-                                onClick = {
-                                    selectedSourceFilter = QuestionSourceFilter.AI_GENERATED_ONLY
-                                    selectedCustomMaterialId = null
-                                }
-                            )
-
-                            QuestionSourceOptionCard(
-                                title = "📝 User Material / Custom Practice Bank",
-                                description = "Questions from your uploaded or pasted practice notes",
-                                badgeText = "Practice",
-                                isSelected = selectedSourceFilter == QuestionSourceFilter.PRACTICE_ONLY,
-                                accentColor = ElectricViolet,
-                                onClick = {
-                                    selectedSourceFilter = QuestionSourceFilter.PRACTICE_ONLY
-                                }
-                            )
-
-                            if (selectedSourceFilter == QuestionSourceFilter.PRACTICE_ONLY) {
-                                Surface(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = Color(0x258B5CF6)
-                                ) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
+                                // Year chips
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    items(pyqYears) { yr ->
+                                        val isSel = selectedPyqYear == yr
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (isSel) GoldenSpark else Color(0x18FFFFFF),
+                                            modifier = Modifier.springClickable { selectedPyqYear = yr }
                                         ) {
                                             Text(
-                                                text = "Saved User Materials (${userMaterials.size})",
-                                                style = MaterialTheme.typography.labelMedium,
+                                                text = yr,
+                                                color = if (isSel) Color(0xFF050814) else Color.White,
+                                                style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.Bold,
-                                                color = Color.White
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                                             )
-                                            TextButton(
-                                                onClick = onManageMaterials,
-                                                contentPadding = PaddingValues(0.dp)
-                                            ) {
-                                                Text("+ Add / Manage", color = NeonCyan, style = MaterialTheme.typography.labelSmall)
-                                            }
                                         }
+                                    }
+                                }
 
-                                        if (userMaterials.isEmpty()) {
+                                // Shift chips
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    items(pyqShifts) { shift ->
+                                        val isSel = selectedPyqShift == shift
+                                        val shortShift = shift.split(" ").take(2).joinToString(" ")
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (isSel) GoldenSpark else Color(0x18FFFFFF),
+                                            modifier = Modifier.springClickable { selectedPyqShift = shift }
+                                        ) {
                                             Text(
-                                                text = "No custom material uploaded yet. Tap '+ Add / Manage' to paste test questions, or default practice bank will be used.",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = Color(0xFFCBD5E1)
+                                                text = shortShift,
+                                                color = if (isSel) Color(0xFF050814) else Color.White,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                                             )
-                                        } else {
-                                            LazyRow(
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                                modifier = Modifier.padding(top = 6.dp)
-                                            ) {
-                                                items(userMaterials) { mat ->
-                                                    val isSelected = selectedCustomMaterialId == mat.id
-                                                    Surface(
-                                                        shape = RoundedCornerShape(8.dp),
-                                                        color = if (isSelected) ElectricViolet else Color(0x30FFFFFF),
-                                                        modifier = Modifier.springClickable {
-                                                            selectedCustomMaterialId = if (isSelected) null else mat.id
-                                                        }
-                                                    ) {
-                                                        Text(
-                                                            text = "${mat.title} (${mat.questionCount} Qs)",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            color = Color.White,
-                                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                                        )
-                                                    }
-                                                }
-                                            }
                                         }
                                     }
                                 }
                             }
                         }
 
-                        // 5. Difficulty Level
-                        ConfigSectionTitle(icon = Icons.Filled.SignalCellularAlt, title = "Difficulty")
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf("Easy", "Medium", "Hard", "Benchmark Level").forEach { diff ->
-                                val isSel = selectedDifficulty == diff
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(38.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(if (isSel) NeonCyan else Color(0x18FFFFFF))
-                                        .border(1.dp, if (isSel) NeonCyan else Color(0x20FFFFFF), RoundedCornerShape(10.dp))
-                                        .springClickable { selectedDifficulty = diff },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = diff,
-                                        color = if (isSel) Color(0xFF050814) else Color.White,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
-                                    )
+                        // 4. Subject & Chapter Cascading Filters
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            ConfigSectionTitle(icon = Icons.Filled.MenuBook, title = "Subject & Chapter Scope")
+                            
+                            // Subject Selector
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(subjectOptions) { subj ->
+                                    val isSelected = selectedSubject == subj
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isSelected) ElectricViolet.copy(alpha = 0.25f) else Color(0x14FFFFFF),
+                                        border = BorderStroke(1.dp, if (isSelected) ElectricViolet else Color(0x25FFFFFF)),
+                                        modifier = Modifier.springClickable {
+                                            selectedSubject = subj
+                                            selectedChapter = "All Chapters"
+                                        }
+                                    ) {
+                                        Text(
+                                            text = subj,
+                                            color = if (isSelected) ElectricViolet else Color(0xFFE2E8F0),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Chapter Selector
+                            if (selectedSubject != "All Subjects") {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    items(chapterOptions) { ch ->
+                                        val isSel = selectedChapter == ch
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (isSel) Color(0xFF8B5CF6) else Color(0x14FFFFFF),
+                                            modifier = Modifier.springClickable { selectedChapter = ch }
+                                        ) {
+                                            Text(
+                                                text = ch,
+                                                color = if (isSel) Color.White else Color(0xFFCBD5E1),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
 
-                        // 6. Number of Questions & Time Limit
+                        // 5. Test Parameters: Language, Difficulty, Question Count, Time Limit
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            // Question count
+                            // Language
                             Column(modifier = Modifier.weight(1f)) {
-                                ConfigSectionTitle(icon = Icons.Filled.Numbers, title = "Questions: $questionCount")
+                                ConfigSectionTitle(icon = Icons.Filled.Language, title = "Language")
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    listOf(10, 20, 30, 50, 100).forEach { count ->
-                                        val isSel = questionCount == count
+                                    listOf("English", "Hindi").forEach { lang ->
+                                        val isSel = selectedLanguage.equals(lang, ignoreCase = true)
+                                        val label = if (lang == "Hindi") "हिंदी" else "English"
                                         Box(
                                             modifier = Modifier
                                                 .weight(1f)
-                                                .height(34.dp)
+                                                .height(36.dp)
                                                 .clip(RoundedCornerShape(8.dp))
                                                 .background(if (isSel) NeonCyan else Color(0x18FFFFFF))
-                                                .springClickable(testTag = "setup_qcount_$count") {
-                                                    questionCount = count
-                                                    timeLimitMinutes = (count * 1.2).toInt().coerceAtLeast(5)
+                                                .springClickable { selectedLanguage = lang },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                color = if (isSel) Color(0xFF050814) else Color.White,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Difficulty
+                            Column(modifier = Modifier.weight(1f)) {
+                                ConfigSectionTitle(icon = Icons.Filled.Speed, title = "Difficulty")
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    listOf("Easy", "Medium", "Hard").forEach { diff ->
+                                        val isSel = selectedDifficulty == diff
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(36.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (isSel) ElectricViolet else Color(0x18FFFFFF))
+                                                .springClickable { selectedDifficulty = diff },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = diff,
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 6. Question Count & Duration
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            // Question Count
+                            Column(modifier = Modifier.weight(1f)) {
+                                ConfigSectionTitle(icon = Icons.Filled.FormatListNumbered, title = "Questions: $questionCount")
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    listOf(10, 20, 25, 50).forEach { cnt ->
+                                        val isSel = questionCount == cnt
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(36.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (isSel) NeonCyan else Color(0x18FFFFFF))
+                                                .springClickable {
+                                                    questionCount = cnt
+                                                    timeLimitMinutes = when (cnt) {
+                                                        10 -> 12
+                                                        20 -> 25
+                                                        25 -> 30
+                                                        50 -> 60
+                                                        else -> 30
+                                                    }
                                                 },
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
-                                                text = "$count",
+                                                text = "$cnt",
                                                 color = if (isSel) Color(0xFF050814) else Color.White,
-                                                style = MaterialTheme.typography.labelSmall,
+                                                style = MaterialTheme.typography.labelMedium,
                                                 fontWeight = FontWeight.Bold
                                             )
                                         }
@@ -513,12 +462,12 @@ fun MockTestSetupDialog(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    listOf(5, 10, 15, 30).forEach { mins ->
+                                    listOf(10, 15, 25, 45, 60).forEach { mins ->
                                         val isSel = timeLimitMinutes == mins
                                         Box(
                                             modifier = Modifier
                                                 .weight(1f)
-                                                .height(34.dp)
+                                                .height(36.dp)
                                                 .clip(RoundedCornerShape(8.dp))
                                                 .background(if (isSel) CoralRose else Color(0x18FFFFFF))
                                                 .springClickable { timeLimitMinutes = mins },
@@ -527,7 +476,7 @@ fun MockTestSetupDialog(
                                             Text(
                                                 text = "${mins}m",
                                                 color = Color.White,
-                                                style = MaterialTheme.typography.labelMedium,
+                                                style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.Bold
                                             )
                                         }
@@ -537,22 +486,25 @@ fun MockTestSetupDialog(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     // Launch CTA Button
                     GlassButton(
-                        text = "🚀 Launch Mock Test ($questionCount Qs • ${timeLimitMinutes}m)",
+                        text = "🚀 Launch CBT Test ($questionCount Qs • ${timeLimitMinutes} mins)",
                         onClick = {
                             val config = MockTestConfig(
                                 exam = selectedExam,
                                 testType = selectedTestType,
+                                questionSource = selectedQuestionSource,
                                 subject = selectedSubject,
-                                topic = selectedTopic,
+                                chapter = selectedChapter,
+                                topic = if (selectedChapter != "All Chapters") selectedChapter else selectedTopic,
+                                pyqYear = selectedPyqYear,
+                                pyqShift = selectedPyqShift,
                                 difficulty = selectedDifficulty,
                                 language = selectedLanguage,
                                 questionCount = questionCount,
                                 timeLimitMinutes = timeLimitMinutes,
-                                sourceFilter = selectedSourceFilter,
                                 customMaterialId = selectedCustomMaterialId
                             )
                             onStartTest(config)

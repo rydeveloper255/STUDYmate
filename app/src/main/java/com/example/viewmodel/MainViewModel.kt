@@ -74,20 +74,45 @@ data class FocusTimerState(
 
 data class ActiveTestState(
     val isTestInProgress: Boolean = false,
-    val subject: String = "Physics",
-    val title: String = "AI Practice Test",
+    val requestId: String = "",
+    val subject: String = "All Subjects",
+    val title: String = "Mock Test",
     val questions: List<Question> = emptyList(),
     val currentQuestionIndex: Int = 0,
     val selectedAnswers: Map<Int, Int> = emptyMap(), // questionIndex -> optionIndex
     val markedForReview: Set<Int> = emptySet(),
+    val visitedQuestions: Set<Int> = emptySet(),
+    val timeSpentSeconds: Map<Int, Int> = emptyMap(), // questionIndex -> seconds spent
+    val currentQuestionEnteredTimestamp: Long = 0L,
+    val startedAtTimestamp: Long = 0L,
+    val expiresAtTimestamp: Long = 0L,
+    val totalDurationSeconds: Int = 600,
     val remainingSeconds: Int = 600,
     val isCompleted: Boolean = false,
+    val isSubmitting: Boolean = false,
+    val submissionError: String? = null,
     val completedAttempt: MockTestAttempt? = null,
     val detailedQuestions: List<QuestionAttemptDetail> = emptyList(),
+    val timeAnalysis: TimeAnalysisResult? = null,
+    val testIntelligence: com.example.service.intelligence.TestIntelligenceResult? = null,
+    val isNovaAnalyzing: Boolean = false,
     val isPaletteOpen: Boolean = false,
     val isSubmitConfirmOpen: Boolean = false,
     val config: MockTestConfig = MockTestConfig()
-)
+) {
+    fun getCbtState(questionIndex: Int): QuestionCbtState {
+        val isAnswered = selectedAnswers.containsKey(questionIndex)
+        val isMarked = markedForReview.contains(questionIndex)
+        val isVisited = visitedQuestions.contains(questionIndex) || questionIndex == currentQuestionIndex
+        return when {
+            isAnswered && isMarked -> QuestionCbtState.ANSWERED_AND_MARKED
+            isAnswered -> QuestionCbtState.ANSWERED
+            isMarked -> QuestionCbtState.MARKED_FOR_REVIEW
+            isVisited -> QuestionCbtState.NOT_ANSWERED
+            else -> QuestionCbtState.NOT_VISITED
+        }
+    }
+}
 
 class MainViewModel(
     application: Application,
@@ -280,11 +305,61 @@ class MainViewModel(
     private val _flashcardMessage = MutableStateFlow<String?>(null)
     val flashcardMessage: StateFlow<String?> = _flashcardMessage.asStateFlow()
 
+    private val sessionPersistence by lazy { com.example.service.intelligence.TestSessionPersistence(getApplication()) }
+
+    private val _pendingResumeSession = MutableStateFlow<ActiveTestState?>(null)
+    val pendingResumeSession: StateFlow<ActiveTestState?> = _pendingResumeSession.asStateFlow()
+
     private val _activeTestState = MutableStateFlow(ActiveTestState())
     val activeTestState: StateFlow<ActiveTestState> = _activeTestState.asStateFlow()
 
+    init {
+        checkAndRestoreActiveSession()
+    }
+
+    fun checkAndRestoreActiveSession() {
+        viewModelScope.launch {
+            val restored = sessionPersistence.loadActiveSession()
+            if (restored != null && !restored.isCompleted && restored.questions.isNotEmpty()) {
+                if (restored.remainingSeconds > 0) {
+                    _pendingResumeSession.value = restored
+                } else {
+                    // Test expired while app was closed -> auto-submit cleanly so answers are preserved!
+                    _activeTestState.value = restored
+                    submitMockTest()
+                }
+            }
+        }
+    }
+
+    fun resumePendingTestSession() {
+        val pending = _pendingResumeSession.value ?: return
+        _pendingResumeSession.value = null
+        _activeTestState.value = pending
+        startMockTestTimerJob()
+    }
+
+    fun discardPendingTestSession() {
+        _pendingResumeSession.value = null
+        sessionPersistence.clearActiveSession()
+    }
+
     private val _isTestGenerating = MutableStateFlow(false)
     val isTestGenerating: StateFlow<Boolean> = _isTestGenerating.asStateFlow()
+
+    private val _generationError = MutableStateFlow<TestGenerationError?>(null)
+    val generationError: StateFlow<TestGenerationError?> = _generationError.asStateFlow()
+
+    private val _insufficientPyqNotice = MutableStateFlow<InsufficientPyqNotice?>(null)
+    val insufficientPyqNotice: StateFlow<InsufficientPyqNotice?> = _insufficientPyqNotice.asStateFlow()
+
+    fun clearGenerationError() {
+        _generationError.value = null
+    }
+
+    fun dismissInsufficientPyqNotice() {
+        _insufficientPyqNotice.value = null
+    }
 
     private val _mistakeDiagnosis = MutableStateFlow<String?>(null)
     val mistakeDiagnosis: StateFlow<String?> = _mistakeDiagnosis.asStateFlow()
@@ -1378,171 +1453,211 @@ class MainViewModel(
     }
 
     val examQuestionBankRepository = com.example.data.repository.ExamQuestionBankRepository()
+    val questionSourceEngine by lazy { com.example.service.intelligence.QuestionSourceEngine(examQuestionBankRepository, geminiRepository) }
     private var mockTestTimerJob: kotlinx.coroutines.Job? = null
+
+    private var pendingTestConfig: MockTestConfig? = null
 
     // --- Mock Test & Practice Actions ---
 
-    fun startMockTestWithConfig(config: MockTestConfig) {
+    fun startMockTestWithConfig(config: MockTestConfig, forceStartWithAvailable: Boolean = false) {
+        pendingTestConfig = config
+        if (_isTestGenerating.value) {
+            android.util.Log.w("MainViewModel", "Test generation in progress. Ignoring duplicate request.")
+            return
+        }
+
         viewModelScope.launch {
             _isTestGenerating.value = true
+            _generationError.value = null
+            _insufficientPyqNotice.value = null
 
-            val targetExamName = config.exam.ifBlank { selectedExam.value.examName }
-            val masteries = allTopicMasteries.value
-            val currentMistakes = mistakes.value
-            val flaggedIds = studyRepository.getFlaggedQuestionIds()
-            val historyList = studyRepository.allQuestionHistory.firstOrNull() ?: emptyList()
+            try {
+                val targetExamName = config.exam.ifBlank { selectedExam.value.examName }
+                val masteries = allTopicMasteries.value
+                val currentMistakes = mistakes.value
+                val flaggedIds = studyRepository.getFlaggedQuestionIds()
+                val historyList = studyRepository.allQuestionHistory.firstOrNull() ?: emptyList()
 
-            val weakTopicsSet = masteries.filter { it.masteryState == "WEAK" || it.masteryScore < 60 }.map { it.topic }.toSet()
-            val mistakeTopicsSet = currentMistakes.filter { !it.isMastered }.map { it.topic }.toSet()
+                val weakTopicsSet = masteries.filter { it.masteryState == "WEAK" || it.masteryScore < 60 }.map { it.topic }.toSet()
+                val mistakeTopicsSet = currentMistakes.filter { !it.isMastered }.map { it.topic }.toSet()
 
-            var questions = when (config.testType) {
-                MockTestType.WEAK_AREAS -> {
-                    val candidateAll = examQuestionBankRepository.getQuestionsForTest(
-                        examName = targetExamName,
-                        subject = config.subject,
-                        topic = "All Topics",
-                        difficulty = "Mixed",
-                        language = config.language,
-                        desiredCount = 50,
-                        testType = config.testType
-                    )
-                    com.example.service.intelligence.SmartMockEngine.filterWeakAreaQuestions(
-                        allQuestions = candidateAll,
-                        topicMasteries = masteries,
-                        mistakes = currentMistakes,
-                        targetSubject = config.subject,
-                        desiredCount = config.questionCount
-                    )
-                }
-                MockTestType.REVISION_TEST -> {
-                    val candidateAll = examQuestionBankRepository.getQuestionsForTest(
-                        examName = targetExamName,
-                        subject = config.subject,
-                        topic = "All Topics",
-                        difficulty = "Mixed",
-                        language = config.language,
-                        desiredCount = 50,
-                        testType = config.testType
-                    )
-                    com.example.service.intelligence.SmartMockEngine.filterRevisionQuestions(
-                        allQuestions = candidateAll,
-                        topicMasteries = masteries,
-                        targetSubject = config.subject,
-                        desiredCount = config.questionCount
-                    )
-                }
-                MockTestType.PREVIOUS_MISTAKES -> {
-                    val candidateAll = examQuestionBankRepository.getQuestionsForTest(
-                        examName = targetExamName,
-                        subject = config.subject,
-                        topic = "All Topics",
-                        difficulty = "Mixed",
-                        language = config.language,
-                        desiredCount = 50,
-                        testType = config.testType
-                    )
-                    com.example.service.intelligence.SmartMockEngine.filterPreviousMistakeQuestions(
-                        allQuestions = candidateAll,
-                        mistakes = currentMistakes,
-                        targetSubject = config.subject,
-                        desiredCount = config.questionCount
-                    )
-                }
-                else -> {
-                    val candidateAll = examQuestionBankRepository.getQuestionsForTest(
-                        examName = targetExamName,
-                        subject = config.subject,
-                        topic = config.topic,
-                        difficulty = config.difficulty,
-                        language = config.language,
-                        desiredCount = 50,
-                        testType = config.testType
-                    )
-                    com.example.service.intelligence.SmartMockEngine.rankAndSelectQuestions(
-                        candidates = candidateAll,
-                        targetExamName = targetExamName,
-                        targetSubject = config.subject,
-                        targetTopic = config.topic,
-                        targetDifficulty = config.difficulty,
-                        targetLanguage = config.language,
-                        history = historyList,
-                        weakTopics = weakTopicsSet,
-                        mistakeTopics = mistakeTopicsSet,
-                        flaggedQuestionIds = flaggedIds,
-                        desiredCount = config.questionCount,
-                        testType = config.testType
-                    )
-                }
-            }
-
-            // 2. If additional questions needed, request exam-aware questions from AI
-            if (questions.size < config.questionCount) {
-                val needCount = config.questionCount - questions.size
-                val aiResult = geminiRepository.generateMockTestQuestions(
-                    subject = if (config.subject == "All Subjects") (selectedExamSubjects.value.firstOrNull()?.name ?: "General") else config.subject,
-                    chapter = config.topic,
-                    difficulty = config.difficulty,
-                    count = needCount,
-                    examName = targetExamName,
-                    language = config.language
-                )
-                aiResult.onSuccess { aiQs ->
-                    val tagged = aiQs.map { q ->
-                        q.copy(
-                            subject = if (q.subject.isBlank() || q.subject == "General") config.subject else q.subject,
-                            topic = if (q.topic.isBlank()) config.topic else q.topic,
-                            source = QuestionSource.AI_GENERATED,
-                            sourceLabel = "AI Exam Concept",
-                            yearOrTag = targetExamName
+                val curationResult = when (config.testType) {
+                    MockTestType.WEAK_AREAS -> {
+                        val candidateAll = examQuestionBankRepository.getQuestionsForTest(
+                            examName = targetExamName,
+                            subject = config.subject,
+                            topic = "All Topics",
+                            difficulty = "Mixed",
+                            language = config.language,
+                            desiredCount = 50,
+                            testType = config.testType
+                        )
+                        val weakFiltered = com.example.service.intelligence.SmartMockEngine.filterWeakAreaQuestions(
+                            allQuestions = candidateAll,
+                            topicMasteries = masteries,
+                            mistakes = currentMistakes,
+                            targetSubject = config.subject,
+                            desiredCount = config.questionCount
+                        )
+                        com.example.service.intelligence.QuestionSourceResult.Success(
+                            questions = weakFiltered,
+                            requestedCount = config.questionCount,
+                            sourceSummary = "Targeted Weak Areas Practice"
                         )
                     }
-                    questions = com.example.service.intelligence.SmartMockEngine.deduplicateQuestions(
-                        com.example.service.intelligence.SmartMockEngine.validateAndFilterQuestions(questions + tagged)
-                    )
+                    MockTestType.REVISION_TEST -> {
+                        val candidateAll = examQuestionBankRepository.getQuestionsForTest(
+                            examName = targetExamName,
+                            subject = config.subject,
+                            topic = "All Topics",
+                            difficulty = "Mixed",
+                            language = config.language,
+                            desiredCount = 50,
+                            testType = config.testType
+                        )
+                        val revisionFiltered = com.example.service.intelligence.SmartMockEngine.filterRevisionQuestions(
+                            allQuestions = candidateAll,
+                            topicMasteries = masteries,
+                            targetSubject = config.subject,
+                            desiredCount = config.questionCount
+                        )
+                        com.example.service.intelligence.QuestionSourceResult.Success(
+                            questions = revisionFiltered,
+                            requestedCount = config.questionCount,
+                            sourceSummary = "Spaced Revision Test"
+                        )
+                    }
+                    MockTestType.PREVIOUS_MISTAKES -> {
+                        val candidateAll = examQuestionBankRepository.getQuestionsForTest(
+                            examName = targetExamName,
+                            subject = config.subject,
+                            topic = "All Topics",
+                            difficulty = "Mixed",
+                            language = config.language,
+                            desiredCount = 50,
+                            testType = config.testType
+                        )
+                        val mistakeFiltered = com.example.service.intelligence.SmartMockEngine.filterPreviousMistakeQuestions(
+                            allQuestions = candidateAll,
+                            mistakes = currentMistakes,
+                            targetSubject = config.subject,
+                            desiredCount = config.questionCount
+                        )
+                        com.example.service.intelligence.QuestionSourceResult.Success(
+                            questions = mistakeFiltered,
+                            requestedCount = config.questionCount,
+                            sourceSummary = "Past Mistakes Retest"
+                        )
+                    }
+                    else -> {
+                        questionSourceEngine.curateTestQuestions(
+                            config = config,
+                            examContext = activeExamContext.value,
+                            historyList = historyList,
+                            weakTopics = weakTopicsSet,
+                            mistakeTopics = mistakeTopicsSet,
+                            flaggedQuestionIds = flaggedIds,
+                            allowPartialPyqOrFill = forceStartWithAvailable
+                        )
+                    }
                 }
+
+                when (curationResult) {
+                    is com.example.service.intelligence.QuestionSourceResult.Success -> {
+                        val finalQuestions = curationResult.questions
+                        val totalSeconds = (config.timeLimitMinutes * 60).coerceAtLeast(60)
+                        val now = System.currentTimeMillis()
+                        val expiresAt = now + (totalSeconds * 1000L)
+
+                        val newState = ActiveTestState(
+                            isTestInProgress = true,
+                            requestId = "test_${now}",
+                            subject = config.subject,
+                            title = when (config.testType) {
+                                MockTestType.FULL_MOCK -> "$targetExamName Full Mock Test"
+                                MockTestType.SUBJECT_TEST -> "$targetExamName - ${config.subject}"
+                                MockTestType.CHAPTER_TEST -> "$targetExamName - Chapter: ${config.chapter}"
+                                MockTestType.TOPIC_TEST -> "$targetExamName - Topic: ${config.topic}"
+                                MockTestType.WEAK_AREAS -> "$targetExamName - Weak Areas Targeted Test"
+                                MockTestType.REVISION_TEST -> "$targetExamName - Spaced Revision Test"
+                                MockTestType.PREVIOUS_MISTAKES -> "$targetExamName - Past Mistakes Retest"
+                                MockTestType.ADAPTIVE_PRACTICE -> "$targetExamName - Adaptive Live Practice"
+                                MockTestType.CUSTOM_TEST -> "$targetExamName - Custom Test"
+                                MockTestType.TIMED_TEST -> "$targetExamName - Timed Speed Test"
+                            },
+                            questions = finalQuestions,
+                            currentQuestionIndex = 0,
+                            selectedAnswers = emptyMap(),
+                            markedForReview = emptySet(),
+                            visitedQuestions = setOf(0),
+                            timeSpentSeconds = emptyMap(),
+                            currentQuestionEnteredTimestamp = now,
+                            startedAtTimestamp = now,
+                            expiresAtTimestamp = expiresAt,
+                            totalDurationSeconds = totalSeconds,
+                            remainingSeconds = totalSeconds,
+                            isCompleted = false,
+                            isSubmitting = false,
+                            submissionError = null,
+                            completedAttempt = null,
+                            config = config
+                        )
+
+                        _activeTestState.value = newState
+                        sessionPersistence.saveActiveSession(newState)
+                        startMockTestTimerJob()
+                    }
+
+                    is com.example.service.intelligence.QuestionSourceResult.InsufficientPyq -> {
+                        _insufficientPyqNotice.value = InsufficientPyqNotice(
+                            availableCount = curationResult.availableCount,
+                            requestedCount = curationResult.requestedCount,
+                            examName = curationResult.examName,
+                            subject = curationResult.subject,
+                            availableQuestions = curationResult.availableQuestions
+                        )
+                    }
+
+                    is com.example.service.intelligence.QuestionSourceResult.Failure -> {
+                        _generationError.value = curationResult.error
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "Test generation failed: ${e.message}", e)
+                _generationError.value = TestGenerationError(
+                    stage = "TEST_INITIALIZATION_ERROR",
+                    userMessage = "Could not initialize test questions. Please verify your settings and try again.",
+                    technicalDetails = e.message ?: "Unknown error"
+                )
+            } finally {
+                _isTestGenerating.value = false
             }
+        }
+    }
 
-            val finalQuestions = questions.take(config.questionCount.coerceAtLeast(1))
-            val totalSeconds = (config.timeLimitMinutes * 60).coerceAtLeast(60)
+    private fun startMockTestTimerJob() {
+        mockTestTimerJob?.cancel()
+        mockTestTimerJob = viewModelScope.launch {
+            while (_activeTestState.value.isTestInProgress && !_activeTestState.value.isCompleted) {
+                kotlinx.coroutines.delay(1000L)
+                val now = System.currentTimeMillis()
+                val expiresAt = _activeTestState.value.expiresAtTimestamp
+                val remaining = if (expiresAt > 0L) {
+                    ((expiresAt - now) / 1000L).coerceAtLeast(0L).toInt()
+                } else {
+                    (_activeTestState.value.remainingSeconds - 1).coerceAtLeast(0)
+                }
 
-            _activeTestState.value = ActiveTestState(
-                isTestInProgress = true,
-                subject = config.subject,
-                title = when (config.testType) {
-                    MockTestType.FULL_MOCK -> "$targetExamName Full Mock Test"
-                    MockTestType.SUBJECT_TEST -> "$targetExamName - ${config.subject}"
-                    MockTestType.CHAPTER_TEST -> "$targetExamName - Chapter: ${config.chapter}"
-                    MockTestType.TOPIC_TEST -> "$targetExamName - Topic: ${config.topic}"
-                    MockTestType.WEAK_AREAS -> "$targetExamName - Weak Areas Targeted Test"
-                    MockTestType.REVISION_TEST -> "$targetExamName - Spaced Revision Test"
-                    MockTestType.PREVIOUS_MISTAKES -> "$targetExamName - Past Mistakes Retest"
-                    MockTestType.ADAPTIVE_PRACTICE -> "$targetExamName - Adaptive Live Practice"
-                    MockTestType.CUSTOM_TEST -> "$targetExamName - Custom Test"
-                    MockTestType.TIMED_TEST -> "$targetExamName - Timed Speed Test"
-                },
-                questions = finalQuestions,
-                currentQuestionIndex = 0,
-                selectedAnswers = emptyMap(),
-                markedForReview = emptySet(),
-                remainingSeconds = totalSeconds,
-                isCompleted = false,
-                completedAttempt = null,
-                config = config
-            )
-            _isTestGenerating.value = false
-
-            // Cancel any old timer and start countdown job
-            mockTestTimerJob?.cancel()
-            mockTestTimerJob = viewModelScope.launch {
-                while (_activeTestState.value.isTestInProgress && _activeTestState.value.remainingSeconds > 0) {
-                    kotlinx.coroutines.delay(1000L)
-                    val currentRemaining = _activeTestState.value.remainingSeconds
-                    if (currentRemaining <= 1) {
-                        _activeTestState.value = _activeTestState.value.copy(remainingSeconds = 0)
-                        submitMockTest()
-                        break
-                    } else {
-                        _activeTestState.value = _activeTestState.value.copy(remainingSeconds = currentRemaining - 1)
+                if (remaining <= 0) {
+                    _activeTestState.value = _activeTestState.value.copy(remainingSeconds = 0)
+                    submitMockTest()
+                    break
+                } else {
+                    _activeTestState.value = _activeTestState.value.copy(remainingSeconds = remaining)
+                    // Periodically sync to persistence every 5 seconds
+                    if (remaining % 5 == 0) {
+                        sessionPersistence.saveActiveSession(_activeTestState.value)
                     }
                 }
             }
@@ -1565,9 +1680,12 @@ class MainViewModel(
         val currentAnswers = currentState.selectedAnswers.toMutableMap()
         currentAnswers[questionIndex] = optionIndex
 
-        _activeTestState.value = currentState.copy(
-            selectedAnswers = currentAnswers
+        val updated = currentState.copy(
+            selectedAnswers = currentAnswers,
+            visitedQuestions = currentState.visitedQuestions + questionIndex
         )
+        _activeTestState.value = updated
+        sessionPersistence.saveActiveSession(updated)
     }
 
     fun reportQuestion(questionId: String, reason: String, notes: String = "") {
@@ -1585,7 +1703,9 @@ class MainViewModel(
     fun clearTestAnswer(questionIndex: Int) {
         val currentAnswers = _activeTestState.value.selectedAnswers.toMutableMap()
         currentAnswers.remove(questionIndex)
-        _activeTestState.value = _activeTestState.value.copy(selectedAnswers = currentAnswers)
+        val updated = _activeTestState.value.copy(selectedAnswers = currentAnswers)
+        _activeTestState.value = updated
+        sessionPersistence.saveActiveSession(updated)
     }
 
     fun skipQuestion(questionIndex: Int) {
@@ -1603,14 +1723,105 @@ class MainViewModel(
         } else {
             current.add(questionIndex)
         }
-        _activeTestState.value = _activeTestState.value.copy(markedForReview = current)
+        val updated = _activeTestState.value.copy(
+            markedForReview = current,
+            visitedQuestions = _activeTestState.value.visitedQuestions + questionIndex
+        )
+        _activeTestState.value = updated
+        sessionPersistence.saveActiveSession(updated)
     }
 
     fun navigateTestQuestion(index: Int) {
-        if (index in 0 until _activeTestState.value.questions.size) {
-            _activeTestState.value = _activeTestState.value.copy(currentQuestionIndex = index)
+        val state = _activeTestState.value
+        if (index in 0 until state.questions.size) {
+            val now = System.currentTimeMillis()
+            val timeSpentMap = state.timeSpentSeconds.toMutableMap()
+            val currentIdx = state.currentQuestionIndex
+            if (state.currentQuestionEnteredTimestamp > 0L) {
+                val elapsedSec = ((now - state.currentQuestionEnteredTimestamp) / 1000).toInt().coerceAtLeast(1)
+                timeSpentMap[currentIdx] = (timeSpentMap[currentIdx] ?: 0) + elapsedSec
+            }
+
+            val updated = state.copy(
+                currentQuestionIndex = index,
+                visitedQuestions = state.visitedQuestions + index,
+                timeSpentSeconds = timeSpentMap,
+                currentQuestionEnteredTimestamp = now
+            )
+            _activeTestState.value = updated
+            sessionPersistence.saveActiveSession(updated)
         }
     }
+
+    fun saveAndNext() {
+        val state = _activeTestState.value
+        val nextIdx = state.currentQuestionIndex + 1
+        if (nextIdx < state.questions.size) {
+            navigateTestQuestion(nextIdx)
+        } else {
+            setPaletteOpen(true)
+        }
+    }
+
+    fun markForReviewAndNext() {
+        val state = _activeTestState.value
+        val currentIdx = state.currentQuestionIndex
+        val currentMarks = state.markedForReview.toMutableSet()
+        currentMarks.add(currentIdx)
+        _activeTestState.value = state.copy(markedForReview = currentMarks)
+
+        val nextIdx = currentIdx + 1
+        if (nextIdx < state.questions.size) {
+            navigateTestQuestion(nextIdx)
+        } else {
+            setPaletteOpen(true)
+        }
+    }
+
+    fun previousQuestion() {
+        val state = _activeTestState.value
+        val prevIdx = state.currentQuestionIndex - 1
+        if (prevIdx >= 0) {
+            navigateTestQuestion(prevIdx)
+        }
+    }
+
+    fun cancelTestGeneration() {
+        _isTestGenerating.value = false
+        _generationError.value = null
+        _insufficientPyqNotice.value = null
+    }
+
+    fun confirmStartWithAvailablePyqs() {
+        val notice = _insufficientPyqNotice.value ?: return
+        _insufficientPyqNotice.value = null
+        val curConfig = _activeTestState.value.config ?: MockTestConfig(
+            exam = notice.examName,
+            subject = notice.subject,
+            questionCount = notice.availableCount
+        )
+        val updatedConfig = curConfig.copy(
+            questionCount = notice.availableCount.coerceAtLeast(1)
+        )
+        startMockTestWithConfig(updatedConfig, forceStartWithAvailable = true)
+    }
+
+    fun confirmAddAiToPyqs() {
+        val notice = _insufficientPyqNotice.value ?: return
+        _insufficientPyqNotice.value = null
+        val curConfig = _activeTestState.value.config ?: MockTestConfig(
+            exam = notice.examName,
+            subject = notice.subject,
+            questionCount = notice.requestedCount
+        )
+        val updatedConfig = curConfig.copy(
+            questionSource = QuestionSourceType.MIXED
+        )
+        startMockTestWithConfig(updatedConfig, forceStartWithAvailable = true)
+    }
+
+    fun startTestWithAvailablePyqs() = confirmStartWithAvailablePyqs()
+    fun startTestWithMixedFallback() = confirmAddAiToPyqs()
 
     fun setPaletteOpen(isOpen: Boolean) {
         _activeTestState.value = _activeTestState.value.copy(isPaletteOpen = isOpen)
@@ -1621,14 +1832,29 @@ class MainViewModel(
     }
 
     fun submitMockTest() {
-        if (_activeTestState.value.isCompleted) return
+        if (_activeTestState.value.isSubmitting || _activeTestState.value.isCompleted) return
         mockTestTimerJob?.cancel()
+        _activeTestState.value = _activeTestState.value.copy(
+            isSubmitting = true,
+            submissionError = null,
+            isPaletteOpen = false,
+            isSubmitConfirmOpen = false
+        )
+
         val state = _activeTestState.value
         val questions = state.questions
         val answers = state.selectedAnswers
         var correctCount = 0
         var incorrectCount = 0
         var skippedCount = 0
+
+        // Flush remaining time on currently open question
+        val now = System.currentTimeMillis()
+        val finalTimeSpentMap = state.timeSpentSeconds.toMutableMap()
+        if (state.currentQuestionEnteredTimestamp > 0L) {
+            val lastElapsed = ((now - state.currentQuestionEnteredTimestamp) / 1000).toInt().coerceAtLeast(1)
+            finalTimeSpentMap[state.currentQuestionIndex] = (finalTimeSpentMap[state.currentQuestionIndex] ?: 0) + lastElapsed
+        }
 
         val topicAttemptCounts = mutableMapOf<String, Int>()
         val topicIncorrectCounts = mutableMapOf<String, Int>()
@@ -1638,6 +1864,7 @@ class MainViewModel(
             val chosen = answers[idx]
             val isCorr = chosen != null && chosen == q.correctOptionIndex
             val topicKey = q.topic.ifBlank { q.subject }
+            val qTimeSpent = finalTimeSpentMap[idx] ?: (if (questions.isNotEmpty()) (state.config.timeLimitMinutes * 60 - state.remainingSeconds) / questions.size else 30)
 
             topicAttemptCounts[topicKey] = (topicAttemptCounts[topicKey] ?: 0) + 1
 
@@ -1656,9 +1883,25 @@ class MainViewModel(
                 selectedIndex = chosen,
                 isCorrect = isCorr,
                 isMarkedForReview = state.markedForReview.contains(idx),
-                timeSpentSeconds = if (questions.isNotEmpty()) (state.config.timeLimitMinutes * 60 - state.remainingSeconds) / questions.size else 30
+                timeSpentSeconds = qTimeSpent
             )
         }
+
+        val totalAllowedSecs = state.config.timeLimitMinutes * 60
+        val actualTimeSpent = (totalAllowedSecs - state.remainingSeconds).coerceAtLeast(10)
+        val avgSecs = if (questions.isNotEmpty()) actualTimeSpent.toFloat() / questions.size else 0f
+
+        val fastestDetail = details.minByOrNull { it.timeSpentSeconds }
+        val longestDetail = details.maxByOrNull { it.timeSpentSeconds }
+
+        val timeAnalysis = TimeAnalysisResult(
+            totalTimeSpentSeconds = actualTimeSpent,
+            avgTimePerQuestionSeconds = avgSecs,
+            fastestQuestionIndex = fastestDetail?.let { details.indexOf(it) } ?: 0,
+            fastestTimeSeconds = fastestDetail?.timeSpentSeconds ?: 0,
+            longestQuestionIndex = longestDetail?.let { details.indexOf(it) } ?: 0,
+            longestTimeSeconds = longestDetail?.timeSpentSeconds ?: 0
+        )
 
         val weakTopics = mutableListOf<String>()
         val strongTopics = mutableListOf<String>()
@@ -1676,123 +1919,342 @@ class MainViewModel(
         }
 
         viewModelScope.launch {
-            questions.forEachIndexed { idx, q ->
-                val chosen = answers[idx]
-                val isCorr = chosen != null && chosen == q.correctOptionIndex
-                val isSkip = chosen == null
-                val spentSecs = details.getOrNull(idx)?.timeSpentSeconds ?: 30
+            try {
+                questions.forEachIndexed { idx, q ->
+                    val chosen = answers[idx]
+                    val isCorr = chosen != null && chosen == q.correctOptionIndex
+                    val isSkip = chosen == null
+                    val spentSecs = details.getOrNull(idx)?.timeSpentSeconds ?: 30
 
-                // Record history for anti-repetition engine
-                studyRepository.recordQuestionAttemptHistory(
-                    questionId = q.id,
-                    examId = activeExamContext.value.examId,
-                    subject = q.subject,
-                    topic = q.topic,
-                    isCorrect = isCorr,
-                    isSkipped = isSkip,
-                    responseTimeSecs = spentSecs
-                )
-
-                if (chosen != null && !isCorr) {
-                    val chosenText = q.options.getOrNull(chosen) ?: "Not attempted"
-                    val correctText = q.options.getOrNull(q.correctOptionIndex) ?: ""
-                    studyRepository.recordMistake(
-                        questionText = q.questionText,
-                        studentAnswer = chosenText,
-                        correctAnswer = correctText,
+                    // Record history for anti-repetition engine
+                    studyRepository.recordQuestionAttemptHistory(
+                        questionId = q.id,
+                        examId = activeExamContext.value.examId,
                         subject = q.subject,
                         topic = q.topic,
-                        explanation = q.explanation
+                        isCorrect = isCorr,
+                        isSkipped = isSkip,
+                        responseTimeSecs = spentSecs
+                    )
+
+                    if (chosen != null && !isCorr) {
+                        val chosenText = q.options.getOrNull(chosen) ?: "Not attempted"
+                        val correctText = q.options.getOrNull(q.correctOptionIndex) ?: ""
+                        studyRepository.recordMistake(
+                            questionText = q.questionText,
+                            studentAnswer = chosenText,
+                            correctAnswer = correctText,
+                            subject = q.subject,
+                            topic = q.topic,
+                            explanation = q.explanation
+                        )
+                    }
+                }
+
+                val (earnedMarks, percentage, schemeLabel) = com.example.service.intelligence.SmartMockEngine.calculateDeterministicScore(
+                    correctCount = correctCount,
+                    incorrectCount = incorrectCount,
+                    skippedCount = skippedCount,
+                    examContext = activeExamContext.value
+                )
+
+                val totalAllowedSecs = state.config.timeLimitMinutes * 60
+                val timeSpent = totalAllowedSecs - state.remainingSeconds
+                val recommendation = if (questions.size < 3) {
+                    "Not enough data yet for a reliable topic analysis. Practice more questions to identify specific topic strengths and weaknesses."
+                } else if (weakTopics.isNotEmpty()) {
+                    "Focus on ${weakTopics.take(2).joinToString(" & ")}. Practice targeted PYQs and concept revisions."
+                } else {
+                    "Excellent mastery across attempted topics! Maintain momentum with full-length timed tests."
+                }
+
+                // Update topic performance records
+                topicAttemptCounts.forEach { (topicName, totalAtt) ->
+                    val correctAtt = topicCorrectCounts[topicName] ?: 0
+                    studyRepository.recordTopicPerformance(
+                        subject = state.subject,
+                        topic = topicName,
+                        questionsAttempted = totalAtt,
+                        correctCount = correctAtt,
+                        difficulty = state.config.difficulty
                     )
                 }
-            }
 
-            val (earnedMarks, percentage, schemeLabel) = com.example.service.intelligence.SmartMockEngine.calculateDeterministicScore(
-                correctCount = correctCount,
-                incorrectCount = incorrectCount,
-                skippedCount = skippedCount,
-                examContext = activeExamContext.value
-            )
+                questions.forEachIndexed { idx, q ->
+                    val chosen = answers[idx]
+                    val isCorrect = chosen == q.correctOptionIndex
+                    val isSkipped = chosen == null
+                    val qTimeSpent = details.getOrNull(idx)?.timeSpentSeconds ?: 0
 
-            val totalAllowedSecs = state.config.timeLimitMinutes * 60
-            val timeSpent = totalAllowedSecs - state.remainingSeconds
-            val recommendation = if (questions.size < 3) {
-                "Not enough data yet for a reliable topic analysis. Practice more questions to identify specific topic strengths and weaknesses."
-            } else if (weakTopics.isNotEmpty()) {
-                "Focus on ${weakTopics.take(2).joinToString(" & ")}. Practice targeted PYQs and concept revisions."
-            } else {
-                "Excellent mastery across attempted topics! Maintain momentum with full-length timed tests."
-            }
+                    studyRepository.recordQuestionAttemptHistory(
+                        questionId = q.id,
+                        examId = activeExamContext.value.examId,
+                        subject = q.subject,
+                        topic = q.topic,
+                        isCorrect = isCorrect,
+                        isSkipped = isSkipped,
+                        responseTimeSecs = qTimeSpent
+                    )
 
-            // Update topic performance records
-            topicAttemptCounts.forEach { (topicName, totalAtt) ->
-                val correctAtt = topicCorrectCounts[topicName] ?: 0
-                studyRepository.recordTopicPerformance(
+                    if (chosen != null && !isCorrect) {
+                        val chosenText = q.options.getOrNull(chosen) ?: "Not attempted"
+                        val correctText = q.options.getOrNull(q.correctOptionIndex) ?: ""
+                        val reason = com.example.service.intelligence.SmartMockEngine.classifyMistakeReason(
+                            question = q,
+                            timeSpentSecs = qTimeSpent
+                        )
+                        studyRepository.recordMistake(
+                            questionText = q.questionText,
+                            studentAnswer = chosenText,
+                            correctAnswer = correctText,
+                            subject = q.subject,
+                            topic = q.topic,
+                            explanation = "${q.explanation} (Classification: $reason)"
+                        )
+                    }
+                }
+
+                val attempt = studyRepository.recordMockTestAttempt(
+                    title = state.title,
                     subject = state.subject,
-                    topic = topicName,
-                    questionsAttempted = totalAtt,
-                    correctCount = correctAtt,
-                    difficulty = state.config.difficulty
+                    score = earnedMarks.roundToInt(),
+                    totalQuestions = questions.size,
+                    timeSpentSeconds = timeSpent.coerceAtLeast(10),
+                    weakTopics = weakTopics,
+                    strongTopics = strongTopics,
+                    aiRecommendation = recommendation,
+                    examName = state.config.exam,
+                    topic = state.config.topic,
+                    difficulty = state.config.difficulty,
+                    correctCount = correctCount,
+                    incorrectCount = incorrectCount,
+                    skippedCount = skippedCount,
+                    avgTimePerQuestionSeconds = if (questions.isNotEmpty()) timeSpent.toFloat() / questions.size else 0f,
+                    markingScheme = schemeLabel,
+                    totalTimeAllowedSeconds = totalAllowedSecs
+                ).copy(
+                    examId = activeExamContext.value.examId,
+                    language = state.config.language,
+                    rawScoreEarned = earnedMarks
+                )
+
+                val testIntelligence = com.example.service.intelligence.SmartMockEngine.computeTestIntelligence(
+                    attempt = attempt,
+                    details = details,
+                    testType = state.config.testType,
+                    language = state.config.language
+                )
+
+                // Clean up local persistent session state on successful submission
+                sessionPersistence.clearActiveSession()
+
+                _activeTestState.value = state.copy(
+                    isTestInProgress = false,
+                    isSubmitting = false,
+                    submissionError = null,
+                    isCompleted = true,
+                    completedAttempt = attempt,
+                    detailedQuestions = details,
+                    timeAnalysis = timeAnalysis,
+                    testIntelligence = testIntelligence,
+                    isNovaAnalyzing = true,
+                    isPaletteOpen = false,
+                    isSubmitConfirmOpen = false
+                )
+
+                fetchNovaPostTestAnalysis(attempt, details, testIntelligence, state.config.language)
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "Error recording mock test attempt: ${e.message}", e)
+                _activeTestState.value = state.copy(
+                    isSubmitting = false,
+                    submissionError = "Database submission failed: ${e.message}. You can tap Retry to resubmit without losing your answers."
                 )
             }
-
-            questions.forEachIndexed { idx, q ->
-                val chosen = answers[idx]
-                if (chosen != null && chosen != q.correctOptionIndex) {
-                    val chosenText = q.options.getOrNull(chosen) ?: "Not attempted"
-                    val correctText = q.options.getOrNull(q.correctOptionIndex) ?: ""
-                    val reason = com.example.service.intelligence.SmartMockEngine.classifyMistakeReason(
-                        question = q,
-                        timeSpentSecs = details.getOrNull(idx)?.timeSpentSeconds ?: 30
-                    )
-                    studyRepository.recordMistake(
-                        questionText = q.questionText,
-                        studentAnswer = chosenText,
-                        correctAnswer = correctText,
-                        subject = q.subject,
-                        topic = q.topic,
-                        explanation = "${q.explanation} (Classification: $reason)"
-                    )
-                }
-            }
-
-            val attempt = studyRepository.recordMockTestAttempt(
-                title = state.title,
-                subject = state.subject,
-                score = earnedMarks.roundToInt(),
-                totalQuestions = questions.size,
-                timeSpentSeconds = timeSpent.coerceAtLeast(10),
-                weakTopics = weakTopics,
-                strongTopics = strongTopics,
-                aiRecommendation = recommendation,
-                examName = state.config.exam,
-                topic = state.config.topic,
-                difficulty = state.config.difficulty,
-                correctCount = correctCount,
-                incorrectCount = incorrectCount,
-                skippedCount = skippedCount,
-                avgTimePerQuestionSeconds = if (questions.isNotEmpty()) timeSpent.toFloat() / questions.size else 0f,
-                markingScheme = schemeLabel,
-                totalTimeAllowedSeconds = totalAllowedSecs
-            ).copy(
-                examId = activeExamContext.value.examId,
-                language = state.config.language,
-                rawScoreEarned = earnedMarks
-            )
-
-            _activeTestState.value = state.copy(
-                isTestInProgress = false,
-                isCompleted = true,
-                completedAttempt = attempt,
-                detailedQuestions = details,
-                isPaletteOpen = false,
-                isSubmitConfirmOpen = false
-            )
         }
+    }
+
+    private fun fetchNovaPostTestAnalysis(
+        attempt: MockTestAttempt,
+        details: List<QuestionAttemptDetail>,
+        baseIntelligence: com.example.service.intelligence.TestIntelligenceResult,
+        language: String
+    ) {
+        viewModelScope.launch {
+            try {
+                val prompt = buildString {
+                    append("Analyze this test result and provide post-test insight.\n")
+                    append("Exam: ${attempt.examName}\n")
+                    append("Title: ${attempt.title}\n")
+                    append("Score: ${attempt.score} / ${attempt.totalQuestions * 4}\n")
+                    append("Accuracy: ${attempt.accuracyPercent.toInt()}%\n")
+                    append("Subject Accuracies: ${baseIntelligence.subjectPerformances.joinToString { "${it.subject}: ${it.accuracyPercent.toInt()}%" }}\n")
+                    append("Weak Topics: ${baseIntelligence.weakTopics.joinToString()}\n")
+                    append("Strong Topics: ${baseIntelligence.strongTopics.joinToString()}\n")
+                    append("Language: $language\n")
+                    append("\nReturn concise analysis in language: $language.\n")
+                    append("Format as JSON with keys:\n")
+                    append("whatWentWell: array of 1-3 concise strings\n")
+                    append("whatNeedsPractice: array of 1-3 concise strings\n")
+                    append("recommendedNextStep: single string\n")
+                }
+
+                val res = geminiRepository.askNova(
+                    userPrompt = prompt,
+                    studyContext = NovaStudyContext(
+                        targetExam = attempt.examName,
+                        preferredLanguage = language,
+                        recentMockAccuracyPercent = attempt.accuracyPercent
+                    )
+                )
+
+                if (res.isSuccess) {
+                    val txt = res.getOrNull()?.replyMarkdown ?: ""
+                    val jsonStart = txt.indexOf('{')
+                    val jsonEnd = txt.lastIndexOf('}')
+                    if (jsonStart >= 0 && jsonEnd > jsonStart) {
+                        val jsonStr = txt.substring(jsonStart, jsonEnd + 1)
+                        val json = org.json.JSONObject(jsonStr)
+                        val wellArr = json.optJSONArray("whatWentWell")
+                        val wellList = mutableListOf<String>()
+                        if (wellArr != null) {
+                            for (i in 0 until wellArr.length()) wellList.add(wellArr.getString(i))
+                        }
+                        val practiceArr = json.optJSONArray("whatNeedsPractice")
+                        val practiceList = mutableListOf<String>()
+                        if (practiceArr != null) {
+                            for (i in 0 until practiceArr.length()) practiceList.add(practiceArr.getString(i))
+                        }
+                        val nextStep = json.optString("recommendedNextStep", baseIntelligence.novaInsight.recommendedNextStep)
+
+                        val enrichedInsight = baseIntelligence.novaInsight.copy(
+                            whatWentWell = if (wellList.isNotEmpty()) wellList else baseIntelligence.novaInsight.whatWentWell,
+                            whatNeedsPractice = if (practiceList.isNotEmpty()) practiceList else baseIntelligence.novaInsight.whatNeedsPractice,
+                            recommendedNextStep = nextStep.ifBlank { baseIntelligence.novaInsight.recommendedNextStep },
+                            isAiGenerated = true
+                        )
+
+                        val updatedIntel = baseIntelligence.copy(novaInsight = enrichedInsight)
+                        _activeTestState.value = _activeTestState.value.copy(
+                            testIntelligence = updatedIntel,
+                            isNovaAnalyzing = false
+                        )
+                        return@launch
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("MainViewModel", "Nova post-test analysis fallback: ${e.message}")
+            }
+            _activeTestState.value = _activeTestState.value.copy(isNovaAnalyzing = false)
+        }
+    }
+
+    fun retryWrongQuestions() {
+        val currentDetails = _activeTestState.value.detailedQuestions
+        val wrongQuestions = currentDetails.filter { !it.isCorrect }.map { it.question }
+        if (wrongQuestions.isEmpty()) return
+
+        val now = System.currentTimeMillis()
+        val totalSeconds = (wrongQuestions.size * 90).coerceAtLeast(120)
+        val expiresAt = now + (totalSeconds * 1000L)
+
+        val retestConfig = MockTestConfig(
+            exam = selectedExam.value.examName,
+            subject = _activeTestState.value.subject,
+            testType = MockTestType.PREVIOUS_MISTAKES,
+            questionCount = wrongQuestions.size,
+            timeLimitMinutes = (totalSeconds / 60).coerceAtLeast(2)
+        )
+
+        val newState = ActiveTestState(
+            isTestInProgress = true,
+            requestId = "retest_${now}",
+            subject = retestConfig.subject,
+            title = "${selectedExam.value.examName} - Incorrect Questions Retest",
+            questions = wrongQuestions,
+            currentQuestionIndex = 0,
+            selectedAnswers = emptyMap(),
+            markedForReview = emptySet(),
+            visitedQuestions = setOf(0),
+            timeSpentSeconds = emptyMap(),
+            currentQuestionEnteredTimestamp = now,
+            startedAtTimestamp = now,
+            expiresAtTimestamp = expiresAt,
+            totalDurationSeconds = totalSeconds,
+            remainingSeconds = totalSeconds,
+            isCompleted = false,
+            isSubmitting = false,
+            submissionError = null,
+            completedAttempt = null,
+            config = retestConfig
+        )
+
+        _activeTestState.value = newState
+        sessionPersistence.saveActiveSession(newState)
+        startMockTestTimerJob()
+    }
+
+    fun retryUnansweredQuestions() {
+        val currentDetails = _activeTestState.value.detailedQuestions
+        val skippedQuestions = currentDetails.filter { it.selectedIndex == null }.map { it.question }
+        if (skippedQuestions.isEmpty()) return
+
+        val now = System.currentTimeMillis()
+        val totalSeconds = (skippedQuestions.size * 90).coerceAtLeast(120)
+        val expiresAt = now + (totalSeconds * 1000L)
+
+        val retestConfig = MockTestConfig(
+            exam = selectedExam.value.examName,
+            subject = _activeTestState.value.subject,
+            testType = MockTestType.REVISION_TEST,
+            questionCount = skippedQuestions.size,
+            timeLimitMinutes = (totalSeconds / 60).coerceAtLeast(2)
+        )
+
+        val newState = ActiveTestState(
+            isTestInProgress = true,
+            requestId = "retest_skipped_${now}",
+            subject = retestConfig.subject,
+            title = "${selectedExam.value.examName} - Unanswered Questions Practice",
+            questions = skippedQuestions,
+            currentQuestionIndex = 0,
+            selectedAnswers = emptyMap(),
+            markedForReview = emptySet(),
+            visitedQuestions = setOf(0),
+            timeSpentSeconds = emptyMap(),
+            currentQuestionEnteredTimestamp = now,
+            startedAtTimestamp = now,
+            expiresAtTimestamp = expiresAt,
+            totalDurationSeconds = totalSeconds,
+            remainingSeconds = totalSeconds,
+            isCompleted = false,
+            isSubmitting = false,
+            submissionError = null,
+            completedAttempt = null,
+            config = retestConfig
+        )
+
+        _activeTestState.value = newState
+        sessionPersistence.saveActiveSession(newState)
+        startMockTestTimerJob()
+    }
+
+    fun startTargetedPractice(rec: com.example.service.intelligence.SmartPracticeRecommendation) {
+        startMockTestWithConfig(
+            MockTestConfig(
+                exam = rec.targetExam,
+                subject = rec.targetSubject,
+                topic = rec.targetTopic,
+                difficulty = rec.recommendedDifficulty,
+                questionCount = rec.recommendedQuestionCount,
+                timeLimitMinutes = 15,
+                testType = rec.recommendedType
+            )
+        )
     }
 
     fun exitTest() {
         mockTestTimerJob?.cancel()
+        sessionPersistence.clearActiveSession()
         _activeTestState.value = ActiveTestState()
     }
 
