@@ -43,14 +43,18 @@ fun LoginScreen(
     errorMessage: String?,
     onGoogleSignIn: () -> Unit,
     onEmailSignIn: (email: String, pass: String) -> Unit,
+    onEmailSignUp: (email: String, pass: String, name: String, examName: String) -> Unit = { _, _, _, _ -> },
     onGuestSignIn: () -> Unit,
     onDismissError: () -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var showEmailDialog by remember { mutableStateOf(false) }
+    var isSignUpMode by remember { mutableStateOf(false) }
     var emailInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
+    var nameInput by remember { mutableStateOf("") }
+    var selectedExam by remember { mutableStateOf("RRB Group D") }
 
     // Display Snackbar and Toast feedback whenever a sign-in error occurs
     LaunchedEffect(errorMessage) {
@@ -311,22 +315,109 @@ fun LoginScreen(
                 containerColor = Color(0xFF131C2E),
                 shape = RoundedCornerShape(24.dp),
                 title = {
-                    Text(
-                        text = "Email Authentication",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF0F172A), RoundedCornerShape(12.dp))
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(36.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (!isSignUpMode) NeonCyan else Color.Transparent,
+                                onClick = { isSignUpMode = false }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "Log In",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = if (!isSignUpMode) Color(0xFF0F172A) else Color(0xFF94A3B8)
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(36.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSignUpMode) NeonCyan else Color.Transparent,
+                                onClick = { isSignUpMode = true }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "Sign Up",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = if (isSignUpMode) Color(0xFF0F172A) else Color(0xFF94A3B8)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 },
                 text = {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text(
-                            text = "Enter your email & password to sign in or create an account.",
-                            color = Color(0xFF94A3B8),
-                            style = MaterialTheme.typography.bodySmall
-                        )
+                        if (!errorMessage.isNullOrBlank() && (errorMessage.contains("already exists", ignoreCase = true) || errorMessage.contains("already registered", ignoreCase = true))) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFF451A03),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF59E0B))
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text(
+                                        text = "Account Already Exists",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = Color(0xFFF59E0B),
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "An account with this email address already exists. Please log in instead.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.White,
+                                        fontSize = 11.sp
+                                    )
+                                    Spacer(Modifier.height(6.dp))
+                                    TextButton(
+                                        onClick = {
+                                            isSignUpMode = false
+                                            onDismissError()
+                                        },
+                                        contentPadding = PaddingValues(0.dp)
+                                    ) {
+                                        Text("Switch to Log In →", color = NeonCyan, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        if (isSignUpMode) {
+                            OutlinedTextField(
+                                value = nameInput,
+                                onValueChange = { nameInput = it },
+                                label = { Text("Full Name") },
+                                leadingIcon = { Icon(Icons.Default.Person, null, tint = NeonCyan) },
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("signup_name_field"),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedBorderColor = NeonCyan,
+                                    unfocusedBorderColor = Color(0x40FFFFFF)
+                                ),
+                                shape = RoundedCornerShape(14.dp)
+                            )
+                        }
 
                         OutlinedTextField(
                             value = emailInput,
@@ -350,7 +441,7 @@ fun LoginScreen(
                         OutlinedTextField(
                             value = passwordInput,
                             onValueChange = { passwordInput = it },
-                            label = { Text("Password") },
+                            label = { Text("Password (6+ chars)") },
                             leadingIcon = { Icon(Icons.Outlined.Lock, null, tint = NeonCyan) },
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
@@ -366,19 +457,48 @@ fun LoginScreen(
                             ),
                             shape = RoundedCornerShape(14.dp)
                         )
+
+                        if (isSignUpMode) {
+                            Column {
+                                Text("Target Exam", style = MaterialTheme.typography.labelSmall, color = Color(0xFF94A3B8))
+                                Spacer(Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    listOf("RRB Group D", "SSC CGL", "UPSC CSE").forEach { exam ->
+                                        FilterChip(
+                                            selected = selectedExam == exam,
+                                            onClick = { selectedExam = exam },
+                                            label = { Text(exam, fontSize = 11.sp) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = NeonCyan,
+                                                selectedLabelColor = Color(0xFF0F172A),
+                                                containerColor = Color(0xFF1E293B),
+                                                labelColor = Color.White
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 },
                 confirmButton = {
                     Button(
                         onClick = {
                             showEmailDialog = false
-                            onEmailSignIn(emailInput, passwordInput)
+                            if (isSignUpMode) {
+                                onEmailSignUp(emailInput, passwordInput, nameInput, selectedExam)
+                            } else {
+                                onEmailSignIn(emailInput, passwordInput)
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color(0xFF070B19)),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.testTag("submit_email_auth")
                     ) {
-                        Text("Continue", fontWeight = FontWeight.Bold)
+                        Text(if (isSignUpMode) "Create Account" else "Log In", fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {

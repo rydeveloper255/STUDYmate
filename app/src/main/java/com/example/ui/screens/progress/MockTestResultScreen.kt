@@ -25,12 +25,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.MockTestAttempt
 import com.example.data.model.QuestionAttemptDetail
 import com.example.service.intelligence.SmartPracticeRecommendation
 import com.example.service.intelligence.TestIntelligenceResult
 import com.example.ui.components.GlassButton
 import com.example.ui.components.GlassCard
+import com.example.ui.components.PersistenceStatusIndicator
 import com.example.ui.components.springClickable
 import com.example.ui.theme.*
 
@@ -83,6 +85,8 @@ fun MockTestResultScreen(
     val formattedTotalTime = if (totalMins > 0) "${totalMins}m ${totalSecs}s" else "${totalSecs}s"
     val avgTime = attempt.avgTimePerQuestionSeconds.toInt()
 
+    val activePersistenceStatus by com.example.data.persistence.PersistenceMonitor.activeStatus.collectAsStateWithLifecycle()
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -90,6 +94,10 @@ fun MockTestResultScreen(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        item {
+            PersistenceStatusIndicator(status = activePersistenceStatus)
+        }
+
         // 1. RESULT HEADER & OVERALL SCORE DASHBOARD
         item {
             GlassCard(

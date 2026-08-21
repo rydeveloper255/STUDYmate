@@ -133,6 +133,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
             errorMessage = authErrorMessage,
             onGoogleSignIn = { viewModel.signInWithGoogle(context) },
             onEmailSignIn = { email, pass -> viewModel.signInWithEmail(email, pass) },
+            onEmailSignUp = { email, pass, name, exam -> viewModel.signUpWithEmail(email, pass, name, exam) },
             onGuestSignIn = { viewModel.continueAsGuest() },
             onDismissError = { viewModel.clearAuthError() }
         )

@@ -3,6 +3,9 @@ package com.example.data.remote.supabase
 import android.util.Log
 import com.example.data.local.StudyMateDatabase
 import com.example.data.model.*
+import com.example.data.persistence.PendingSyncEntity
+import com.example.data.persistence.PersistenceMonitor
+import com.example.data.persistence.PersistenceStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -112,10 +115,20 @@ class SupabaseSyncService(
 
                 if (res.isSuccess) {
                     _syncStatus.value = SupabaseSyncStatus.Success("Profile synced to cloud")
+                    PersistenceMonitor.log("PROFILE_SYNC", "profiles", uid, uid, "SUCCESS")
+                    PersistenceMonitor.updateStatus(PersistenceStatus.Saved(message = "✓ Profile saved to cloud"))
+                } else {
+                    val errMsg = (res as? SupabaseResult.Error)?.message
+                    enqueuePendingSync("profiles", uid, profileJson.toString(), errMsg)
+                    PersistenceMonitor.log("PROFILE_SYNC", "profiles", uid, uid, "OFFLINE_QUEUED", details = errMsg)
+                    PersistenceMonitor.updateStatus(PersistenceStatus.Offline(message = "⚠ Offline — profile saved on device"))
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed syncing user profile to Supabase: ${e.message}")
                 _syncStatus.value = SupabaseSyncStatus.Error(e.message ?: "Sync error", e)
+                val uid = if (user.uid.isNotBlank()) user.uid else userId
+                PersistenceMonitor.log("PROFILE_SYNC", "profiles", uid, uid, "OFFLINE_QUEUED", details = e.message)
+                PersistenceMonitor.updateStatus(PersistenceStatus.Offline(message = "⚠ Offline — profile saved on device"))
             }
         }
     }
@@ -330,8 +343,51 @@ class SupabaseSyncService(
 
     // --- 5. TESTS & MOCK ATTEMPTS & MISTAKES ---
 
+    suspend fun enqueuePendingSync(tableName: String, recordId: String, jsonPayload: String, lastError: String? = null) = withContext(Dispatchers.IO) {
+        try {
+            database.pendingSyncDao().enqueue(
+                PendingSyncEntity(
+                    tableName = tableName,
+                    recordId = recordId,
+                    action = "UPSERT",
+                    jsonPayload = jsonPayload,
+                    lastError = lastError
+                )
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error enqueuing pending sync item: ${e.message}")
+        }
+    }
+
+    suspend fun processPendingQueue(): Int = withContext(Dispatchers.IO) {
+        if (!client.isReady()) return@withContext 0
+        var syncedCount = 0
+        try {
+            val pendingItems = database.pendingSyncDao().getAllPendingOnce()
+            for (item in pendingItems) {
+                val res = client.from(item.tableName).upsert(
+                    jsonBody = item.jsonPayload,
+                    onConflict = if (item.tableName == "profiles") "id" else "user_id,local_id",
+                    accessToken = token
+                )
+                if (res.isSuccess) {
+                    database.pendingSyncDao().deleteById(item.id)
+                    syncedCount++
+                    PersistenceMonitor.log("OFFLINE_QUEUE_SYNC", item.tableName, item.recordId, userId, "SUCCESS")
+                } else {
+                    val errMsg = (res as? SupabaseResult.Error)?.message
+                    database.pendingSyncDao().enqueue(
+                        item.copy(retryCount = item.retryCount + 1, lastError = errMsg)
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed processing offline queue: ${e.message}")
+        }
+        syncedCount
+    }
+
     fun syncMockTestAttempt(attempt: MockTestAttempt) {
-        if (!client.isReady()) return
         syncScope.launch {
             try {
                 val attemptJson = JSONObject().apply {
@@ -356,13 +412,32 @@ class SupabaseSyncService(
                     put("timestamp", attempt.timestamp)
                 }
 
-                client.from("test_attempts").upsert(
+                if (!client.isReady()) {
+                    enqueuePendingSync("test_attempts", attempt.id.toString(), attemptJson.toString())
+                    PersistenceMonitor.log("TEST_RESULT_INSERT", "test_attempts", attempt.id.toString(), userId, "OFFLINE_QUEUED")
+                    PersistenceMonitor.updateStatus(PersistenceStatus.Offline(message = "⚠ Result saved locally on device"))
+                    return@launch
+                }
+
+                val res = client.from("test_attempts").upsert(
                     jsonBody = attemptJson.toString(),
                     onConflict = "user_id,local_id",
                     accessToken = token
                 )
+
+                if (res.isSuccess) {
+                    PersistenceMonitor.log("TEST_RESULT_INSERT", "test_attempts", attempt.id.toString(), userId, "SUCCESS")
+                    PersistenceMonitor.updateStatus(PersistenceStatus.Saved(message = "✓ Test result saved to cloud"))
+                } else {
+                    val errMsg = (res as? SupabaseResult.Error)?.message
+                    enqueuePendingSync("test_attempts", attempt.id.toString(), attemptJson.toString(), errMsg)
+                    PersistenceMonitor.log("TEST_RESULT_INSERT", "test_attempts", attempt.id.toString(), userId, "OFFLINE_QUEUED", details = errMsg)
+                    PersistenceMonitor.updateStatus(PersistenceStatus.Offline(message = "⚠ Offline — test result saved on device"))
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "Error syncing test attempt", e)
+                PersistenceMonitor.log("TEST_RESULT_INSERT", "test_attempts", attempt.id.toString(), userId, "OFFLINE_QUEUED", details = e.message)
+                PersistenceMonitor.updateStatus(PersistenceStatus.Offline(message = "⚠ Offline — test result saved on device"))
             }
         }
     }

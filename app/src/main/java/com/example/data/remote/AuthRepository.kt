@@ -14,6 +14,8 @@ import androidx.credentials.exceptions.GetCredentialProviderConfigurationExcepti
 import androidx.credentials.exceptions.NoCredentialException
 import com.example.data.local.UserDao
 import com.example.data.model.UserProfile
+import com.example.data.persistence.PersistenceMonitor
+import com.example.data.persistence.PersistenceStatus
 import com.example.data.remote.supabase.SupabaseAuthManager
 import com.example.data.remote.supabase.SupabaseClient
 import com.example.data.remote.supabase.SupabaseResult
@@ -338,15 +340,103 @@ class AuthRepository(
         }
     }
 
-    suspend fun signInWithEmail(email: String, pass: String): Result<UserProfile> = withContext(Dispatchers.IO) {
-        try {
-            if (email.isBlank() || pass.length < 6) {
-                return@withContext Result.failure(IllegalArgumentException("Please enter a valid email and at least 6 characters password."))
-            }
+    suspend fun signUpWithEmail(
+        email: String,
+        pass: String,
+        displayName: String = "",
+        examName: String = "RRB Group D"
+    ): Result<UserProfile> = withContext(Dispatchers.IO) {
+        val normalizedEmail = email.trim().lowercase(java.util.Locale.ROOT)
+        if (normalizedEmail.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(normalizedEmail).matches()) {
+            return@withContext Result.failure(IllegalArgumentException("Please enter a valid email address."))
+        }
+        if (pass.length < 6) {
+            return@withContext Result.failure(IllegalArgumentException("Password must be at least 6 characters."))
+        }
 
+        try {
             var supabaseUid = ""
             if (supabaseClient?.isReady() == true) {
-                when (val signInRes = supabaseClient.signInWithPassword(email, pass)) {
+                when (val signUpRes = supabaseClient.signUp(normalizedEmail, pass, mapOf("full_name" to displayName))) {
+                    is SupabaseResult.Success -> {
+                        val session = signUpRes.data
+                        if (!session.accessToken.isNullOrBlank() && session.user != null) {
+                            supabaseUid = session.user.id
+                            supabaseAuthManager?.saveSession(
+                                accessToken = session.accessToken,
+                                refreshToken = session.refreshToken,
+                                userId = session.user.id,
+                                email = session.user.email ?: normalizedEmail,
+                                expiresInSeconds = session.expiresIn ?: 3600L
+                            )
+                        } else if (session.user != null) {
+                            supabaseUid = session.user.id
+                        }
+                    }
+                    is SupabaseResult.Error -> {
+                        val err = signUpRes.message
+                        if (err.contains("already registered", ignoreCase = true) ||
+                            err.contains("already exists", ignoreCase = true) ||
+                            signUpRes.code == 422
+                        ) {
+                            PersistenceMonitor.log("AUTH_SIGNUP", "auth.users", normalizedEmail, normalizedEmail, "FAILED", "ALREADY_EXISTS", err)
+                            return@withContext Result.failure(IllegalStateException("An account with this email already exists. Please log in instead."))
+                        }
+                        PersistenceMonitor.log("AUTH_SIGNUP", "auth.users", normalizedEmail, normalizedEmail, "FAILED", signUpRes.code?.toString(), err)
+                        return@withContext Result.failure(Exception("Sign-up failed: $err"))
+                    }
+                }
+            }
+
+            val uidToUse = if (supabaseUid.isNotBlank()) supabaseUid else "usr_${Math.abs(normalizedEmail.hashCode())}"
+            val nameToUse = if (displayName.isNotBlank()) displayName else normalizedEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
+
+            val profile = UserProfile(
+                id = "current_user",
+                uid = uidToUse,
+                name = nameToUse,
+                email = normalizedEmail,
+                examName = examName,
+                isGuest = false,
+                isOnboardingCompleted = false
+            )
+
+            val localSaved = try {
+                userDao.insertOrUpdateUserProfile(profile)
+                true
+            } catch (e: Exception) {
+                false
+            }
+
+            if (!localSaved) {
+                PersistenceMonitor.log("PROFILE_CREATE", "user_profile", uidToUse, uidToUse, "FAILED", details = "Room DB insert error")
+                return@withContext Result.failure(Exception("Account created, profile setup incomplete. Your account was created, but profile data could not be saved."))
+            }
+
+            supabaseAuthManager?.associateFirebaseOrLocalUser(profile.uid, profile.email)
+            supabaseSyncService?.syncUserProfile(profile)
+
+            PersistenceMonitor.log("AUTH_SIGNUP", "profiles", uidToUse, uidToUse, "SUCCESS")
+            Result.success(profile)
+        } catch (e: Exception) {
+            PersistenceMonitor.log("AUTH_SIGNUP", "profiles", normalizedEmail, "unknown", "FAILED", details = e.message)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun signInWithEmail(email: String, pass: String): Result<UserProfile> = withContext(Dispatchers.IO) {
+        val normalizedEmail = email.trim().lowercase(java.util.Locale.ROOT)
+        if (normalizedEmail.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(normalizedEmail).matches()) {
+            return@withContext Result.failure(IllegalArgumentException("Please enter a valid email address."))
+        }
+        if (pass.length < 6) {
+            return@withContext Result.failure(IllegalArgumentException("Password must be at least 6 characters."))
+        }
+
+        try {
+            var supabaseUid = ""
+            if (supabaseClient?.isReady() == true) {
+                when (val signInRes = supabaseClient.signInWithPassword(normalizedEmail, pass)) {
                     is SupabaseResult.Success -> {
                         val session = signInRes.data
                         if (!session.accessToken.isNullOrBlank() && session.user != null) {
@@ -355,87 +445,43 @@ class AuthRepository(
                                 accessToken = session.accessToken,
                                 refreshToken = session.refreshToken,
                                 userId = session.user.id,
-                                email = session.user.email ?: email,
+                                email = session.user.email ?: normalizedEmail,
                                 expiresInSeconds = session.expiresIn ?: 3600L
                             )
                         }
                     }
                     is SupabaseResult.Error -> {
-                        // Attempt sign up if user not found
-                        val signUpRes = supabaseClient.signUp(email, pass)
-                        if (signUpRes is SupabaseResult.Success) {
-                            val session = signUpRes.data
-                            if (!session.accessToken.isNullOrBlank() && session.user != null) {
-                                supabaseUid = session.user.id
-                                supabaseAuthManager?.saveSession(
-                                    accessToken = session.accessToken,
-                                    refreshToken = session.refreshToken,
-                                    userId = session.user.id,
-                                    email = session.user.email ?: email,
-                                    expiresInSeconds = session.expiresIn ?: 3600L
-                                )
-                            }
+                        val err = signInRes.message
+                        PersistenceMonitor.log("AUTH_SIGNIN", "auth.users", normalizedEmail, normalizedEmail, "FAILED", signInRes.code?.toString(), err)
+                        if (err.contains("invalid", ignoreCase = true) || signInRes.code == 400) {
+                            return@withContext Result.failure(Exception("Invalid email or password. Please try again."))
                         }
+                        return@withContext Result.failure(Exception(err))
                     }
                 }
             }
 
-            val auth = firebaseAuth
-            if (auth != null) {
-                try {
-                    val authResult = auth.signInWithEmailAndPassword(email, pass).await()
-                    val user = authResult.user
-                    val existing = userDao.getUserProfileOnce()
-                    val profile = UserProfile(
-                        id = "current_user",
-                        uid = if (supabaseUid.isNotBlank()) supabaseUid else (user?.uid ?: ""),
-                        name = user?.displayName ?: email.substringBefore("@").replaceFirstChar { it.uppercase() },
-                        email = email,
-                        isGuest = false,
-                        isOnboardingCompleted = existing?.isOnboardingCompleted == true
-                    )
-                    userDao.insertOrUpdateUserProfile(profile)
-                    supabaseAuthManager?.associateFirebaseOrLocalUser(profile.uid, profile.email)
-                    supabaseSyncService?.syncUserProfile(profile)
-                    supabaseSyncService?.fullCloudRestore()
-                    return@withContext Result.success(profile)
-                } catch (e: Exception) {
-                    try {
-                        val createResult = auth.createUserWithEmailAndPassword(email, pass).await()
-                        val user = createResult.user
-                        val profile = UserProfile(
-                            id = "current_user",
-                            uid = if (supabaseUid.isNotBlank()) supabaseUid else (user?.uid ?: ""),
-                            name = email.substringBefore("@").replaceFirstChar { it.uppercase() },
-                            email = email,
-                            isGuest = false,
-                            isOnboardingCompleted = false
-                        )
-                        userDao.insertOrUpdateUserProfile(profile)
-                        supabaseAuthManager?.associateFirebaseOrLocalUser(profile.uid, profile.email)
-                        supabaseSyncService?.syncUserProfile(profile)
-                        return@withContext Result.success(profile)
-                    } catch (ce: Exception) {
-                        return@withContext Result.failure(Exception("Authentication failed: ${ce.localizedMessage ?: ce.message}"))
-                    }
-                }
-            } else {
-                val existing = userDao.getUserProfileOnce()
-                val profile = UserProfile(
-                    id = "current_user",
-                    uid = if (supabaseUid.isNotBlank()) supabaseUid else (existing?.uid ?: "user_${email.hashCode()}"),
-                    name = email.substringBefore("@").replaceFirstChar { it.uppercase() },
-                    email = email,
-                    isGuest = false,
-                    isOnboardingCompleted = existing?.isOnboardingCompleted ?: false
-                )
-                userDao.insertOrUpdateUserProfile(profile)
-                supabaseAuthManager?.associateFirebaseOrLocalUser(profile.uid, profile.email)
-                supabaseSyncService?.syncUserProfile(profile)
-                supabaseSyncService?.fullCloudRestore()
-                Result.success(profile)
-            }
+            val uidToUse = if (supabaseUid.isNotBlank()) supabaseUid else "usr_${Math.abs(normalizedEmail.hashCode())}"
+            val existing = userDao.getUserProfileOnce()
+            val profile = UserProfile(
+                id = "current_user",
+                uid = uidToUse,
+                name = existing?.name ?: normalizedEmail.substringBefore("@").replaceFirstChar { it.uppercase() },
+                email = normalizedEmail,
+                isGuest = false,
+                isOnboardingCompleted = existing?.isOnboardingCompleted ?: false,
+                examName = existing?.examName ?: "RRB Group D"
+            )
+
+            userDao.insertOrUpdateUserProfile(profile)
+            supabaseAuthManager?.associateFirebaseOrLocalUser(profile.uid, profile.email)
+            supabaseSyncService?.syncUserProfile(profile)
+            supabaseSyncService?.fullCloudRestore()
+
+            PersistenceMonitor.log("AUTH_SIGNIN", "profiles", uidToUse, uidToUse, "SUCCESS")
+            Result.success(profile)
         } catch (e: Exception) {
+            PersistenceMonitor.log("AUTH_SIGNIN", "profiles", normalizedEmail, "unknown", "FAILED", details = e.message)
             Result.failure(e)
         }
     }

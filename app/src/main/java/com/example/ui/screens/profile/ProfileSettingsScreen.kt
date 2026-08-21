@@ -33,12 +33,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.data.model.ExamEntity
 import com.example.data.model.NotificationPreference
 import com.example.data.model.UserProfile
 import com.example.ui.components.GlassButton
 import com.example.ui.components.GlassCard
+import com.example.ui.components.PersistenceStatusIndicator
 import com.example.ui.components.springClickable
 import com.example.ui.screens.auth.PermissionSetupScreen
 import com.example.ui.screens.focus.AccessibilityPrivacyScreen
@@ -93,6 +95,9 @@ fun ProfileSettingsScreen(
     var showSignOutConfirm by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showResetDataConfirm by remember { mutableStateOf(false) }
+    var showDiagnosticDialog by remember { mutableStateOf(false) }
+
+    val activePersistenceStatus by com.example.data.persistence.PersistenceMonitor.activeStatus.collectAsStateWithLifecycle()
 
     // TTS Preview state
     var ttsPreview: TextToSpeech? by remember { mutableStateOf(null) }
@@ -265,6 +270,24 @@ fun ProfileSettingsScreen(
                         )
                     }
 
+                    IconButton(
+                        onClick = { showDiagnosticDialog = true },
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Color(0x2038BDF8))
+                            .testTag("persistence_diagnostic_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CloudSync,
+                            contentDescription = "Cloud Save Status Diagnostics",
+                            tint = NeonCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
                     // Quick Edit Shortcut
                     IconButton(
                         onClick = { activeSubScreen = ProfileSubScreen.EDIT_MODE },
@@ -285,6 +308,10 @@ fun ProfileSettingsScreen(
             }
         }
     ) { innerPadding ->
+        if (showDiagnosticDialog) {
+            PersistenceDiagnosticDialog(onDismiss = { showDiagnosticDialog = false })
+        }
+
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -292,6 +319,12 @@ fun ProfileSettingsScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            item {
+                PersistenceStatusIndicator(
+                    status = activePersistenceStatus,
+                    onRetry = { showDiagnosticDialog = true }
+                )
+            }
             // =========================================================================
             // 1. PROFILE HEADER (Identity & Preparation Context)
             // =========================================================================

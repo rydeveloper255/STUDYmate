@@ -34,9 +34,10 @@ import com.example.data.model.*
         LearningTopicContent::class,
         UserLearningBookmark::class,
         QuestionHistoryEntity::class,
-        QuestionQualityReportEntity::class
+        QuestionQualityReportEntity::class,
+        com.example.data.persistence.PendingSyncEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -64,6 +65,7 @@ abstract class StudyMateDatabase : RoomDatabase() {
     abstract fun userLearningBookmarkDao(): UserLearningBookmarkDao
     abstract fun questionHistoryDao(): QuestionHistoryDao
     abstract fun questionQualityReportDao(): QuestionQualityReportDao
+    abstract fun pendingSyncDao(): com.example.data.persistence.PendingSyncDao
 
     companion object {
         @Volatile

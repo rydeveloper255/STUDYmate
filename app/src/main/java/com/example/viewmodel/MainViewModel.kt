@@ -645,8 +645,32 @@ class MainViewModel(
         viewModelScope.launch {
             _isAuthLoading.value = true
             _authErrorMessage.value = null
+            com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saving)
             val result = authRepository.signInWithEmail(email, pass)
-            result.onFailure { _authErrorMessage.value = it.message ?: "Authentication failed" }
+            result.onSuccess {
+                com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saved(message = "✓ Authenticated & synced"))
+            }
+            result.onFailure {
+                _authErrorMessage.value = it.message ?: "Authentication failed"
+                com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Failed(it.message ?: "Auth failed"))
+            }
+            _isAuthLoading.value = false
+        }
+    }
+
+    fun signUpWithEmail(email: String, pass: String, displayName: String = "", examName: String = "RRB Group D") {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            _authErrorMessage.value = null
+            com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saving)
+            val result = authRepository.signUpWithEmail(email, pass, displayName, examName)
+            result.onSuccess {
+                com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saved(message = "✓ Account created & synced"))
+            }
+            result.onFailure {
+                _authErrorMessage.value = it.message ?: "Sign-up failed"
+                com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Failed(it.message ?: "Sign-up failed"))
+            }
             _isAuthLoading.value = false
         }
     }
