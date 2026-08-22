@@ -40,6 +40,7 @@ import com.example.ui.screens.document.DocumentSummarizerScreen
 import com.example.ui.screens.focus.FocusModeScreen
 import com.example.ui.screens.home.HomeScreen
 import com.example.ui.screens.nova.NovaScreen
+import com.example.ui.screens.nova.NovaFloatingAssistant
 import com.example.ui.screens.planner.StudyPlannerScreen
 import com.example.ui.screens.planner.StudySessionTimerView
 import com.example.data.model.ExamContext
@@ -168,6 +169,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     }
 
     // Authenticated & Onboarded Main Application Flow
+    val novaViewModel: NovaViewModel = viewModel()
     val studyPlan by viewModel.studyPlanItems.collectAsStateWithLifecycle()
     val isPlanGenerating by viewModel.isPlanGenerating.collectAsStateWithLifecycle()
     val missions by viewModel.dailyMissions.collectAsStateWithLifecycle()
@@ -244,6 +246,16 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     var selectedLearningChapter by remember { mutableStateOf<String?>("General Chapter") }
     var selectedLearningTopic by remember { mutableStateOf<String?>(null) }
     var showSavedLearning by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentTab, activeTestState.isTestInProgress, selectedLearningSubject, selectedLearningTopic, userProfile?.examName) {
+        novaViewModel.setAppContext(
+            screenName = currentTab.name,
+            subject = selectedLearningSubject ?: userProfile?.subjects?.firstOrNull(),
+            topic = selectedLearningTopic,
+            isTestActive = activeTestState.isTestInProgress,
+            targetExam = userProfile?.examName ?: "General"
+        )
+    }
 
     val activity = context as? Activity
     var lastBackPressTime by remember { mutableLongStateOf(0L) }
@@ -423,11 +435,11 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onSignOut = { viewModel.signOut(context) },
                             onScanQuestion = { onSelectTab(AppNavTab.AI_TUTOR) },
                             onOpenDocumentSummarizer = { showDocumentSummarizer = true },
-                            onUpdateUserProfile = { updatedProfile -> viewModel.updateUserProfile(updatedProfile) }
+                            onUpdateUserProfile = { updatedProfile -> viewModel.updateUserProfile(updatedProfile) },
+                            novaViewModel = novaViewModel
                         )
 
                         AppNavTab.AI_TUTOR -> {
-                            val novaViewModel: NovaViewModel = viewModel()
                             NovaScreen(
                                 viewModel = novaViewModel,
                                 onNavigateToFocus = { sub, top, mins ->
@@ -743,6 +755,17 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                         )
                     }
                 }
+            }
+
+            // Floating In-Context Assistant on secondary screens (except Home, AI Tutor, and active Mock Test)
+            if (currentTab != AppNavTab.HOME && currentTab != AppNavTab.AI_TUTOR && !activeTestState.isTestInProgress && !showProfileSettings && !showDocumentSummarizer && !showExamReadinessCenter) {
+                NovaFloatingAssistant(
+                    viewModel = novaViewModel,
+                    onNavigateToTab = { onSelectTab(it) },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 16.dp, bottom = 96.dp)
+                )
             }
 
             // Unfinished Test Session Recovery Modal Dialog

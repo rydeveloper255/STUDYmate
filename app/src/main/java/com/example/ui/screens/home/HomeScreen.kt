@@ -34,6 +34,8 @@ import coil.compose.AsyncImage
 import com.example.data.model.*
 import com.example.ui.components.*
 import com.example.ui.theme.*
+import com.example.ui.screens.nova.NovaHomeUniversalWidget
+import com.example.viewmodel.NovaViewModel
 import org.json.JSONArray
 import java.text.SimpleDateFormat
 import java.util.*
@@ -64,6 +66,7 @@ fun HomeScreen(
     onScanQuestion: () -> Unit = {},
     onOpenDocumentSummarizer: () -> Unit = {},
     onUpdateUserProfile: (UserProfile) -> Unit = {},
+    novaViewModel: NovaViewModel? = null,
     modifier: Modifier = Modifier
 ) {
     val isDark = isAppInDarkTheme()
@@ -428,6 +431,19 @@ fun HomeScreen(
                         }
                     }
                 }
+            }
+        }
+
+        // =========================================================================
+        // 2.5. NOVA UNIVERSAL SMART WIDGET (STEP 20)
+        // =========================================================================
+        if (novaViewModel != null) {
+            item {
+                NovaHomeUniversalWidget(
+                    viewModel = novaViewModel,
+                    onNavigateToTab = onNavigateToTab,
+                    modifier = Modifier.testTag("nova_home_widget")
+                )
             }
         }
 

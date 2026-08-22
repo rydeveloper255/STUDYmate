@@ -353,6 +353,20 @@ fun NovaAssistantChatTab(
                             val clip = ClipData.newPlainText("NOVA Notes", text)
                             clipboard.setPrimaryClip(clip)
                             Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                        },
+                        onSaveNote = { text ->
+                            viewModel.saveNovaAnswerAsNote(text)
+                        },
+                        onExportPdf = { text ->
+                            viewModel.exportNovaAnswerPdf(context, text)
+                        },
+                        onShareText = { text ->
+                            val sendIntent = android.content.Intent().apply {
+                                action = android.content.Intent.ACTION_SEND
+                                putExtra(android.content.Intent.EXTRA_TEXT, text)
+                                type = "text/plain"
+                            }
+                            context.startActivity(android.content.Intent.createChooser(sendIntent, "Share Study Notes"))
                         }
                     )
                 }
@@ -778,7 +792,10 @@ fun NovaChatMessageBubble(
     onExecuteAction: (NovaActionType, String?) -> Unit,
     onSpeak: (String) -> Unit,
     isSpeaking: Boolean,
-    onCopyText: (String) -> Unit
+    onCopyText: (String) -> Unit,
+    onSaveNote: (String) -> Unit,
+    onExportPdf: (String) -> Unit,
+    onShareText: (String) -> Unit
 ) {
     val isUser = message.sender == NovaSender.USER
     val timeFormatted = remember(message.timestamp) {
@@ -808,7 +825,7 @@ fun NovaChatMessageBubble(
         }
 
         Column(
-            modifier = Modifier.widthIn(max = 310.dp),
+            modifier = Modifier.widthIn(max = 330.dp),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
         ) {
             Surface(
@@ -847,8 +864,26 @@ fun NovaChatMessageBubble(
                         lineHeight = 19.sp
                     )
 
-                    // Action Trigger Cards
-                    if (message.actionType != NovaActionType.NONE) {
+                    // Current Affairs preview cards (if attached)
+                    if (message.currentAffairsPreview.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        NovaCurrentAffairsPreviewGroup(
+                            items = message.currentAffairsPreview,
+                            onOpenItem = { onExecuteAction(NovaActionType.OPEN_CURRENT_AFFAIRS, null) }
+                        )
+                    }
+
+                    // Contextual Action Card Group (if action buttons present)
+                    if (message.actionButtons.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        NovaActionCardGroup(
+                            actions = message.actionButtons,
+                            onActionClick = { action ->
+                                onExecuteAction(action.actionType, action.payload)
+                            }
+                        )
+                    } else if (message.actionType != NovaActionType.NONE) {
+                        // Single Action Trigger Button fallback
                         Spacer(modifier = Modifier.height(10.dp))
                         NovaActionTriggerButton(
                             actionType = message.actionType,
@@ -873,7 +908,49 @@ fun NovaChatMessageBubble(
                                 color = TextSecondary
                             )
 
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                // Save to Notes
+                                IconButton(
+                                    onClick = { onSaveNote(message.text) },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.BookmarkBorder,
+                                        contentDescription = "Save to Smart Notes",
+                                        tint = TextSecondary,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+
+                                // Export PDF
+                                IconButton(
+                                    onClick = { onExportPdf(message.text) },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PictureAsPdf,
+                                        contentDescription = "Download PDF",
+                                        tint = TextSecondary,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+
+                                // Share
+                                IconButton(
+                                    onClick = { onShareText(message.text) },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Share,
+                                        contentDescription = "Share",
+                                        tint = TextSecondary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+
                                 // Copy Button
                                 IconButton(
                                     onClick = { onCopyText(message.text) },
@@ -881,7 +958,7 @@ fun NovaChatMessageBubble(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.ContentCopy,
-                                        contentDescription = "Copy Notes",
+                                        contentDescription = "Copy Text",
                                         tint = TextSecondary,
                                         modifier = Modifier.size(14.dp)
                                     )
@@ -892,12 +969,12 @@ fun NovaChatMessageBubble(
                                     NovaVoiceWaveform(
                                         isActive = true,
                                         isProcessing = false,
-                                        barCount = 4,
+                                        barCount = 3,
                                         minBarHeight = 4.dp,
-                                        maxBarHeight = 14.dp,
-                                        barWidth = 2.5.dp,
-                                        barSpacing = 2.5.dp,
-                                        modifier = Modifier.padding(end = 4.dp)
+                                        maxBarHeight = 12.dp,
+                                        barWidth = 2.dp,
+                                        barSpacing = 2.dp,
+                                        modifier = Modifier.padding(end = 2.dp)
                                     )
                                 }
 
@@ -911,11 +988,12 @@ fun NovaChatMessageBubble(
                                         tint = NeonCyan,
                                         modifier = Modifier.size(14.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Spacer(modifier = Modifier.width(3.dp))
                                     Text(
                                         text = if (isSpeaking) "Stop" else "Listen",
                                         fontSize = 11.sp,
-                                        color = NeonCyan
+                                        color = NeonCyan,
+                                        fontWeight = FontWeight.SemiBold
                                     )
                                 }
                             }
@@ -929,6 +1007,166 @@ fun NovaChatMessageBubble(
                             color = Color.White.copy(alpha = 0.6f),
                             modifier = Modifier.align(Alignment.End)
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// CURRENT AFFAIRS PREVIEW GROUP
+// =============================================================================
+@Composable
+private fun NovaCurrentAffairsPreviewGroup(
+    items: List<CurrentAffairsItem>,
+    onOpenItem: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = DarkSurface,
+        border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.35f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "📰 HIGH-YIELD HEADLINES",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = NeonCyan,
+                    letterSpacing = 0.8.sp
+                )
+                Text(
+                    text = "${items.size} updates",
+                    fontSize = 10.sp,
+                    color = TextSecondary
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+
+            items.take(3).forEach { item ->
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color.White.copy(alpha = 0.04f),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 3.dp)
+                        .springClickable { onOpenItem() }
+                ) {
+                    Column(modifier = Modifier.padding(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = ElectricIndigo.copy(alpha = 0.3f)
+                            ) {
+                                Text(
+                                    text = item.category.uppercase(),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeonCyan,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                            Text(
+                                text = item.publishedDate,
+                                fontSize = 9.sp,
+                                color = TextSecondary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = item.title,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                            lineHeight = 15.sp,
+                            maxLines = 2
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// ACTION CARD GROUP (Step 18 Action Cards UI)
+// =============================================================================
+@Composable
+private fun NovaActionCardGroup(
+    actions: List<NovaContextualAction>,
+    onActionClick: (NovaContextualAction) -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = DarkSurface,
+        border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.4f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // Render Primary Action as full-width gradient button
+            val primaryAction = actions.firstOrNull { it.isPrimary } ?: actions.firstOrNull()
+            if (primaryAction != null) {
+                Button(
+                    onClick = { onActionClick(primaryAction) },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.horizontalGradient(listOf(NeonCyan, ElectricIndigo)),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                ) {
+                    Text(
+                        text = primaryAction.label,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
+
+            // Render secondary actions as responsive grid / row of chips
+            val secondaryActions = actions.filter { it != primaryAction }
+            if (secondaryActions.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    secondaryActions.forEach { action ->
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.White.copy(alpha = 0.07f),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .springClickable { onActionClick(action) }
+                        ) {
+                            Text(
+                                text = action.label,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White.copy(alpha = 0.95f),
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
             }

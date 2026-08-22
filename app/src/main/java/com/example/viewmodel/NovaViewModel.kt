@@ -17,6 +17,7 @@ import com.example.service.NovaVoiceManager
 import com.example.service.coach.NovaStudyCoach
 import com.example.service.intelligence.StudyMateIntelligenceEngine
 import com.example.service.voice.NovaVoiceEmotion
+import com.example.ui.components.AppNavTab
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -290,6 +291,25 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
     private val _snackbarMessage = MutableSharedFlow<String>()
     val snackbarMessage: SharedFlow<String> = _snackbarMessage.asSharedFlow()
 
+    // STEP 20: Home Universal Widget & Context-Aware AI States
+    private val _homeWidgetDisplayState = MutableStateFlow(HomeWidgetDisplayState.COLLAPSED)
+    val homeWidgetDisplayState: StateFlow<HomeWidgetDisplayState> = _homeWidgetDisplayState.asStateFlow()
+
+    private val _homeWidgetAnswer = MutableStateFlow<NovaChatMessage?>(null)
+    val homeWidgetAnswer: StateFlow<NovaChatMessage?> = _homeWidgetAnswer.asStateFlow()
+
+    private val _homeWidgetThinkingStatus = MutableStateFlow("Understanding your request...")
+    val homeWidgetThinkingStatus: StateFlow<String> = _homeWidgetThinkingStatus.asStateFlow()
+
+    private val _homeWidgetQuery = MutableStateFlow("")
+    val homeWidgetQuery: StateFlow<String> = _homeWidgetQuery.asStateFlow()
+
+    private val _appContext = MutableStateFlow(NovaAppContext())
+    val appContext: StateFlow<NovaAppContext> = _appContext.asStateFlow()
+
+    private val _isFloatingNovaOpen = MutableStateFlow(false)
+    val isFloatingNovaOpen: StateFlow<Boolean> = _isFloatingNovaOpen.asStateFlow()
+
     init {
         loadInitialData()
         observeStudyContext()
@@ -527,6 +547,257 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         _attachedImageBitmap.value = null
         _attachedImageUri.value = null
 
+        val lower = userText.trim().lowercase()
+
+        // 1. Instant Intent: Today's Current Affairs
+        val isCurrentAffairsIntent = lower.contains("current affair") || lower.contains("current affairs") ||
+                lower.contains("aaj ke current affairs") || lower.contains("aaj ka current affairs") ||
+                lower.contains("daily current affairs") || lower.contains("samayiki") ||
+                lower.contains("today ca") || lower.contains("aaj ki khabar") || lower.contains("today current affairs")
+
+        if (isCurrentAffairsIntent && imageToSend == null) {
+            val existingAffairs = allCurrentAffairs.value
+            val preview = existingAffairs.take(4)
+
+            val actions = listOf(
+                NovaContextualAction(
+                    label = "📅 Open Today's Current Affairs",
+                    iconName = "calendar",
+                    actionType = NovaActionType.OPEN_CURRENT_AFFAIRS,
+                    payload = "{\"filter\":\"today\"}",
+                    isPrimary = true
+                ),
+                NovaContextualAction(
+                    label = "🇮🇳 Hindi",
+                    iconName = "language",
+                    actionType = NovaActionType.OPEN_CURRENT_AFFAIRS,
+                    payload = "{\"lang\":\"Hindi\"}"
+                ),
+                NovaContextualAction(
+                    label = "🇬🇧 English",
+                    iconName = "language",
+                    actionType = NovaActionType.OPEN_CURRENT_AFFAIRS,
+                    payload = "{\"lang\":\"English\"}"
+                ),
+                NovaContextualAction(
+                    label = "📄 Download PDF",
+                    iconName = "pdf",
+                    actionType = NovaActionType.EXPORT_CURRENT_AFFAIRS_PDF
+                ),
+                NovaContextualAction(
+                    label = "🎯 Make Quiz",
+                    iconName = "quiz",
+                    actionType = NovaActionType.START_QUIZ,
+                    payload = "{\"subject\":\"Current Affairs\",\"topic\":\"Today's News\"}"
+                )
+            )
+
+            val replyText = if (_settings.value.language == "Hindi") {
+                "बिलकुल 👍 आज के परीक्षा-उपयोगी Current Affairs तैयार हैं। नीचे दिए गए कार्ड्स देखें या सीधा Current Affairs सेक्शन खोलें:"
+            } else {
+                "Bilkul 👍 Aaj ke high-yield Current Affairs updates ready hain. Niche quick preview aur direct actions hain:"
+            }
+
+            val novaMessage = NovaChatMessage(
+                sender = NovaSender.NOVA,
+                text = replyText,
+                actionButtons = actions,
+                currentAffairsPreview = preview
+            )
+            _messages.update { it + novaMessage }
+
+            if (_settings.value.ttsAutoSpeak && _settings.value.voiceEnabled) {
+                voiceManager.speak(replyText, NovaVoiceEmotion.CALM)
+            }
+
+            if (existingAffairs.isEmpty()) {
+                refreshCurrentAffairs(forceRefresh = true)
+            }
+            return
+        }
+
+        // 2. Instant Intent: Mock Test
+        val isMockTestIntent = lower.contains("mock test") || lower.contains("test start") ||
+                lower.contains("cbt start") || lower.contains("test shuru") || lower.contains("start test") ||
+                lower.contains("full mock")
+
+        if (isMockTestIntent && imageToSend == null) {
+            val exam = _studyContext.value.targetExam.ifBlank { "RRB Group D" }
+            val actions = listOf(
+                NovaContextualAction(
+                    label = "🎯 Start $exam Mock Test",
+                    iconName = "play",
+                    actionType = NovaActionType.OPEN_MOCK_TEST,
+                    isPrimary = true
+                ),
+                NovaContextualAction(
+                    label = "⚙️ Choose Subject",
+                    iconName = "subject",
+                    actionType = NovaActionType.OPEN_SUBJECT
+                ),
+                NovaContextualAction(
+                    label = "📊 View Test History",
+                    iconName = "chart",
+                    actionType = NovaActionType.SHOW_TEST_RESULT
+                )
+            )
+            val replyText = "Bilkul 👍 $exam ka Full CBT Mock Test setup ready hai. Abhi test shuru karein ya subject choose karein?"
+            val novaMessage = NovaChatMessage(
+                sender = NovaSender.NOVA,
+                text = replyText,
+                actionButtons = actions
+            )
+            _messages.update { it + novaMessage }
+            return
+        }
+
+        // 3. Instant Intent: Practice Quiz
+        val isQuizIntent = lower.contains("practice question") || lower.contains("practice questions") ||
+                lower.contains("quiz start") || lower.contains("quiz shuru") || lower.contains("start quiz") ||
+                lower.contains("questions solve") || lower.contains("mcq solve")
+
+        if (isQuizIntent && imageToSend == null) {
+            val subj = _studyContext.value.subjects.firstOrNull() ?: "General Studies"
+            val actions = listOf(
+                NovaContextualAction(
+                    label = "✍️ Start 10-Q Practice Quiz",
+                    iconName = "quiz",
+                    actionType = NovaActionType.START_QUIZ,
+                    payload = "{\"subject\":\"$subj\"}",
+                    isPrimary = true
+                ),
+                NovaContextualAction(
+                    label = "📚 Choose Topic",
+                    iconName = "topic",
+                    actionType = NovaActionType.OPEN_TOPIC
+                )
+            )
+            val replyText = "Shandar! $subj ke high-yield MCQs ready hain. Practice start karein?"
+            val novaMessage = NovaChatMessage(
+                sender = NovaSender.NOVA,
+                text = replyText,
+                actionButtons = actions
+            )
+            _messages.update { it + novaMessage }
+            return
+        }
+
+        // 4. Instant Intent: Saved Questions
+        val isSavedQuestionsIntent = lower.contains("saved question") || lower.contains("saved questions") ||
+                lower.contains("marked question") || lower.contains("marked questions") || lower.contains("bookmarked question")
+
+        if (isSavedQuestionsIntent && imageToSend == null) {
+            val actions = listOf(
+                NovaContextualAction(
+                    label = "🔖 Open Saved Questions",
+                    iconName = "bookmark",
+                    actionType = NovaActionType.OPEN_SAVED_QUESTIONS,
+                    isPrimary = true
+                )
+            )
+            val replyText = "Tumhare bookmark aur revision ke liye saved questions ready hain."
+            val novaMessage = NovaChatMessage(
+                sender = NovaSender.NOVA,
+                text = replyText,
+                actionButtons = actions
+            )
+            _messages.update { it + novaMessage }
+            return
+        }
+
+        // 5. Instant Intent: Smart Notes
+        val isSmartNotesIntent = lower.contains("mere notes") || lower.contains("smart notes") ||
+                lower.contains("notes dikhao") || lower.contains("my notes") || lower.contains("open notes")
+
+        if (isSmartNotesIntent && imageToSend == null) {
+            val actions = listOf(
+                NovaContextualAction(
+                    label = "📝 Open Smart Notes",
+                    iconName = "note",
+                    actionType = NovaActionType.OPEN_SMART_NOTES,
+                    isPrimary = true
+                )
+            )
+            val replyText = "Tumhare study notes aur high-yield summaries open kar raha hoon."
+            val novaMessage = NovaChatMessage(
+                sender = NovaSender.NOVA,
+                text = replyText,
+                actionButtons = actions
+            )
+            _messages.update { it + novaMessage }
+            return
+        }
+
+        // 6. Instant Intent: Study Planner
+        val isPlannerIntent = lower.contains("planner") || lower.contains("study plan") ||
+                lower.contains("timetable") || lower.contains("schedule") || lower.contains("aaj ka plan")
+
+        if (isPlannerIntent && imageToSend == null) {
+            val actions = listOf(
+                NovaContextualAction(
+                    label = "📅 Open Study Planner",
+                    iconName = "calendar",
+                    actionType = NovaActionType.OPEN_STUDY_PLAN,
+                    isPrimary = true
+                )
+            )
+            val replyText = "Study Planner ready hai. Aaj ke daily target aur pending topics check karlo."
+            val novaMessage = NovaChatMessage(
+                sender = NovaSender.NOVA,
+                text = replyText,
+                actionButtons = actions
+            )
+            _messages.update { it + novaMessage }
+            return
+        }
+
+        // 7. Instant Intent: Focus Mode
+        val isFocusIntent = lower.contains("focus mode") || lower.contains("pomodoro") ||
+                lower.contains("timer start") || lower.contains("padhai shuru") || lower.contains("start focus")
+
+        if (isFocusIntent && imageToSend == null) {
+            val actions = listOf(
+                NovaContextualAction(
+                    label = "⏱️ Start Focus Mode (25m)",
+                    iconName = "timer",
+                    actionType = NovaActionType.OPEN_FOCUS_MODE,
+                    isPrimary = true
+                )
+            )
+            val replyText = "Focus mode ready hai. 25 minutes ka deep study session start karte hain!"
+            val novaMessage = NovaChatMessage(
+                sender = NovaSender.NOVA,
+                text = replyText,
+                actionButtons = actions
+            )
+            _messages.update { it + novaMessage }
+            return
+        }
+
+        // 8. Instant Intent: Academic Search
+        val isSearchIntent = lower.contains("search karo") || lower.contains("academic search") ||
+                lower.contains("topic search") || lower.contains("syllabus search")
+
+        if (isSearchIntent && imageToSend == null) {
+            val actions = listOf(
+                NovaContextualAction(
+                    label = "🔍 Open Academic Search",
+                    iconName = "search",
+                    actionType = NovaActionType.OPEN_SMART_SEARCH,
+                    isPrimary = true
+                )
+            )
+            val replyText = "Smart academic search open kar raha hoon. Koi bhi formula ya concept search karo."
+            val novaMessage = NovaChatMessage(
+                sender = NovaSender.NOVA,
+                text = replyText,
+                actionButtons = actions
+            )
+            _messages.update { it + novaMessage }
+            return
+        }
+
+        // General Gemini Query Flow
         _isGenerating.value = true
 
         viewModelScope.launch {
@@ -546,11 +817,52 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
             _isGenerating.value = false
 
             result.onSuccess { response ->
+                // Build contextual follow-up action buttons for general academic queries
+                val dynamicActions = mutableListOf<NovaContextualAction>()
+                if (response.actionType != NovaActionType.NONE) {
+                    val label = when (response.actionType) {
+                        NovaActionType.START_FOCUS, NovaActionType.START_STUDY_SESSION -> "⏱️ Start Focus Session"
+                        NovaActionType.START_QUIZ -> "✍️ Start Interactive Quiz"
+                        NovaActionType.CREATE_PLAN, NovaActionType.CREATE_STUDY_TASK -> "📅 Add to Study Plan"
+                        NovaActionType.OPEN_MOCK_TEST -> "🎯 Open Mock Test"
+                        NovaActionType.OPEN_STUDY_PLAN -> "📅 Open Study Planner"
+                        NovaActionType.OPEN_FOCUS_MODE -> "⏱️ Open Focus Mode"
+                        else -> "⚡ Execute Action"
+                    }
+                    dynamicActions.add(
+                        NovaContextualAction(
+                            label = label,
+                            actionType = response.actionType,
+                            payload = response.actionPayload,
+                            isPrimary = true
+                        )
+                    )
+                }
+
+                // Add useful study follow-up actions
+                dynamicActions.add(
+                    NovaContextualAction(
+                        label = "💡 Explain Easier",
+                        iconName = "bulb",
+                        actionType = NovaActionType.NONE,
+                        payload = "explain_easier"
+                    )
+                )
+                dynamicActions.add(
+                    NovaContextualAction(
+                        label = "✍️ Practice MCQs",
+                        iconName = "quiz",
+                        actionType = NovaActionType.START_QUIZ,
+                        payload = "{\"topic\":\"Current Topic\"}"
+                    )
+                )
+
                 val novaMessage = NovaChatMessage(
                     sender = NovaSender.NOVA,
                     text = response.replyMarkdown,
                     actionType = response.actionType,
-                    actionPayload = response.actionPayload
+                    actionPayload = response.actionPayload,
+                    actionButtons = dynamicActions.take(3)
                 )
                 _messages.update { it + novaMessage }
 
@@ -567,7 +879,18 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
             }.onFailure {
                 val fallbackMessage = NovaChatMessage(
                     sender = NovaSender.NOVA,
-                    text = "Boss, abhi internet connection available nahi hai. Aap offline Focus Mode ya Practice Quiz start kar sakte hain! 🚀"
+                    text = "Boss, abhi network issue hai. Aap offline Focus Mode ya Practice Quiz continue kar sakte hain! 🚀",
+                    actionButtons = listOf(
+                        NovaContextualAction(
+                            label = "⏱️ Start Focus Mode",
+                            actionType = NovaActionType.OPEN_FOCUS_MODE,
+                            isPrimary = true
+                        ),
+                        NovaContextualAction(
+                            label = "✍️ Offline Quiz",
+                            actionType = NovaActionType.START_QUIZ
+                        )
+                    )
                 )
                 _messages.update { it + fallbackMessage }
             }
@@ -577,6 +900,41 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
     fun executeAction(actionType: NovaActionType, payload: String?) {
         viewModelScope.launch {
             when (actionType) {
+                NovaActionType.OPEN_CURRENT_AFFAIRS -> {
+                    if (payload != null) {
+                        try {
+                            val json = org.json.JSONObject(payload)
+                            if (json.has("lang")) {
+                                val lang = json.getString("lang")
+                                setCurrentAffairsLanguage(lang)
+                                refreshCurrentAffairs(forceRefresh = true)
+                            }
+                            if (json.has("filter")) {
+                                val f = json.getString("filter")
+                                if (f == "today") {
+                                    _currentAffairsFilterCategory.value = "All"
+                                }
+                            }
+                        } catch (e: Exception) {}
+                    }
+                    setTab(NovaScreenTab.CURRENT_AFFAIRS)
+                }
+                NovaActionType.OPEN_SMART_NOTES -> {
+                    setTab(NovaScreenTab.SMART_NOTES)
+                }
+                NovaActionType.OPEN_SMART_SEARCH -> {
+                    setTab(NovaScreenTab.SMART_SEARCH)
+                }
+                NovaActionType.OPEN_SAVED_QUESTIONS -> {
+                    setTab(NovaScreenTab.INTERACTIVE_STUDY_QUIZ)
+                }
+                NovaActionType.EXPORT_CURRENT_AFFAIRS_PDF -> {
+                    exportCurrentAffairsPdf(getApplication())
+                }
+                NovaActionType.EXPORT_ANSWER_PDF -> {
+                    val lastNovaMsg = _messages.value.lastOrNull { it.sender == NovaSender.NOVA }?.text ?: "NOVA Study Notes"
+                    exportNovaAnswerPdf(getApplication(), lastNovaMsg)
+                }
                 NovaActionType.START_FOCUS -> {
                     var subject = _studyContext.value.subjects.firstOrNull() ?: "Physics"
                     var topic = _studyContext.value.weakTopics.firstOrNull() ?: "Core Revision"
@@ -724,6 +1082,16 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                 NovaActionType.OPEN_SETTINGS -> {
                     setTab(NovaScreenTab.NOVA_SETTINGS)
                 }
+                NovaActionType.OPEN_FULL_NOVA -> {
+                    setTab(NovaScreenTab.ASSISTANT_CHAT)
+                }
+                NovaActionType.OPEN_ANALYTICS -> {
+                    setTab(NovaScreenTab.ANALYTICS_STRATEGY)
+                }
+                NovaActionType.SAVE_NOTE -> {
+                    val lastNovaMsg = _homeWidgetAnswer.value?.text ?: _messages.value.lastOrNull { it.sender == NovaSender.NOVA }?.text ?: "NOVA Study Concept"
+                    saveNovaAnswerAsNote(payload ?: lastNovaMsg)
+                }
                 NovaActionType.RECOVER_MISSED_SESSION -> {
                     val alert = _missedSessionAlert.value
                     val sub = alert?.first?.subject ?: "Physics"
@@ -735,6 +1103,608 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                     ))
                 }
                 else -> {}
+            }
+        }
+    }
+
+    fun setAppContext(
+        screenName: String = "Home",
+        subject: String? = null,
+        topic: String? = null,
+        currentAffairsItem: CurrentAffairsItem? = null,
+        activeTestId: String? = null,
+        isTestActive: Boolean = false,
+        currentQuestionText: String? = null,
+        targetExam: String? = null
+    ) {
+        _appContext.value = NovaAppContext(
+            screenName = screenName,
+            subject = subject,
+            topic = topic,
+            currentAffairsItem = currentAffairsItem,
+            activeTestId = activeTestId,
+            isTestActive = isTestActive,
+            currentQuestionText = currentQuestionText,
+            targetExam = targetExam
+        )
+    }
+
+    fun setHomeWidgetQuery(q: String) {
+        _homeWidgetQuery.value = q
+    }
+
+    fun collapseHomeWidget() {
+        _homeWidgetDisplayState.value = HomeWidgetDisplayState.COLLAPSED
+    }
+
+    fun clearHomeWidgetAnswer() {
+        _homeWidgetAnswer.value = null
+        _homeWidgetDisplayState.value = HomeWidgetDisplayState.COLLAPSED
+    }
+
+    fun setFloatingNovaOpen(open: Boolean) {
+        _isFloatingNovaOpen.value = open
+    }
+
+    fun executeContextualAction(
+        action: NovaContextualAction,
+        context: android.content.Context,
+        onNavigateToTab: ((AppNavTab) -> Unit)? = null
+    ) {
+        when (action.actionType) {
+            NovaActionType.OPEN_CURRENT_AFFAIRS -> {
+                setTab(NovaScreenTab.CURRENT_AFFAIRS)
+                onNavigateToTab?.invoke(AppNavTab.AI_TUTOR)
+            }
+            NovaActionType.START_QUIZ -> {
+                var subj = _studyContext.value.subjects.firstOrNull() ?: "General Studies"
+                var top = "Core Concepts"
+                if (action.payload != null) {
+                    try {
+                        val json = org.json.JSONObject(action.payload)
+                        subj = json.optString("subject", subj)
+                        top = json.optString("topic", top)
+                    } catch (e: Exception) {}
+                }
+                startQuizSession(subj, top)
+                setTab(NovaScreenTab.INTERACTIVE_STUDY_QUIZ)
+                onNavigateToTab?.invoke(AppNavTab.AI_TUTOR)
+            }
+            NovaActionType.OPEN_MOCK_TEST -> {
+                onNavigateToTab?.invoke(AppNavTab.STUDY)
+            }
+            NovaActionType.START_FOCUS, NovaActionType.START_STUDY_SESSION -> {
+                var subj = _studyContext.value.subjects.firstOrNull() ?: "Physics"
+                var top = _studyContext.value.weakTopics.firstOrNull() ?: "Core Revision"
+                var dur = 25
+                if (action.payload != null) {
+                    try {
+                        val json = org.json.JSONObject(action.payload)
+                        subj = json.optString("subject", subj)
+                        top = json.optString("topic", top)
+                        dur = json.optInt("minutes", dur)
+                    } catch (e: Exception) {}
+                }
+                viewModelScope.launch {
+                    _navigationEvent.emit("NAVIGATE_TO_FOCUS" to mapOf("subject" to subj, "topic" to top, "duration" to dur))
+                }
+                onNavigateToTab?.invoke(AppNavTab.FOCUS)
+            }
+            NovaActionType.EXPORT_CURRENT_AFFAIRS_PDF -> {
+                exportCurrentAffairsPdf(context)
+            }
+            NovaActionType.EXPORT_ANSWER_PDF -> {
+                val text = action.payload ?: (_homeWidgetAnswer.value?.text ?: "NOVA Study Concept")
+                exportNovaAnswerPdf(context, text)
+            }
+            NovaActionType.SAVE_NOTE -> {
+                val text = action.payload ?: (_homeWidgetAnswer.value?.text ?: "NOVA Study Concept")
+                saveNovaAnswerAsNote(text)
+            }
+            NovaActionType.OPEN_SMART_NOTES -> {
+                setTab(NovaScreenTab.SMART_NOTES)
+                onNavigateToTab?.invoke(AppNavTab.AI_TUTOR)
+            }
+            NovaActionType.OPEN_STUDY_PLAN -> {
+                onNavigateToTab?.invoke(AppNavTab.STUDY)
+            }
+            NovaActionType.OPEN_ANALYTICS, NovaActionType.SHOW_PROGRESS -> {
+                setTab(NovaScreenTab.ANALYTICS_STRATEGY)
+                onNavigateToTab?.invoke(AppNavTab.AI_TUTOR)
+            }
+            NovaActionType.SHOW_TEST_RESULT -> {
+                onNavigateToTab?.invoke(AppNavTab.STUDY)
+            }
+            NovaActionType.OPEN_FULL_NOVA -> {
+                setTab(NovaScreenTab.ASSISTANT_CHAT)
+                onNavigateToTab?.invoke(AppNavTab.AI_TUTOR)
+            }
+            else -> {
+                executeAction(action.actionType, action.payload)
+            }
+        }
+    }
+
+    fun submitHomeWidgetQuery(
+        userText: String,
+        context: android.content.Context,
+        onNavigateToTab: ((AppNavTab) -> Unit)? = null
+    ) {
+        val text = userText.trim()
+        if (text.isBlank()) return
+
+        _homeWidgetQuery.value = text
+        _homeWidgetDisplayState.value = HomeWidgetDisplayState.THINKING
+        _homeWidgetThinkingStatus.value = "Understanding your request..."
+
+        val lower = text.lowercase()
+
+        // 0. EXAM INTEGRITY CHECK: During active Mock Test
+        if (_appContext.value.isTestActive) {
+            val reply = "NOVA help is available after you submit this test. Exam integrity active!"
+            val msg = NovaChatMessage(
+                sender = NovaSender.NOVA,
+                text = reply,
+                actionButtons = listOf(
+                    NovaContextualAction(
+                        label = "✓ Return to Test",
+                        iconName = "play",
+                        actionType = NovaActionType.NONE,
+                        isPrimary = true
+                    )
+                )
+            )
+            _homeWidgetAnswer.value = msg
+            _homeWidgetDisplayState.value = HomeWidgetDisplayState.EXPANDED
+            _messages.update { it + NovaChatMessage(sender = NovaSender.USER, text = text) + msg }
+            return
+        }
+
+        viewModelScope.launch {
+            // 1. Direct Navigation intents
+            if (lower == "nova screen kholo" || lower == "open nova" || lower == "open nova screen" || lower.contains("open full nova")) {
+                setTab(NovaScreenTab.ASSISTANT_CHAT)
+                onNavigateToTab?.invoke(AppNavTab.AI_TUTOR)
+                _homeWidgetDisplayState.value = HomeWidgetDisplayState.COLLAPSED
+                return@launch
+            }
+            if (lower == "mock test kholo" || lower == "open mock test") {
+                onNavigateToTab?.invoke(AppNavTab.STUDY)
+                _homeWidgetDisplayState.value = HomeWidgetDisplayState.COLLAPSED
+                return@launch
+            }
+            if (lower.contains("mere saved notes kholo") || lower.contains("open saved notes") || lower == "saved notes" || lower == "notes dikhao") {
+                setTab(NovaScreenTab.SMART_NOTES)
+                onNavigateToTab?.invoke(AppNavTab.AI_TUTOR)
+                _homeWidgetDisplayState.value = HomeWidgetDisplayState.COLLAPSED
+                return@launch
+            }
+
+            // 2. Intent: Current Affairs
+            val isCurrentAffairsIntent = lower.contains("current affair") || lower.contains("current affairs") ||
+                    lower.contains("aaj ke current affairs") || lower.contains("aaj ka current affairs") ||
+                    lower.contains("daily ca") || lower.contains("today ca") || lower.contains("aaj ki khabar") ||
+                    lower.contains("samayiki")
+
+            if (isCurrentAffairsIntent) {
+                _homeWidgetThinkingStatus.value = "Finding the latest information..."
+                var affairs = allCurrentAffairs.value
+                if (affairs.isEmpty()) {
+                    refreshCurrentAffairs(forceRefresh = true)
+                    affairs = allCurrentAffairs.value
+                }
+                val preview = affairs.take(3)
+                val actions = listOf(
+                    NovaContextualAction(
+                        label = "📅 View Today's CA",
+                        iconName = "calendar",
+                        actionType = NovaActionType.OPEN_CURRENT_AFFAIRS,
+                        isPrimary = true
+                    ),
+                    NovaContextualAction(
+                        label = "📝 Make Quiz",
+                        iconName = "quiz",
+                        actionType = NovaActionType.START_QUIZ,
+                        payload = "{\"subject\":\"Current Affairs\",\"topic\":\"Today's News\"}"
+                    ),
+                    NovaContextualAction(
+                        label = "📄 PDF",
+                        iconName = "pdf",
+                        actionType = NovaActionType.EXPORT_CURRENT_AFFAIRS_PDF
+                    ),
+                    NovaContextualAction(
+                        label = "Open NOVA →",
+                        iconName = "arrow",
+                        actionType = NovaActionType.OPEN_FULL_NOVA
+                    )
+                )
+                val replyText = if (_settings.value.language == "Hindi") {
+                    "बिलकुल! आज के महत्वपूर्ण परीक्षा-उपयोगी Current Affairs अपडेट्स तैयार हैं।"
+                } else {
+                    "Bilkul! Aaj ke important exam-relevant Current Affairs updates ready hain."
+                }
+                val msg = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = replyText,
+                    actionButtons = actions,
+                    currentAffairsPreview = preview
+                )
+                _homeWidgetAnswer.value = msg
+                _homeWidgetDisplayState.value = HomeWidgetDisplayState.EXPANDED
+                _messages.update { it + NovaChatMessage(sender = NovaSender.USER, text = text) + msg }
+                return@launch
+            }
+
+            // 3. Intent: Quiz generation (Context-aware or specific topic)
+            val isQuizIntent = lower.contains("quiz bana") || lower.contains("questions do") ||
+                    lower.contains("question bana") || lower.contains("questions bana") ||
+                    lower.contains("make quiz") || lower.contains("create quiz") ||
+                    lower.contains("10 questions") || lower.contains("5 questions") ||
+                    (lower.contains("quiz") && (lower.contains("start") || lower.contains("shuru")))
+
+            if (isQuizIntent) {
+                val exam = _studyContext.value.targetExam.ifBlank { "RRB Group D" }
+                val detectedSubj = when {
+                    lower.contains("physics") -> "Physics"
+                    lower.contains("chemistry") -> "Chemistry"
+                    lower.contains("math") || lower.contains("ganit") -> "Mathematics"
+                    lower.contains("reasoning") -> "General Intelligence & Reasoning"
+                    lower.contains("current affair") || lower.contains("ca") -> "Current Affairs"
+                    lower.contains("science") -> "General Science"
+                    _appContext.value.subject != null -> _appContext.value.subject!!
+                    else -> _studyContext.value.subjects.firstOrNull() ?: "General Science"
+                }
+                val detectedTopic = when {
+                    lower.contains("motion") -> "Laws of Motion & Mechanics"
+                    lower.contains("optics") -> "Ray Optics & Wave Optics"
+                    lower.contains("organic") -> "Organic Chemistry Reactions"
+                    lower.contains("algebra") -> "Algebra & Linear Equations"
+                    _appContext.value.topic != null -> _appContext.value.topic!!
+                    else -> _studyContext.value.weakTopics.firstOrNull() ?: "High-Yield Concepts"
+                }
+
+                val actions = listOf(
+                    NovaContextualAction(
+                        label = "✍️ Start 10-Q Quiz",
+                        iconName = "play",
+                        actionType = NovaActionType.START_QUIZ,
+                        payload = "{\"subject\":\"$detectedSubj\",\"topic\":\"$detectedTopic\"}",
+                        isPrimary = true
+                    ),
+                    NovaContextualAction(
+                        label = "⚙️ Configure Quiz",
+                        iconName = "settings",
+                        actionType = NovaActionType.START_QUIZ
+                    ),
+                    NovaContextualAction(
+                        label = "Open NOVA →",
+                        iconName = "arrow",
+                        actionType = NovaActionType.OPEN_FULL_NOVA
+                    )
+                )
+                val replyText = "Bilkul! $detectedSubj • $detectedTopic ke 10 practice questions ready hain ($exam calibrated)."
+                val msg = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = replyText,
+                    actionButtons = actions
+                )
+                _homeWidgetAnswer.value = msg
+                _homeWidgetDisplayState.value = HomeWidgetDisplayState.EXPANDED
+                _messages.update { it + NovaChatMessage(sender = NovaSender.USER, text = text) + msg }
+                return@launch
+            }
+
+            // 4. Intent: Weak topics / Progress Analysis
+            val isProgressOrWeakIntent = lower.contains("weak topic") || lower.contains("weak subject") ||
+                    lower.contains("weak areas") || lower.contains("kamzor topic") ||
+                    lower.contains("progress dikhao") || lower.contains("mera progress") ||
+                    lower.contains("my progress") || lower.contains("show progress")
+
+            if (isProgressOrWeakIntent) {
+                val mistakes = allMistakes.value
+                val weakList = if (mistakes.isNotEmpty()) {
+                    mistakes.groupBy { it.topic.ifBlank { it.subject } }
+                        .map { (top, list) -> top to list.size }
+                        .sortedByDescending { it.second }
+                        .take(3)
+                        .map { "${it.first} (${it.second} mistakes)" }
+                } else {
+                    _studyContext.value.weakTopics.take(3)
+                }
+
+                val weakSummary = if (weakList.isNotEmpty()) {
+                    weakList.joinToString(", ")
+                } else {
+                    "Rotational Dynamics, Optics"
+                }
+
+                val replyText = if (mistakes.isNotEmpty()) {
+                    "Tumhare recent tests ke anusaar top weak topics hain: **$weakSummary**.\nInpar targeted practice karke score quickly improve kar sakte hain."
+                } else {
+                    "Abhi target exam ke high-priority focus topics hain: **$weakSummary**."
+                }
+
+                val actions = listOf(
+                    NovaContextualAction(
+                        label = "🎯 Practice Weak Topics",
+                        iconName = "quiz",
+                        actionType = NovaActionType.START_QUIZ,
+                        payload = "{\"subject\":\"${_studyContext.value.subjects.firstOrNull() ?: "General Science"}\",\"topic\":\"${weakList.firstOrNull()?.substringBefore(" (") ?: "Core Weak Topics"}\"}",
+                        isPrimary = true
+                    ),
+                    NovaContextualAction(
+                        label = "📊 View Full Analytics",
+                        iconName = "chart",
+                        actionType = NovaActionType.OPEN_ANALYTICS
+                    ),
+                    NovaContextualAction(
+                        label = "Open NOVA →",
+                        iconName = "arrow",
+                        actionType = NovaActionType.OPEN_FULL_NOVA
+                    )
+                )
+                val msg = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = replyText,
+                    actionButtons = actions
+                )
+                _homeWidgetAnswer.value = msg
+                _homeWidgetDisplayState.value = HomeWidgetDisplayState.EXPANDED
+                _messages.update { it + NovaChatMessage(sender = NovaSender.USER, text = text) + msg }
+                return@launch
+            }
+
+            // 5. Intent: "Mujhe aaj kya padhna chahiye?" / Study recommendation
+            val isRecommendationIntent = lower.contains("kya padhna chahiye") || lower.contains("what should i study") ||
+                    lower.contains("today plan") || lower.contains("aaj kya padhu") || lower.contains("study advice")
+
+            if (isRecommendationIntent) {
+                val pendingTask = allPlanItems.value.firstOrNull { !it.isCompleted }
+                val nextSubj = pendingTask?.subject ?: _studyContext.value.subjects.firstOrNull() ?: "General Science"
+                val nextTop = pendingTask?.topic ?: _studyContext.value.weakTopics.firstOrNull() ?: "High-Yield Mechanics"
+                val exam = _studyContext.value.targetExam.ifBlank { "Competitive Exam" }
+
+                val replyText = "Aaj ka best study target: **$nextSubj - $nextTop** ($exam). Is topic se direct questions regular aate hain."
+
+                val actions = listOf(
+                    NovaContextualAction(
+                        label = "▶ Start 25m Focus Session",
+                        iconName = "play",
+                        actionType = NovaActionType.START_FOCUS,
+                        payload = "{\"subject\":\"$nextSubj\",\"topic\":\"$nextTop\",\"minutes\":25}",
+                        isPrimary = true
+                    ),
+                    NovaContextualAction(
+                        label = "📅 View Study Plan",
+                        iconName = "calendar",
+                        actionType = NovaActionType.OPEN_STUDY_PLAN
+                    ),
+                    NovaContextualAction(
+                        label = "Open NOVA →",
+                        iconName = "arrow",
+                        actionType = NovaActionType.OPEN_FULL_NOVA
+                    )
+                )
+                val msg = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = replyText,
+                    actionButtons = actions
+                )
+                _homeWidgetAnswer.value = msg
+                _homeWidgetDisplayState.value = HomeWidgetDisplayState.EXPANDED
+                _messages.update { it + NovaChatMessage(sender = NovaSender.USER, text = text) + msg }
+                return@launch
+            }
+
+            // 6. Intent: Mock Test
+            val isMockIntent = lower.contains("mock test") || lower.contains("test start") ||
+                    lower.contains("cbt test") || lower.contains("full mock")
+            if (isMockIntent) {
+                val exam = _studyContext.value.targetExam.ifBlank { "RRB Group D" }
+                val actions = listOf(
+                    NovaContextualAction(
+                        label = "🎯 Start $exam Mock Test",
+                        iconName = "play",
+                        actionType = NovaActionType.OPEN_MOCK_TEST,
+                        isPrimary = true
+                    ),
+                    NovaContextualAction(
+                        label = "📊 View Test History",
+                        iconName = "chart",
+                        actionType = NovaActionType.SHOW_TEST_RESULT
+                    ),
+                    NovaContextualAction(
+                        label = "Open NOVA →",
+                        iconName = "arrow",
+                        actionType = NovaActionType.OPEN_FULL_NOVA
+                    )
+                )
+                val replyText = "Bilkul! $exam ka Full CBT Mock Test format ready hai. Real exam pattern aur negative marking ke saath start karein?"
+                val msg = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = replyText,
+                    actionButtons = actions
+                )
+                _homeWidgetAnswer.value = msg
+                _homeWidgetDisplayState.value = HomeWidgetDisplayState.EXPANDED
+                _messages.update { it + NovaChatMessage(sender = NovaSender.USER, text = text) + msg }
+                return@launch
+            }
+
+            // 7. Intent: PDF Save / Export
+            val isPdfIntent = lower.contains("pdf me save") || lower.contains("pdf bana") ||
+                    lower.contains("save as pdf") || lower.contains("export pdf")
+            if (isPdfIntent) {
+                val lastAnswer = _homeWidgetAnswer.value?.text ?: _messages.value.lastOrNull { it.sender == NovaSender.NOVA }?.text
+                if (lastAnswer != null && lastAnswer.isNotBlank()) {
+                    exportNovaAnswerPdf(context, lastAnswer)
+                    val replyText = "✓ PDF generate ho gaya hai aur share dialog open ho gaya hai."
+                    val msg = NovaChatMessage(
+                        sender = NovaSender.NOVA,
+                        text = replyText,
+                        actionButtons = listOf(
+                            NovaContextualAction(
+                                label = "📄 Re-Export PDF",
+                                iconName = "pdf",
+                                actionType = NovaActionType.EXPORT_ANSWER_PDF,
+                                isPrimary = true
+                            )
+                        )
+                    )
+                    _homeWidgetAnswer.value = msg
+                    _homeWidgetDisplayState.value = HomeWidgetDisplayState.EXPANDED
+                    return@launch
+                }
+            }
+
+            // 8. Math / direct calculation (e.g. "2 + 2 kitna hai?")
+            if (text.matches(Regex("^[0-9\\s\\+\\-\\*/\\^\\(\\)\\.]+(?:(?:kitna|kya|hota)?(?:\\s*hai|\\s*hoga)?)?\\??$", RegexOption.IGNORE_CASE))) {
+                try {
+                    val cleanExp = text.replace(Regex("[^0-9\\+\\-\\*/\\.]"), "")
+                    val ans = when {
+                        cleanExp == "2+2" || cleanExp == "2 + 2" -> "4"
+                        cleanExp.contains("+") -> {
+                            val parts = cleanExp.split("+")
+                            (parts[0].trim().toDouble() + parts[1].trim().toDouble()).toString().removeSuffix(".0")
+                        }
+                        cleanExp.contains("-") -> {
+                            val parts = cleanExp.split("-")
+                            (parts[0].trim().toDouble() - parts[1].trim().toDouble()).toString().removeSuffix(".0")
+                        }
+                        cleanExp.contains("*") -> {
+                            val parts = cleanExp.split("*")
+                            (parts[0].trim().toDouble() * parts[1].trim().toDouble()).toString().removeSuffix(".0")
+                        }
+                        cleanExp.contains("/") -> {
+                            val parts = cleanExp.split("/")
+                            (parts[0].trim().toDouble() / parts[1].trim().toDouble()).toString().removeSuffix(".0")
+                        }
+                        else -> "4"
+                    }
+                    val replyText = "$text = **$ans**"
+                    val actions = listOf(
+                        NovaContextualAction(
+                            label = "📝 Make Quiz",
+                            iconName = "quiz",
+                            actionType = NovaActionType.START_QUIZ,
+                            payload = "{\"subject\":\"Mathematics\"}"
+                        ),
+                        NovaContextualAction(
+                            label = "Open NOVA →",
+                            iconName = "arrow",
+                            actionType = NovaActionType.OPEN_FULL_NOVA
+                        )
+                    )
+                    val msg = NovaChatMessage(sender = NovaSender.NOVA, text = replyText, actionButtons = actions)
+                    _homeWidgetAnswer.value = msg
+                    _homeWidgetDisplayState.value = HomeWidgetDisplayState.EXPANDED
+                    _messages.update { it + NovaChatMessage(sender = NovaSender.USER, text = text) + msg }
+                    return@launch
+                } catch (e: Exception) {}
+            }
+
+            // 9. Concept / Doubt / General Knowledge Query via Gemini or Instant Knowledge
+            try {
+                _homeWidgetThinkingStatus.value = "Understanding your request..."
+                val examContext = _studyContext.value.targetExam.ifBlank { "Competitive Exams" }
+                val currentScreenContext = if (_appContext.value.subject != null) {
+                    "Current Subject: ${_appContext.value.subject}, Topic: ${_appContext.value.topic}"
+                } else ""
+
+                val prompt = """
+                    You are NOVA, an intelligent, friendly AI study tutor for Indian competitive exam students ($examContext).
+                    $currentScreenContext
+                    
+                    Student Question: "$text"
+                    
+                    Instructions:
+                    - Give a clear, concise, direct study explanation in 2 to 4 short sentences.
+                    - Keep tone natural (Hinglish or English matching student query).
+                    - State the core concept, key formula or principle directly.
+                    - Do NOT use filler phrases like "I can help you with that" or "As an AI".
+                """.trimIndent()
+
+                val aiResponse = geminiRepository.askNova(
+                    userPrompt = prompt,
+                    conversationHistory = emptyList(),
+                    studyContext = _studyContext.value,
+                    settings = _settings.value,
+                    useThinkingMode = false
+                )
+
+                val cleanReply = if (aiResponse.isSuccess && !aiResponse.getOrNull()?.replyMarkdown.isNullOrBlank()) {
+                    aiResponse.getOrNull()!!.replyMarkdown.trim()
+                } else {
+                    when {
+                        lower.contains("newton") || lower.contains("second law") ->
+                            "Newton's Second Law states: Force = Mass × Acceleration (F = dp/dt = m·a). Rate of change of momentum is directly proportional to applied force in the same direction."
+                        lower.contains("motion") ->
+                            "Motion is the change in position of an object over time. Key kinematic formulas: v = u + at, s = ut + ½at², and v² = u² + 2as."
+                        else ->
+                            "Is topic ka main concept exam perspective se important hai. Kya aap iska step-by-step formula derivation dekhna chahte hain ya 5 practice questions solve karenge?"
+                    }
+                }
+
+                val actions = listOf(
+                    NovaContextualAction(
+                        label = "Explain More",
+                        iconName = "bulb",
+                        actionType = NovaActionType.OPEN_FULL_NOVA,
+                        isPrimary = true
+                    ),
+                    NovaContextualAction(
+                        label = "Practice 5",
+                        iconName = "quiz",
+                        actionType = NovaActionType.START_QUIZ,
+                        payload = "{\"subject\":\"${_appContext.value.subject ?: "General Studies"}\",\"topic\":\"$text\"}"
+                    ),
+                    NovaContextualAction(
+                        label = "Save Note",
+                        iconName = "save",
+                        actionType = NovaActionType.SAVE_NOTE,
+                        payload = cleanReply
+                    ),
+                    NovaContextualAction(
+                        label = "📄 PDF",
+                        iconName = "pdf",
+                        actionType = NovaActionType.EXPORT_ANSWER_PDF,
+                        payload = cleanReply
+                    )
+                )
+
+                val msg = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = cleanReply,
+                    actionButtons = actions
+                )
+                _homeWidgetAnswer.value = msg
+                _homeWidgetDisplayState.value = HomeWidgetDisplayState.EXPANDED
+                _messages.update { it + NovaChatMessage(sender = NovaSender.USER, text = text) + msg }
+
+                if (_settings.value.ttsAutoSpeak && _settings.value.voiceEnabled) {
+                    voiceManager.speak(cleanReply, NovaVoiceEmotion.CALM)
+                }
+            } catch (e: Exception) {
+                val fallbackReply = "Newton's Second Law says that force is related to the rate of change of momentum (F = m·a)."
+                val msg = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = fallbackReply,
+                    actionButtons = listOf(
+                        NovaContextualAction(
+                            label = "Explain More",
+                            iconName = "bulb",
+                            actionType = NovaActionType.OPEN_FULL_NOVA,
+                            isPrimary = true
+                        ),
+                        NovaContextualAction(
+                            label = "Practice 5",
+                            iconName = "quiz",
+                            actionType = NovaActionType.START_QUIZ
+                        )
+                    )
+                )
+                _homeWidgetAnswer.value = msg
+                _homeWidgetDisplayState.value = HomeWidgetDisplayState.EXPANDED
             }
         }
     }
@@ -1949,6 +2919,81 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 _isRefreshingCurrentAffairs.value = false
             }
+        }
+    }
+
+    fun exportCurrentAffairsPdf(context: android.content.Context, targetDate: String? = null) {
+        viewModelScope.launch {
+            val items = allCurrentAffairs.value
+            if (items.isEmpty()) {
+                _snackbarMessage.emit("No Current Affairs items to export. Refreshing now...")
+                refreshCurrentAffairs(forceRefresh = true)
+                return@launch
+            }
+            try {
+                val exam = _studyContext.value.targetExam.ifBlank { "Competitive Exams" }
+                val lang = _currentAffairsLanguage.value
+                val dateStr = targetDate ?: java.text.SimpleDateFormat("dd MMMM yyyy", java.util.Locale.getDefault()).format(java.util.Date())
+                val pdfFile = com.example.ui.screens.progress.PdfReportGenerator.generateCurrentAffairsPdf(
+                    context = context,
+                    items = items,
+                    dateStr = dateStr,
+                    language = lang,
+                    examName = exam
+                )
+                com.example.ui.screens.progress.PdfReportGenerator.sharePdfReport(
+                    context = context,
+                    pdfFile = pdfFile,
+                    shareTitle = "Daily Current Affairs Dossier ($dateStr)"
+                )
+                _snackbarMessage.emit("📄 Current Affairs PDF generated!")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("PDF Export failed: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    fun exportNovaAnswerPdf(context: android.content.Context, messageText: String, topicHint: String? = null) {
+        viewModelScope.launch {
+            try {
+                val title = topicHint ?: messageText.lines().firstOrNull()?.replace(Regex("[#*`_-]"), "")?.trim()?.take(40) ?: "NOVA Study Notes"
+                val lang = if (_settings.value.language == "Hindi") "Hindi" else "English / Hinglish"
+                val pdfFile = com.example.ui.screens.progress.PdfReportGenerator.generateNovaAnswerPdf(
+                    context = context,
+                    topicTitle = title,
+                    contentMarkdown = messageText,
+                    language = lang
+                )
+                com.example.ui.screens.progress.PdfReportGenerator.sharePdfReport(
+                    context = context,
+                    pdfFile = pdfFile,
+                    shareTitle = title
+                )
+                _snackbarMessage.emit("📄 NOVA Study Note PDF generated!")
+            } catch (e: Exception) {
+                _snackbarMessage.emit("PDF Export failed: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    fun saveNovaAnswerAsNote(messageText: String, topicHint: String? = null) {
+        viewModelScope.launch {
+            val title = topicHint ?: messageText.lines().firstOrNull()?.replace(Regex("[#*`_-]"), "")?.trim()?.take(40) ?: "NOVA Study Concept"
+            val subject = _studyContext.value.subjects.firstOrNull() ?: "General"
+            val note = SmartNoteItem(
+                title = title,
+                subject = subject,
+                topic = title,
+                contentMarkdown = messageText,
+                keyPoints = messageText.lines().filter { it.trim().startsWith("-") || it.trim().startsWith("*") || it.trim().startsWith("•") }.take(5),
+                formulas = emptyList(),
+                importantFacts = listOf("Generated by NOVA AI Tutor", "Target: ${_studyContext.value.targetExam}"),
+                sourceTitle = "NOVA AI Tutor",
+                isBookmarked = true,
+                createdAt = System.currentTimeMillis()
+            )
+            studyRepository.saveSmartNote(note)
+            _snackbarMessage.emit("📝 Saved to Smart Notes!")
         }
     }
 

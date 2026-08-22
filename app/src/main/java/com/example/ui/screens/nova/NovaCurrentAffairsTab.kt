@@ -355,6 +355,58 @@ fun NovaCurrentAffairsTab(
         // --- 2. Category Filter Rail (When in Current Affairs tab) ---
         if (selectedSection == 0) {
             item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Download PDF Button
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color.White.copy(alpha = 0.06f),
+                        border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .springClickable(testTag = "btn_download_ca_pdf", onClick = { viewModel.exportCurrentAffairsPdf(context) })
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(Icons.Default.PictureAsPdf, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Download PDF", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+
+                    // Make Quiz Button
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color.White.copy(alpha = 0.06f),
+                        border = BorderStroke(1.dp, AmberGold.copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .springClickable(
+                                testTag = "btn_make_ca_quiz",
+                                onClick = {
+                                    viewModel.startQuizSession("Current Affairs", "Daily Exam Updates")
+                                }
+                            )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(Icons.Default.Psychology, contentDescription = null, tint = AmberGold, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Make Practice Quiz", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                }
+            }
+
+            item {
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()

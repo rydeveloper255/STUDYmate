@@ -634,8 +634,26 @@ enum class NovaActionType {
     OPEN_STUDY_PLAN,
     OPEN_FOCUS_MODE,
     SHOW_PROGRESS,
-    SHOW_TEST_RESULT
+    SHOW_TEST_RESULT,
+    // Step 18 & 20 Human & Action-Oriented Nova Actions
+    OPEN_CURRENT_AFFAIRS,
+    OPEN_SMART_NOTES,
+    OPEN_SMART_SEARCH,
+    OPEN_SAVED_QUESTIONS,
+    EXPORT_CURRENT_AFFAIRS_PDF,
+    EXPORT_ANSWER_PDF,
+    SAVE_NOTE,
+    OPEN_FULL_NOVA,
+    OPEN_ANALYTICS
 }
+
+data class NovaContextualAction(
+    val label: String,
+    val iconName: String? = null,
+    val actionType: NovaActionType,
+    val payload: String? = null,
+    val isPrimary: Boolean = false
+)
 
 data class NovaChatMessage(
     val id: String = java.util.UUID.randomUUID().toString(),
@@ -646,7 +664,9 @@ data class NovaChatMessage(
     val actionPayload: String? = null,
     val isActionCompleted: Boolean = false,
     val attachedImageUri: String? = null,
-    val isThinking: Boolean = false
+    val isThinking: Boolean = false,
+    val actionButtons: List<NovaContextualAction> = emptyList(),
+    val currentAffairsPreview: List<CurrentAffairsItem> = emptyList()
 )
 
 enum class NovaVoiceState {
@@ -691,7 +711,38 @@ data class NovaSettings(
     val quietStartHour: Int = 22,
     val quietStartMinute: Int = 0,
     val quietEndHour: Int = 7,
-    val quietEndMinute: Int = 0
+    val quietEndMinute: Int = 0,
+
+    // Home Widget Settings (STEP 20)
+    val showNovaOnHome: Boolean = true,
+    val homeWidgetSize: String = "Compact" // "Compact", "Standard", "Expanded"
+)
+
+// =========================================================================
+// NOVA UNIVERSAL WIDGET & CONTEXT-AWARE AI MODELS (STEP 20)
+// =========================================================================
+
+enum class NovaWidgetSize(val displayName: String) {
+    COMPACT("Compact"),
+    STANDARD("Standard"),
+    EXPANDED("Expanded")
+}
+
+enum class HomeWidgetDisplayState {
+    COLLAPSED,
+    THINKING,
+    EXPANDED
+}
+
+data class NovaAppContext(
+    val screenName: String = "Home",
+    val subject: String? = null,
+    val topic: String? = null,
+    val currentAffairsItem: CurrentAffairsItem? = null,
+    val activeTestId: String? = null,
+    val isTestActive: Boolean = false,
+    val currentQuestionText: String? = null,
+    val targetExam: String? = null
 )
 
 data class NovaStudyContext(
