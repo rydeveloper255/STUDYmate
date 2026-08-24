@@ -33,6 +33,7 @@ fun SmartRevisionQueueView(
     queue: List<SmartRevisionItem>,
     onStartRevisionSession: (SmartRevisionItem) -> Unit,
     onStartQuickRevisionTest: (SmartRevisionItem, questionCount: Int) -> Unit,
+    onRecordFeedback: (subject: String, topic: String, feedback: String) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var selectedPriorityFilter by remember { mutableStateOf("All") }
@@ -173,7 +174,8 @@ fun SmartRevisionQueueView(
                 RevisionCard(
                     item = item,
                     onStartRevisionSession = onStartRevisionSession,
-                    onStartQuickRevisionTest = onStartQuickRevisionTest
+                    onStartQuickRevisionTest = onStartQuickRevisionTest,
+                    onRecordFeedback = onRecordFeedback
                 )
             }
         }
@@ -184,7 +186,8 @@ fun SmartRevisionQueueView(
 private fun RevisionCard(
     item: SmartRevisionItem,
     onStartRevisionSession: (SmartRevisionItem) -> Unit,
-    onStartQuickRevisionTest: (SmartRevisionItem, Int) -> Unit
+    onStartQuickRevisionTest: (SmartRevisionItem, Int) -> Unit,
+    onRecordFeedback: (subject: String, topic: String, feedback: String) -> Unit = { _, _, _ -> }
 ) {
     var showQuickTestOptions by remember { mutableStateOf(false) }
 
@@ -317,6 +320,47 @@ private fun RevisionCard(
                                 color = NeonCyan,
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Spaced Review Feedback Row (Step 36)
+            Spacer(modifier = Modifier.height(2.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Rate Understanding:",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF94A3B8),
+                    fontSize = 10.sp
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(
+                        Triple("UNDERSTOOD", "😄 Easy (+7d)", EmeraldSuccess),
+                        Triple("NEEDS_PRACTICE", "😐 Practice (+2d)", AmberGold),
+                        Triple("DIFFICULT", "🙁 Hard (+1d)", CoralRose)
+                    ).forEach { (fbKey, label, color) ->
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = color.copy(alpha = 0.15f),
+                            border = BorderStroke(0.5.dp, color.copy(alpha = 0.4f)),
+                            modifier = Modifier.springClickable {
+                                onRecordFeedback(item.subject, item.topic, fbKey)
+                            }
+                        ) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = color,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                             )
                         }
                     }

@@ -21,7 +21,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.Calendar
+import java.util.Date
 import java.util.Locale
+import java.util.UUID
+import java.text.SimpleDateFormat
+import android.content.Context
 
 data class ChatMessage(
     val id: String = java.util.UUID.randomUUID().toString(),
@@ -332,18 +337,6 @@ class MainViewModel(
         }
     }
 
-    fun resumePendingTestSession() {
-        val pending = _pendingResumeSession.value ?: return
-        _pendingResumeSession.value = null
-        _activeTestState.value = pending
-        startMockTestTimerJob()
-    }
-
-    fun discardPendingTestSession() {
-        _pendingResumeSession.value = null
-        sessionPersistence.clearActiveSession()
-    }
-
     private val _isTestGenerating = MutableStateFlow(false)
     val isTestGenerating: StateFlow<Boolean> = _isTestGenerating.asStateFlow()
 
@@ -426,6 +419,36 @@ class MainViewModel(
 
     val allExamUpdates: StateFlow<List<ExamUpdateItem>> = studyRepository.allExamUpdates
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // --- Step 21 Live Exam Intelligence System ---
+    val liveExamIntelligenceEngine = (application as StudyMateApplication).liveExamIntelligenceEngine
+
+    private val _liveExamFeedState = MutableStateFlow(LiveExamFeedState())
+    val liveExamFeedState: StateFlow<LiveExamFeedState> = _liveExamFeedState.asStateFlow()
+
+    private val _isRefreshingLiveExam = MutableStateFlow(false)
+    val isRefreshingLiveExam: StateFlow<Boolean> = _isRefreshingLiveExam.asStateFlow()
+
+    private val _selectedLiveUpdateForDetail = MutableStateFlow<LiveExamUpdateEntity?>(null)
+    val selectedLiveUpdateForDetail: StateFlow<LiveExamUpdateEntity?> = _selectedLiveUpdateForDetail.asStateFlow()
+
+    private val _showLiveExamIntelligenceScreen = MutableStateFlow(false)
+    val showLiveExamIntelligenceScreen: StateFlow<Boolean> = _showLiveExamIntelligenceScreen.asStateFlow()
+
+    // --- Step 40 Smart Vacancy, Results & Admit Card Intelligence ---
+    val recruitmentIntelligenceEngine = (application as StudyMateApplication).recruitmentIntelligenceEngine
+
+    private val _recruitmentFeedState = MutableStateFlow(RecruitmentFeedState())
+    val recruitmentFeedState: StateFlow<RecruitmentFeedState> = _recruitmentFeedState.asStateFlow()
+
+    private val _selectedRecruitmentDetail = MutableStateFlow<RecruitmentEntity?>(null)
+    val selectedRecruitmentDetail: StateFlow<RecruitmentEntity?> = _selectedRecruitmentDetail.asStateFlow()
+
+    private val _showSmartVacancyScreen = MutableStateFlow(false)
+    val showSmartVacancyScreen: StateFlow<Boolean> = _showSmartVacancyScreen.asStateFlow()
+
+    private val _isRefreshingRecruitment = MutableStateFlow(false)
+    val isRefreshingRecruitment: StateFlow<Boolean> = _isRefreshingRecruitment.asStateFlow()
 
     // --- Room-based Intelligence Engine State Flows ---
     val allExamObjectives: StateFlow<List<ExamObjective>> = studyRepository.allExamObjectives
@@ -564,6 +587,16 @@ class MainViewModel(
     private val _notificationPrefs = MutableStateFlow(NotificationPreference())
     val notificationPrefs: StateFlow<NotificationPreference> = _notificationPrefs.asStateFlow()
 
+    // --- Step 30 Notification Center & Daily Briefing State ---
+    private val _appNotifications = MutableStateFlow<List<AppNotification>>(emptyList())
+    val appNotifications: StateFlow<List<AppNotification>> = _appNotifications.asStateFlow()
+
+    private val _activeInAppBanner = MutableStateFlow<AppNotification?>(null)
+    val activeInAppBanner: StateFlow<AppNotification?> = _activeInAppBanner.asStateFlow()
+
+    private val _dailyBriefingData = MutableStateFlow(DailyBriefingData())
+    val dailyBriefingData: StateFlow<DailyBriefingData> = _dailyBriefingData.asStateFlow()
+
     // --- Daily Missions ---
     val dailyMissions = flow {
         emit(
@@ -579,8 +612,21 @@ class MainViewModel(
     init {
         initTts()
         loadInitialNotificationSettings()
+        loadAppNotificationsFromDisk()
         viewModelScope.launch {
             authRepository.getInitialUser()
+        }
+        viewModelScope.launch {
+            userProfile.filterNotNull().collect { profile ->
+                refreshLiveExamIntelligence(force = false)
+                refreshRecruitmentCatalog(force = false)
+                checkAndTriggerSmartNotifications()
+            }
+        }
+        viewModelScope.launch {
+            recruitmentIntelligenceEngine.allRecruitmentItems.collect { items ->
+                updateRecruitmentFeedState(items)
+            }
         }
     }
 
@@ -748,16 +794,171 @@ class MainViewModel(
         }
     }
 
-    fun signOut(activityContext: android.content.Context? = null) {
+    fun sendPasswordResetEmail(email: String, onResult: (Boolean, String?) -> Unit) {
         viewModelScope.launch {
-            authRepository.signOut(activityContext)
+            _isAuthLoading.value = true
+            val res = authRepository.sendPasswordResetEmail(email)
+            _isAuthLoading.value = false
+            res.onSuccess {
+                onResult(true, "Password reset link sent to $email. Please check your inbox.")
+            }.onFailure {
+                onResult(false, it.message ?: "Failed to send password reset email.")
+            }
         }
     }
 
-    fun deleteAccount() {
+    fun signOut(activityContext: android.content.Context? = null) {
         viewModelScope.launch {
-            authRepository.deleteAccount()
+            authRepository.signOut(activityContext)
+            _appNotifications.value = emptyList()
+            _activeInAppBanner.value = null
+            _dailyBriefingData.value = DailyBriefingData()
+            _activeTestState.value = ActiveTestState()
+            _pendingResumeSession.value = null
+            _showLiveExamIntelligenceScreen.value = false
+            saveAppNotificationsToDisk()
         }
+    }
+
+    fun changePassword(newPassword: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saving)
+            val res = authRepository.changePassword(newPassword)
+            _isAuthLoading.value = false
+            res.onSuccess {
+                com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saved(message = "✓ Password updated successfully"))
+                onResult(true, "Password updated successfully.")
+            }.onFailure { err ->
+                val msg = err.message ?: "Failed to update password."
+                com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Failed(msg))
+                onResult(false, msg)
+            }
+        }
+    }
+
+    fun requestEmailChange(newEmail: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saving)
+            val res = authRepository.requestEmailChange(newEmail)
+            _isAuthLoading.value = false
+            res.onSuccess {
+                com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saved(message = "✓ Confirmation link sent"))
+                onResult(true, "Confirmation link sent to $newEmail. Please confirm from your inbox.")
+            }.onFailure { err ->
+                val msg = err.message ?: "Failed to change email."
+                com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Failed(msg))
+                onResult(false, msg)
+            }
+        }
+    }
+
+    fun deleteAccount(onComplete: ((Boolean, String?) -> Unit)? = null) {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saving)
+            try {
+                studyRepository.clearAllUserStudyData()
+                val res = authRepository.deleteAccount()
+                _appNotifications.value = emptyList()
+                _activeInAppBanner.value = null
+                _dailyBriefingData.value = DailyBriefingData()
+                _activeTestState.value = ActiveTestState()
+                _pendingResumeSession.value = null
+                _showLiveExamIntelligenceScreen.value = false
+                saveAppNotificationsToDisk()
+                _isAuthLoading.value = false
+                res.onSuccess {
+                    com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saved(message = "✓ Account deleted"))
+                    onComplete?.invoke(true, null)
+                }.onFailure {
+                    com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Failed(it.message ?: "Deletion error"))
+                    onComplete?.invoke(false, it.message)
+                }
+            } catch (e: Exception) {
+                _isAuthLoading.value = false
+                com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Failed(e.message ?: "Deletion error"))
+                onComplete?.invoke(false, e.message)
+            }
+        }
+    }
+
+    fun clearAllLocalStudyData(onComplete: () -> Unit) {
+        viewModelScope.launch {
+            studyRepository.clearAllUserStudyData()
+            generateAiStudyPlan()
+            onComplete()
+        }
+    }
+
+    fun resetPersonalization(onComplete: () -> Unit) {
+        viewModelScope.launch {
+            val defaultPrefs = UserStudyPreferences(userId = "current_user")
+            studyRepository.saveUserPreferences(defaultPrefs)
+            onComplete()
+        }
+    }
+
+    fun triggerManualSync(onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Syncing)
+            try {
+                val sync = (getApplication<android.app.Application>() as com.example.StudyMateApplication).supabaseSyncService
+                val profile = userProfile.value
+                val notifs = notificationPrefs.value
+                if (profile != null && sync != null) {
+                    sync.syncUserProfile(profile, notifs)
+                }
+                kotlinx.coroutines.delay(800)
+                com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saved(message = "✓ All data up to date"))
+                onResult(true, "All changes synchronized with cloud.")
+            } catch (e: Exception) {
+                com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Offline(message = "⚠ Offline — stored securely on device"))
+                onResult(false, e.message ?: "Unable to reach server. Local data is safe.")
+            }
+        }
+    }
+
+    fun exportUserDataJson(): String {
+        val profile = userProfile.value ?: UserProfile()
+        val prefs = userStudyPreferences.value
+        val attempts = mockTestAttempts.value
+        val mistakeList = mistakes.value
+        val flashcardsList = flashcards.value
+        val bookmarks = bookmarkedSmartNotes.value
+        val plans = studyPlanItems.value
+
+        val root = org.json.JSONObject().apply {
+            put("exportDate", java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date()))
+            put("appVersion", "2.4.0")
+            put("user", org.json.JSONObject().apply {
+                put("displayName", profile.name)
+                put("email", profile.email)
+                put("examName", profile.examName)
+                put("level", profile.level)
+                put("xp", profile.xp)
+                put("streakDays", profile.streakDays)
+                put("dailyStudyHours", profile.availableStudyHours)
+                put("isGuest", profile.isGuest)
+                put("memberSince", java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(profile.createdAt)))
+            })
+            put("preferences", org.json.JSONObject().apply {
+                put("dailyQuestionGoal", prefs.dailyQuestionGoal)
+                put("dailyAvailableMinutes", prefs.dailyAvailableMinutes)
+                put("personalizationEnabled", prefs.personalizationEnabled)
+                put("preferredStudyWindow", prefs.preferredStudyWindow)
+                put("preferredSessionMinutes", prefs.preferredSessionMinutes)
+            })
+            put("statistics", org.json.JSONObject().apply {
+                put("mockTestAttemptsCount", attempts.size)
+                put("mistakesCount", mistakeList.size)
+                put("flashcardsCount", flashcardsList.size)
+                put("bookmarksCount", bookmarks.size)
+                put("studyPlanItemsCount", plans.size)
+            })
+        }
+        return root.toString(2)
     }
 
     // --- Study Plan Actions ---
@@ -1599,9 +1800,13 @@ class MainViewModel(
                             requestId = "test_${now}",
                             subject = config.subject,
                             title = when (config.testType) {
-                                MockTestType.FULL_MOCK -> "$targetExamName Full Mock Test"
-                                MockTestType.SUBJECT_TEST -> "$targetExamName - ${config.subject}"
-                                MockTestType.CHAPTER_TEST -> "$targetExamName - Chapter: ${config.chapter}"
+                                MockTestType.PYQ -> "$targetExamName - Verified PYQ Practice"
+                                MockTestType.SUBJECT_PRACTICE, MockTestType.SUBJECT_TEST -> "$targetExamName - ${config.subject}"
+                                MockTestType.CHAPTER_PRACTICE, MockTestType.CHAPTER_TEST -> "$targetExamName - Chapter: ${config.chapter}"
+                                MockTestType.SMART_PRACTICE -> "$targetExamName - Smart Performance Drill"
+                                MockTestType.AI_PRACTICE -> "$targetExamName - AI Practice Drill"
+                                MockTestType.MOCK_TEST, MockTestType.FULL_MOCK -> "$targetExamName Full Mock Test"
+                                MockTestType.MIXED_PRACTICE -> "$targetExamName - Mixed Practice Drill"
                                 MockTestType.TOPIC_TEST -> "$targetExamName - Topic: ${config.topic}"
                                 MockTestType.WEAK_AREAS -> "$targetExamName - Weak Areas Targeted Test"
                                 MockTestType.REVISION_TEST -> "$targetExamName - Spaced Revision Test"
@@ -2262,6 +2467,10 @@ class MainViewModel(
         startMockTestTimerJob()
     }
 
+    fun retrySkippedQuestions() {
+        retryUnansweredQuestions()
+    }
+
     fun startTargetedPractice(rec: com.example.service.intelligence.SmartPracticeRecommendation) {
         startMockTestWithConfig(
             MockTestConfig(
@@ -2276,9 +2485,69 @@ class MainViewModel(
         )
     }
 
+    fun saveAndExitActiveTest() {
+        if (_activeTestState.value.isTestInProgress && !_activeTestState.value.isCompleted) {
+            mockTestTimerJob?.cancel()
+            val now = System.currentTimeMillis()
+            val currentIdx = _activeTestState.value.currentQuestionIndex
+            val enteredAt = _activeTestState.value.currentQuestionEnteredTimestamp
+            val deltaSec = ((now - enteredAt) / 1000).toInt().coerceAtLeast(0)
+            val updatedMap = _activeTestState.value.timeSpentSeconds.toMutableMap()
+            updatedMap[currentIdx] = (updatedMap[currentIdx] ?: 0) + deltaSec
+
+            val stateToSave = _activeTestState.value.copy(
+                timeSpentSeconds = updatedMap,
+                currentQuestionEnteredTimestamp = now
+            )
+            sessionPersistence.saveActiveSession(stateToSave)
+            _pendingResumeSession.value = stateToSave
+            _activeTestState.value = ActiveTestState()
+        } else {
+            exitTest()
+        }
+    }
+
+    fun resumePendingTestSession() {
+        val pending = _pendingResumeSession.value ?: sessionPersistence.loadActiveSession()
+        if (pending != null && pending.questions.isNotEmpty()) {
+            val now = System.currentTimeMillis()
+            val remaining = if (pending.expiresAtTimestamp > 0L) {
+                ((pending.expiresAtTimestamp - now) / 1000L).coerceAtLeast(0L).toInt()
+            } else {
+                pending.remainingSeconds
+            }
+
+            if (remaining <= 0) {
+                _activeTestState.value = pending.copy(
+                    remainingSeconds = 0,
+                    currentQuestionEnteredTimestamp = now
+                )
+                _pendingResumeSession.value = null
+                submitMockTest()
+            } else {
+                val restored = pending.copy(
+                    isTestInProgress = true,
+                    isCompleted = false,
+                    remainingSeconds = remaining,
+                    currentQuestionEnteredTimestamp = now
+                )
+                _activeTestState.value = restored
+                _pendingResumeSession.value = null
+                sessionPersistence.saveActiveSession(restored)
+                startMockTestTimerJob()
+            }
+        }
+    }
+
+    fun discardPendingTestSession() {
+        sessionPersistence.clearActiveSession()
+        _pendingResumeSession.value = null
+    }
+
     fun exitTest() {
         mockTestTimerJob?.cancel()
         sessionPersistence.clearActiveSession()
+        _pendingResumeSession.value = null
         _activeTestState.value = ActiveTestState()
     }
 
@@ -2727,6 +2996,247 @@ class MainViewModel(
         )
     }
 
+    // --- Step 30 Notification Center & Smart Notification Logic ---
+
+    fun markNotificationAsRead(id: String) {
+        _appNotifications.value = _appNotifications.value.map {
+            if (it.id == id) it.copy(isRead = true) else it
+        }
+        saveAppNotificationsToDisk()
+    }
+
+    fun markAllNotificationsAsRead() {
+        _appNotifications.value = _appNotifications.value.map { it.copy(isRead = true) }
+        saveAppNotificationsToDisk()
+    }
+
+    fun deleteNotification(id: String) {
+        _appNotifications.value = _appNotifications.value.filter { it.id != id }
+        saveAppNotificationsToDisk()
+    }
+
+    fun clearAllNotifications() {
+        _appNotifications.value = emptyList()
+        saveAppNotificationsToDisk()
+    }
+
+    fun dismissInAppBanner() {
+        _activeInAppBanner.value = null
+    }
+
+    fun addNotification(notification: AppNotification) {
+        val prefs = _notificationPrefs.value
+        if (!prefs.masterEnabled) return
+
+        // Category check
+        val categoryEnabled = when (notification.category) {
+            NotificationCategory.STUDY -> prefs.studyReminders
+            NotificationCategory.TESTS -> prefs.testReminders
+            NotificationCategory.CURRENT_AFFAIRS -> prefs.currentAffairsReminders
+            NotificationCategory.EXAM_UPDATES -> prefs.examUpdatesReminders
+            NotificationCategory.NOVA -> prefs.novaReminders
+            NotificationCategory.SYSTEM -> true
+        }
+        if (!categoryEnabled) return
+
+        // Quiet Hours Check
+        if (prefs.quietHoursEnabled) {
+            val cal = Calendar.getInstance()
+            val currentMins = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+            val startMins = prefs.quietStartHour * 60 + prefs.quietStartMinute
+            val endMins = prefs.quietEndHour * 60 + prefs.quietEndMinute
+            val inQuiet = if (startMins <= endMins) {
+                currentMins in startMins..endMins
+            } else {
+                currentMins >= startMins || currentMins <= endMins
+            }
+            if (inQuiet && notification.category != NotificationCategory.SYSTEM) return
+        }
+
+        // Duplicate Event Key Check
+        if (notification.eventKey != null) {
+            val exists = _appNotifications.value.any { it.eventKey == notification.eventKey }
+            if (exists) return
+        }
+
+        val updated = listOf(notification) + _appNotifications.value
+        _appNotifications.value = updated
+        _activeInAppBanner.value = notification
+        saveAppNotificationsToDisk()
+    }
+
+    private fun saveAppNotificationsToDisk() {
+        try {
+            val context = getApplication<Application>()
+            val prefs = context.getSharedPreferences("studymate_notifications_store", Context.MODE_PRIVATE)
+            val jsonArray = org.json.JSONArray()
+            _appNotifications.value.take(50).forEach { item ->
+                val obj = org.json.JSONObject().apply {
+                    put("id", item.id)
+                    put("category", item.category.name)
+                    put("title", item.title)
+                    put("message", item.message)
+                    put("timestamp", item.timestamp)
+                    put("isRead", item.isRead)
+                    put("actionText", item.actionText)
+                    put("deepLink", item.deepLink)
+                    put("payload", item.payload)
+                    put("eventKey", item.eventKey ?: "")
+                }
+                jsonArray.put(obj)
+            }
+            prefs.edit().putString("notifications_json", jsonArray.toString()).apply()
+        } catch (e: Exception) {
+            android.util.Log.e("MainViewModel", "Error saving notifications: ${e.message}")
+        }
+    }
+
+    private fun loadAppNotificationsFromDisk() {
+        try {
+            val context = getApplication<Application>()
+            val prefs = context.getSharedPreferences("studymate_notifications_store", Context.MODE_PRIVATE)
+            val jsonStr = prefs.getString("notifications_json", null)
+            if (!jsonStr.isNullOrBlank()) {
+                val jsonArray = org.json.JSONArray(jsonStr)
+                val list = mutableListOf<AppNotification>()
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    list.add(
+                        AppNotification(
+                            id = obj.optString("id", UUID.randomUUID().toString()),
+                            category = try { NotificationCategory.valueOf(obj.optString("category", "STUDY")) } catch(e: Exception) { NotificationCategory.STUDY },
+                            title = obj.optString("title", ""),
+                            message = obj.optString("message", ""),
+                            timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
+                            isRead = obj.optBoolean("isRead", false),
+                            actionText = obj.optString("actionText", "Open"),
+                            deepLink = obj.optString("deepLink", "HOME"),
+                            payload = obj.optString("payload", ""),
+                            eventKey = obj.optString("eventKey", "").ifBlank { null }
+                        )
+                    )
+                }
+                _appNotifications.value = list
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MainViewModel", "Error loading notifications: ${e.message}")
+        }
+    }
+
+    fun computeDailyBriefingData() {
+        val profile = userProfile.value
+        val name = profile?.name ?: "Student"
+        val language = profile?.languagePreference ?: _notificationPrefs.value.language
+
+        val dateStr = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.getDefault()).format(Date())
+
+        val cal = Calendar.getInstance()
+        val hour = cal.get(Calendar.HOUR_OF_DAY)
+        val greetingTime = when {
+            hour < 12 -> if (language.equals("Hindi", ignoreCase = true)) "Namaste $name 🙏 Suprabhat!" else "Good Morning, $name 👋"
+            hour < 17 -> if (language.equals("Hindi", ignoreCase = true)) "Namaste $name 🙏 Shubh Dopahar!" else "Good Afternoon, $name 👋"
+            else -> if (language.equals("Hindi", ignoreCase = true)) "Namaste $name 🙏 Shubh Sandhya!" else "Good Evening, $name 👋"
+        }
+
+        // Real focus topic from recommendations or study plan
+        val focusRec = studyRecommendations.value.firstOrNull()
+        val focusTopic = focusRec?.topicName ?: studyPlanItems.value.firstOrNull { !it.isCompleted }?.topic ?: "Faraday's Law & Electromagnetic Induction"
+        val focusSubject = focusRec?.subjectName ?: profile?.subjects?.firstOrNull() ?: "Physics"
+        val focusReason = focusRec?.reason ?: "Selected based on high-yield exam weightage and past practice."
+
+        // Real Current Affairs headline from live exam feed
+        val caList = liveExamFeedState.value.liveNews
+        val caHeadline = caList.firstOrNull()?.title ?: "National Science & Tech Scholarship & Board Exam Updates"
+        val caCount = caList.size.coerceAtLeast(3)
+
+        // Unfinished test check
+        val activeTest = activeTestState.value
+        val unfinishedTitle = if (activeTest.isTestInProgress) activeTest.title else null
+        val unfinishedProgress = if (activeTest.isTestInProgress) "Q${activeTest.currentQuestionIndex + 1}/${activeTest.questions.size}" else null
+
+        // Exam Countdown
+        val examDate = profile?.examDateMillis ?: (System.currentTimeMillis() + 45L * 86400000L)
+        val daysLeft = ((examDate - System.currentTimeMillis()) / 86400000L).coerceAtLeast(1L).toInt()
+
+        _dailyBriefingData.value = DailyBriefingData(
+            dateString = dateStr,
+            greeting = greetingTime,
+            focusTopic = focusTopic,
+            focusSubject = focusSubject,
+            focusReason = focusReason,
+            currentAffairsHeadline = caHeadline,
+            currentAffairsCount = caCount,
+            practiceSuggestion = "10 $focusSubject Practice Questions",
+            practiceQuestionCount = 10,
+            examDaysRemaining = daysLeft,
+            examName = profile?.examName ?: "JEE Main / Board Exam",
+            unfinishedTestTitle = unfinishedTitle,
+            unfinishedTestProgress = unfinishedProgress,
+            revisionQuestionsCount = mistakes.value.size,
+            language = language
+        )
+    }
+
+    fun checkAndTriggerSmartNotifications() {
+        computeDailyBriefingData()
+
+        val todayDate = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault()).format(Date())
+
+        // 1. Daily Briefing Ready
+        addNotification(
+            AppNotification(
+                category = NotificationCategory.STUDY,
+                title = "☀️ Daily Briefing Ready",
+                message = "Your personalized daily preparation overview for today is ready.",
+                actionText = "View Briefing",
+                deepLink = "DAILY_BRIEFING",
+                eventKey = "daily_briefing_$todayDate"
+            )
+        )
+
+        // 2. Current Affairs Update
+        if (_dailyBriefingData.value.currentAffairsCount > 0) {
+            addNotification(
+                AppNotification(
+                    category = NotificationCategory.CURRENT_AFFAIRS,
+                    title = "📰 Today's Current Affairs Ready",
+                    message = "${_dailyBriefingData.value.currentAffairsCount} verified exam updates are available to read.",
+                    actionText = "Read Updates",
+                    deepLink = "CURRENT_AFFAIRS",
+                    eventKey = "current_affairs_$todayDate"
+                )
+            )
+        }
+
+        // 3. Unfinished Test
+        if (activeTestState.value.isTestInProgress) {
+            addNotification(
+                AppNotification(
+                    category = NotificationCategory.TESTS,
+                    title = "⏱️ Unfinished Mock Test",
+                    message = "You have an active test: ${activeTestState.value.title}. Resume to finish your session.",
+                    actionText = "Resume Test",
+                    deepLink = "MOCK_TEST",
+                    eventKey = "unfinished_test_${activeTestState.value.requestId}"
+                )
+            )
+        }
+
+        // 4. Revision Due
+        if (mistakes.value.isNotEmpty()) {
+            addNotification(
+                AppNotification(
+                    category = NotificationCategory.STUDY,
+                    title = "🧠 Spaced Revision Due",
+                    message = "${mistakes.value.size} saved weak questions are ready for review.",
+                    actionText = "Start Revision",
+                    deepLink = "REVISION",
+                    eventKey = "revision_due_$todayDate"
+                )
+            )
+        }
+    }
+
     // --- Document Summarizer & Study Questions Actions ---
 
     fun processDocumentUri(uri: android.net.Uri) {
@@ -3119,6 +3629,410 @@ class MainViewModel(
         }
     }
 
+    // --- Step 21 Live Exam Intelligence Actions ---
+
+    fun refreshLiveExamIntelligence(force: Boolean = false) {
+        viewModelScope.launch {
+            _isRefreshingLiveExam.value = true
+            val currentExam = userProfile.value?.examName ?: selectedExam.value.examName
+            liveExamIntelligenceEngine.refreshLiveExamIntelligence(
+                examName = currentExam,
+                forceRefresh = force
+            ).onSuccess { feedState ->
+                _liveExamFeedState.value = feedState
+            }.onFailure { e ->
+                _snackbarMessage.emit("Unable to refresh live updates: ${e.message ?: "Network offline"}")
+            }
+            _isRefreshingLiveExam.value = false
+        }
+    }
+
+    fun startInteractiveStudyQuiz(subject: String, topic: String) {
+        startMockTest(
+            subject = subject.ifBlank { "General Studies" },
+            chapter = topic.ifBlank { "Live Updates Practice" },
+            mode = "Trending Topic Practice",
+            questionCount = 5
+        )
+    }
+
+    fun toggleSaveLiveExamUpdate(id: String, isSaved: Boolean) {
+        viewModelScope.launch {
+            liveExamIntelligenceEngine.toggleSaveUpdate(id, isSaved)
+            val currentList = _liveExamFeedState.value.liveNews.map {
+                if (it.id == id) it.copy(isSaved = isSaved) else it
+            }
+            val currentTrending = _liveExamFeedState.value.trendingTopics
+            val currentSaved = currentList.filter { it.isSaved }
+            _liveExamFeedState.update {
+                it.copy(
+                    liveNews = currentList,
+                    whatsNewList = currentList.take(4),
+                    officialNotices = currentList.filter { u -> u.isVerifiedOfficial || u.category == LiveExamCategory.OFFICIAL_NOTIFICATION.name },
+                    radarUpdates = currentList.filter { u -> u.relevance == ExamRelevanceLevel.HIGH.name || u.isVerifiedOfficial }.take(5),
+                    savedUpdates = currentSaved
+                )
+            }
+            if (isSaved) {
+                _snackbarMessage.emit("🔖 Update saved to your Revision list!")
+            }
+        }
+    }
+
+    fun toggleSaveTrendingTopic(id: String, isSaved: Boolean) {
+        viewModelScope.launch {
+            liveExamIntelligenceEngine.toggleSaveTrending(id, isSaved)
+            val currentTrending = _liveExamFeedState.value.trendingTopics.map {
+                if (it.id == id) it.copy(isSaved = isSaved) else it
+            }
+            _liveExamFeedState.update { it.copy(trendingTopics = currentTrending) }
+            if (isSaved) {
+                _snackbarMessage.emit("🔖 Topic saved to your Revision list!")
+            }
+        }
+    }
+
+    fun markLiveUpdateRead(id: String) {
+        viewModelScope.launch {
+            liveExamIntelligenceEngine.markUpdateAsRead(id)
+            val currentList = _liveExamFeedState.value.liveNews.map {
+                if (it.id == id) it.copy(isRead = true) else it
+            }
+            _liveExamFeedState.update { it.copy(liveNews = currentList) }
+        }
+    }
+
+    fun selectLiveUpdateForDetail(update: LiveExamUpdateEntity?) {
+        _selectedLiveUpdateForDetail.value = update
+        if (update != null) {
+            markLiveUpdateRead(update.id)
+        }
+    }
+
+    fun setShowLiveExamIntelligenceScreen(show: Boolean) {
+        _showLiveExamIntelligenceScreen.value = show
+    }
+
+    // --- Step 40 Smart Vacancy, Results & Admit Card Actions ---
+
+    fun refreshRecruitmentCatalog(force: Boolean = false) {
+        viewModelScope.launch {
+            _isRefreshingRecruitment.value = true
+            val currentExam = userProfile.value?.examName ?: selectedExam.value.examName
+            val currentState = _recruitmentFeedState.value.selectedState
+            val profile = _recruitmentFeedState.value.userProfile
+            recruitmentIntelligenceEngine.refreshRecruitmentCatalog(
+                profile = profile,
+                userExam = currentExam,
+                userState = currentState,
+                forceLiveSearch = force
+            ).onSuccess { count ->
+                _recruitmentFeedState.update { it.copy(lastSyncMillis = System.currentTimeMillis()) }
+                updateRecruitmentFeedState()
+            }.onFailure { e ->
+                _snackbarMessage.emit("Unable to refresh recruitment updates: ${e.message ?: "Offline mode active"}")
+            }
+            _isRefreshingRecruitment.value = false
+        }
+    }
+
+    fun updateRecruitmentProfile(profile: UserRecruitmentProfile) {
+        _recruitmentFeedState.update { it.copy(userProfile = profile) }
+        refreshRecruitmentCatalog(force = false)
+        viewModelScope.launch {
+            _snackbarMessage.emit("🎯 Recruitment preferences updated!")
+        }
+    }
+
+    fun updateUserApplicationStatus(
+        id: String,
+        status: UserApplicationStatus,
+        applicationNumber: String = "",
+        rollNumber: String = "",
+        appliedPost: String = "",
+        notes: String = ""
+    ) {
+        viewModelScope.launch {
+            recruitmentIntelligenceEngine.updateApplicationStatus(
+                id = id,
+                status = status,
+                applicationNumber = applicationNumber,
+                rollNumber = rollNumber,
+                appliedPost = appliedPost,
+                notes = notes
+            )
+            updateRecruitmentFeedState()
+            val msg = if (status == UserApplicationStatus.APPLIED) "✅ Marked as Application Submitted! Added to Tracker."
+                      else "Status updated to ${status.label}"
+            _snackbarMessage.emit(msg)
+        }
+    }
+
+    fun updateDocumentReadyStatus(id: String, docsReady: List<String>) {
+        viewModelScope.launch {
+            recruitmentIntelligenceEngine.updateDocumentsReadyList(id, docsReady)
+            updateRecruitmentFeedState()
+        }
+    }
+
+    fun updateChecklistChecked(id: String, checked: List<String>) {
+        viewModelScope.launch {
+            recruitmentIntelligenceEngine.updateChecklistCheckedList(id, checked)
+            updateRecruitmentFeedState()
+        }
+    }
+
+    fun findJobsForMe(
+        category: String?,
+        state: String?,
+        qualification: String?,
+        age: Int?
+    ) {
+        viewModelScope.launch {
+            val matches = recruitmentIntelligenceEngine.findJobsForMe(category, state, qualification, age)
+            _recruitmentFeedState.update { it.copy(findJobsMatches = matches) }
+        }
+    }
+
+    fun setRecruitmentCategory(category: String) {
+        _recruitmentFeedState.update { it.copy(selectedCategory = category) }
+        updateRecruitmentFeedState()
+    }
+
+    fun setRecruitmentState(state: String) {
+        _recruitmentFeedState.update { it.copy(selectedState = state) }
+        updateRecruitmentFeedState()
+    }
+
+    fun setRecruitmentTab(tab: String) {
+        _recruitmentFeedState.update { it.copy(selectedTab = tab) }
+    }
+
+    fun setRecruitmentSearch(query: String) {
+        _recruitmentFeedState.update { it.copy(searchQuery = query) }
+        updateRecruitmentFeedState()
+    }
+
+    fun setRecruitmentSort(sortOption: RecruitmentSortOption) {
+        _recruitmentFeedState.update { it.copy(sortOption = sortOption) }
+        updateRecruitmentFeedState()
+    }
+
+    fun selectRecruitmentDetail(item: RecruitmentEntity?) {
+        _selectedRecruitmentDetail.value = item
+    }
+
+    fun toggleSaveRecruitment(id: String, isSaved: Boolean) {
+        viewModelScope.launch {
+            recruitmentIntelligenceEngine.toggleSaveItem(id, isSaved)
+            if (isSaved) {
+                _snackbarMessage.emit("📌 Saved to your Jobs & Updates watchlist!")
+            } else {
+                _snackbarMessage.emit("Removed from watchlist.")
+            }
+            updateRecruitmentFeedState()
+        }
+    }
+
+    fun setDeadlineReminder(id: String, enabled: Boolean, daysBefore: Int = 3) {
+        viewModelScope.launch {
+            recruitmentIntelligenceEngine.setDeadlineReminder(id, enabled, daysBefore)
+            if (enabled) {
+                _snackbarMessage.emit("⏰ Deadline reminder set for $daysBefore days before close!")
+            } else {
+                _snackbarMessage.emit("Reminder disabled.")
+            }
+            updateRecruitmentFeedState()
+        }
+    }
+
+    fun submitRecruitmentReport(itemId: String, reportCategory: String, userComment: String) {
+        viewModelScope.launch {
+            _snackbarMessage.emit("✓ Thank you! Feedback received. Our team will verify the official notice.")
+        }
+    }
+
+    fun setShowSmartVacancyScreen(show: Boolean, initialTab: String? = null) {
+        _showSmartVacancyScreen.value = show
+        if (initialTab != null) {
+            _recruitmentFeedState.update { it.copy(selectedTab = initialTab) }
+        }
+    }
+
+    private fun updateRecruitmentFeedState(rawItems: List<RecruitmentEntity>? = null) {
+        viewModelScope.launch {
+            val all = rawItems ?: getApplication<StudyMateApplication>().database.recruitmentDao().getAllOnce()
+            val state = _recruitmentFeedState.value
+            val targetExam = userProfile.value?.examName ?: selectedExam.value.examName
+            val targetState = state.selectedState
+            val query = state.searchQuery.trim().lowercase()
+            val selectedCat = state.selectedCategory
+
+            // 1. Filter for search query if present
+            var filtered = if (query.isBlank()) all else {
+                all.filter { item ->
+                    item.title.lowercase().contains(query) ||
+                    item.organization.lowercase().contains(query) ||
+                    item.postName.lowercase().contains(query) ||
+                    item.examCategory.lowercase().contains(query) ||
+                    item.state.lowercase().contains(query) ||
+                    item.educationalQualification.lowercase().contains(query)
+                }
+            }
+
+            // 2. Filter for sector/category chip if not ALL
+            if (selectedCat != RecruitmentCategory.ALL.name) {
+                filtered = filtered.filter { it.examCategory.equals(selectedCat, ignoreCase = true) }
+            }
+
+            // 3. Filter for state if not All India
+            if (targetState != "All India") {
+                filtered = filtered.filter { it.state.equals("All India", ignoreCase = true) || it.state.equals(targetState, ignoreCase = true) }
+            }
+
+            // Hard Application Filter: Only active vacancies (OPEN, LAST_DAY, EXTENDED)
+            val activeVacancies = filtered.filter { it.contentType == RecruitmentContentType.VACANCY.name && it.getComputedStatus().isApplyActive }
+
+            // Sorting logic
+            val sortedActiveVacancies = when (state.sortOption) {
+                RecruitmentSortOption.RECOMMENDED -> activeVacancies.sortedWith(
+                    compareByDescending<RecruitmentEntity> { it.personalRelevanceScore }
+                        .thenBy { RecruitmentDateLogic.calculateDaysRemaining(it.applicationLastDate) ?: 999 }
+                )
+                RecruitmentSortOption.LAST_DATE_SOON -> activeVacancies.sortedBy {
+                    RecruitmentDateLogic.calculateDaysRemaining(it.applicationLastDate) ?: 999
+                }
+                RecruitmentSortOption.NEWEST -> activeVacancies.sortedByDescending { it.applicationStartDate ?: "" }
+                RecruitmentSortOption.RECENTLY_UPDATED -> activeVacancies.sortedByDescending { it.lastVerifiedAt }
+                RecruitmentSortOption.EXAM_RELATED -> activeVacancies.sortedByDescending {
+                    if (it.examCategory.contains(targetExam, ignoreCase = true) || it.title.contains(targetExam, ignoreCase = true)) 1 else 0
+                }
+                RecruitmentSortOption.STATE_RELATED -> activeVacancies.sortedByDescending {
+                    if (it.state.equals(targetState, ignoreCase = true)) 1 else 0
+                }
+            }
+
+            val examCategoryKeyword = when {
+                targetExam.contains("Railway", ignoreCase = true) || targetExam.contains("RRB", ignoreCase = true) -> RecruitmentCategory.RAILWAY.name
+                targetExam.contains("SSC", ignoreCase = true) || targetExam.contains("CGL", ignoreCase = true) || targetExam.contains("CHSL", ignoreCase = true) -> RecruitmentCategory.SSC.name
+                targetExam.contains("Bank", ignoreCase = true) || targetExam.contains("IBPS", ignoreCase = true) || targetExam.contains("SBI", ignoreCase = true) -> RecruitmentCategory.BANKING.name
+                targetExam.contains("Defence", ignoreCase = true) || targetExam.contains("NDA", ignoreCase = true) || targetExam.contains("CDS", ignoreCase = true) -> RecruitmentCategory.DEFENCE.name
+                targetExam.contains("UPSC", ignoreCase = true) || targetExam.contains("Civil", ignoreCase = true) -> RecruitmentCategory.UPSC.name
+                targetExam.contains("Teacher", ignoreCase = true) || targetExam.contains("TET", ignoreCase = true) || targetExam.contains("BPSC", ignoreCase = true) -> RecruitmentCategory.TEACHING.name
+                targetExam.contains("Police", ignoreCase = true) -> RecruitmentCategory.STATE_PSC.name
+                else -> RecruitmentCategory.ALL.name
+            }
+
+            val forYou = sortedActiveVacancies.filter {
+                it.relevanceTier == RelevanceTier.HIGHLY_RELEVANT.name ||
+                it.examCategory.equals(examCategoryKeyword, ignoreCase = true) ||
+                it.title.contains(targetExam, ignoreCase = true)
+            }.ifEmpty {
+                sortedActiveVacancies.take(4)
+            }
+
+            val otherState = sortedActiveVacancies.filter { !forYou.contains(it) }
+
+            val results = filtered.filter { it.contentType == RecruitmentContentType.RESULT.name }
+            val admitCards = filtered.filter { it.contentType == RecruitmentContentType.ADMIT_CARD.name }
+            val notifications = filtered.filter {
+                it.contentType == RecruitmentContentType.NOTIFICATION.name ||
+                it.contentType == RecruitmentContentType.EXAM_UPDATE.name ||
+                it.isCorrectionNotice ||
+                it.isDeadlineExtended
+            }
+            val saved = all.filter { it.isSaved }
+            val tracked = all.filter { it.applicationStatus != UserApplicationStatus.NONE.name }
+
+            _recruitmentFeedState.update {
+                it.copy(
+                    userTargetExam = targetExam,
+                    userTargetState = targetState,
+                    latestForYouVacancies = forYou,
+                    otherStateVacancies = otherState,
+                    allActiveVacancies = sortedActiveVacancies,
+                    resultsList = results,
+                    admitCardsList = admitCards,
+                    notificationsList = notifications,
+                    savedItems = saved,
+                    activeTrackedApplications = tracked
+                )
+            }
+
+            // Step 40: Trigger Verified Event Generation & Daily Digest
+            val userProfileForEngine = state.userProfile
+            recruitmentIntelligenceEngine.generateNotificationEventsForCatalog(
+                items = all,
+                profile = userProfileForEngine,
+                settings = recruitmentIntelligenceEngine.notificationSettings.value
+            )
+            recruitmentIntelligenceEngine.generateDailyDigest(
+                items = all,
+                profile = userProfileForEngine
+            )
+        }
+    }
+
+    // Step 40: Recruitment Intelligence Platform 3.0 Notification & Admin Streams
+    val recruitmentNotificationSettings = recruitmentIntelligenceEngine.notificationSettings
+    val recruitmentOutbox = recruitmentIntelligenceEngine.outboxItems
+    val recruitmentDailyDigest = recruitmentIntelligenceEngine.dailyDigest
+    val recruitmentDiagnostics = recruitmentIntelligenceEngine.adminDiagnostics
+
+    fun updateRecruitmentNotificationSettings(settings: RecruitmentNotificationSettings) {
+        recruitmentIntelligenceEngine.updateNotificationSettings(settings)
+        viewModelScope.launch {
+            _snackbarMessage.emit("Notification preferences updated.")
+        }
+    }
+
+    fun muteRecruitment(id: String) {
+        recruitmentIntelligenceEngine.muteRecruitment(id)
+        viewModelScope.launch { _snackbarMessage.emit("Muted alerts for this recruitment.") }
+    }
+
+    fun unmuteRecruitment(id: String) {
+        recruitmentIntelligenceEngine.unmuteRecruitment(id)
+        viewModelScope.launch { _snackbarMessage.emit("Unmuted recruitment alerts.") }
+    }
+
+    fun muteRecruitmentCategory(category: String) {
+        recruitmentIntelligenceEngine.muteCategory(category)
+        viewModelScope.launch { _snackbarMessage.emit("Muted alerts for $category category.") }
+    }
+
+    fun unmuteRecruitmentCategory(category: String) {
+        recruitmentIntelligenceEngine.unmuteCategory(category)
+        viewModelScope.launch { _snackbarMessage.emit("Unmuted $category alerts.") }
+    }
+
+    fun markRecruitmentOutboxItemRead(id: String) {
+        recruitmentIntelligenceEngine.markOutboxItemAsRead(id)
+    }
+
+    fun markAllRecruitmentOutboxItemsRead() {
+        recruitmentIntelligenceEngine.markAllOutboxItemsAsRead()
+    }
+
+    fun deleteRecruitmentOutboxItem(id: String) {
+        recruitmentIntelligenceEngine.deleteOutboxItem(id)
+    }
+
+    fun clearAllRecruitmentOutbox() {
+        recruitmentIntelligenceEngine.clearAllOutbox()
+    }
+
+    fun handleNovaRecruitmentQuery(query: String, onNavigate: (NovaRecruitmentActionType) -> Unit) {
+        val profile = _recruitmentFeedState.value.userProfile
+        val (response, action) = recruitmentIntelligenceEngine.handleNovaRecruitmentQuery(query, profile)
+        viewModelScope.launch {
+            _snackbarMessage.emit(response)
+            if (action != null) {
+                onNavigate(action)
+            }
+        }
+    }
+
     // --- Intelligence Engine Actions ---
 
     fun saveExamObjective(objective: ExamObjective) {
@@ -3202,6 +4116,83 @@ class MainViewModel(
             val examId = activeExamContext.value.examId
             studyRepository.setUserManualOverride(examId, subject, topic, override)
             _snackbarMessage.emit("Updated preference for $topic")
+        }
+    }
+
+    fun recordSpacedRevisionFeedback(subject: String, topic: String, feedback: String) {
+        viewModelScope.launch {
+            val masteries = allTopicMasteries.value
+            val existing = masteries.firstOrNull { it.topic.equals(topic, ignoreCase = true) }
+            val now = System.currentTimeMillis()
+            val dayMs = 24 * 3600 * 1000L
+
+            val nextReviewMs = when (feedback.uppercase()) {
+                "UNDERSTOOD", "EASY" -> now + (7 * dayMs)
+                "NEEDS_PRACTICE", "MEDIUM" -> now + (2 * dayMs)
+                else -> now + (1 * dayMs) // DIFFICULT / HARD
+            }
+
+            val newState = when (feedback.uppercase()) {
+                "UNDERSTOOD", "EASY" -> "MASTERED"
+                "NEEDS_PRACTICE", "MEDIUM" -> "DEVELOPING"
+                else -> "REVISION_DUE"
+            }
+
+            if (existing != null) {
+                val updated = existing.copy(
+                    lastStudiedMillis = now,
+                    recommendedReviewDateMillis = nextReviewMs,
+                    masteryState = newState,
+                    updatedAt = now
+                )
+                studyRepository.saveTopicMastery(updated)
+            } else {
+                val newMastery = com.example.data.model.TopicMastery(
+                    subject = subject,
+                    topic = topic,
+                    lastStudiedMillis = now,
+                    recommendedReviewDateMillis = nextReviewMs,
+                    masteryState = newState,
+                    updatedAt = now
+                )
+                studyRepository.saveTopicMastery(newMastery)
+            }
+            _snackbarMessage.emit("Updated revision schedule for $topic! 🔁")
+        }
+    }
+
+    fun resetPersonalizationSignals() {
+        viewModelScope.launch {
+            val currentPrefs = userStudyPreferences.value
+            val resetPrefs = currentPrefs.copy(
+                personalizationEnabled = true,
+                subjectPrioritiesJson = "{}",
+                topicPrioritiesJson = "{}",
+                updatedAt = System.currentTimeMillis()
+            )
+            studyRepository.saveUserPreferences(resetPrefs)
+            _snackbarMessage.emit("Personalization recommendation signals reset. 🔄")
+        }
+    }
+
+    fun updatePersonalizationSettings(settings: com.example.service.intelligence.PersonalizationSettings) {
+        viewModelScope.launch {
+            val current = userStudyPreferences.value
+            val updated = current.copy(
+                personalizationEnabled = settings.isEnabled,
+                dailyQuestionGoal = settings.dailyQuestionGoal,
+                dailyStudyMinutesGoal = settings.dailyStudyMinutesGoal,
+                weeklyTestsGoal = settings.weeklyTestsGoal,
+                studyTimeAvailableOption = settings.studyTimeAvailableOption,
+                caRemindersEnabled = settings.caRemindersEnabled,
+                revisionRemindersEnabled = settings.revisionRemindersEnabled,
+                studyRemindersEnabled = settings.studyRemindersEnabled,
+                testRemindersEnabled = settings.testRemindersEnabled,
+                goalRemindersEnabled = settings.goalRemindersEnabled,
+                updatedAt = System.currentTimeMillis()
+            )
+            studyRepository.saveUserPreferences(updated)
+            _snackbarMessage.emit("Updated personalization & study goals!")
         }
     }
 

@@ -288,6 +288,30 @@ class SupabaseClient(
         }
     }
 
+    suspend fun recoverPasswordForEmail(
+        email: String
+    ): SupabaseResult<String> = withContext(Dispatchers.IO) {
+        if (!isReady()) return@withContext SupabaseResult.Error("Supabase is not configured yet.")
+
+        try {
+            val json = JSONObject().apply {
+                put("email", email)
+            }
+
+            val request = Request.Builder()
+                .url("$baseUrl/auth/v1/recover")
+                .addHeader("apikey", anonKey)
+                .addHeader("Content-Type", "application/json")
+                .post(json.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+
+            executeRequest(request)
+        } catch (e: Exception) {
+            Log.e(TAG, "Supabase recoverPasswordForEmail failed", e)
+            SupabaseResult.Error(e.message ?: "Password recovery error", e)
+        }
+    }
+
     suspend fun refreshToken(
         refreshToken: String
     ): SupabaseResult<SupabaseAuthResponse> = withContext(Dispatchers.IO) {
@@ -341,6 +365,68 @@ class SupabaseClient(
         }
     }
 
+    suspend fun updateUser(
+        accessToken: String,
+        password: String? = null,
+        email: String? = null,
+        data: Map<String, Any>? = null
+    ): SupabaseResult<SupabaseUserDto> = withContext(Dispatchers.IO) {
+        if (!isReady()) return@withContext SupabaseResult.Error("Supabase is not configured yet.")
+
+        try {
+            val json = JSONObject()
+            if (!password.isNullOrBlank()) {
+                json.put("password", password)
+            }
+            if (!email.isNullOrBlank()) {
+                json.put("email", email)
+            }
+            if (!data.isNullOrEmpty()) {
+                json.put("data", JSONObject(data))
+            }
+
+            val request = Request.Builder()
+                .url("$baseUrl/auth/v1/user")
+                .addHeader("apikey", anonKey)
+                .addHeader("Authorization", "Bearer $accessToken")
+                .addHeader("Content-Type", "application/json")
+                .put(json.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+
+            val response = executeRequest(request)
+            when (response) {
+                is SupabaseResult.Success -> {
+                    val obj = JSONObject(response.data)
+                    val id = obj.optString("id", "")
+                    val userEmail = obj.optString("email", "")
+                    SupabaseResult.Success(SupabaseUserDto(id = id, email = userEmail))
+                }
+                is SupabaseResult.Error -> SupabaseResult.Error(response.message, response.throwable, response.code)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Update user failed", e)
+            SupabaseResult.Error(e.message ?: "Update user error", e)
+        }
+    }
+
+    suspend fun deleteUser(accessToken: String): SupabaseResult<String> = withContext(Dispatchers.IO) {
+        if (!isReady()) return@withContext SupabaseResult.Error("Supabase is not configured yet.")
+
+        try {
+            val request = Request.Builder()
+                .url("$baseUrl/auth/v1/user")
+                .addHeader("apikey", anonKey)
+                .addHeader("Authorization", "Bearer $accessToken")
+                .delete()
+                .build()
+
+            executeRequest(request)
+        } catch (e: Exception) {
+            Log.e(TAG, "Delete user failed", e)
+            SupabaseResult.Error(e.message ?: "Delete user error", e)
+        }
+    }
+
     // --- 3. Supabase Storage API ---
 
     suspend fun uploadFile(
@@ -388,7 +474,35 @@ class SupabaseClient(
         return "$baseUrl/storage/v1/object/public/$bucket/$cleanPath"
     }
 
-    // --- 4. Supabase Edge Functions ---
+    // --- 4. Supabase RPC (Remote Procedure Calls) & Functions ---
+
+    suspend fun rpc(
+        functionName: String,
+        jsonParams: String = "{}",
+        accessToken: String? = null
+    ): SupabaseResult<String> = withContext(Dispatchers.IO) {
+        if (!isReady()) return@withContext SupabaseResult.Error("Supabase is not configured yet.")
+
+        try {
+            val url = "$baseUrl/rest/v1/rpc/$functionName"
+            val authHeader = if (!accessToken.isNullOrBlank()) "Bearer $accessToken" else "Bearer $anonKey"
+
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", anonKey)
+                .addHeader("Authorization", authHeader)
+                .addHeader("Content-Type", "application/json")
+                .post(jsonParams.toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+
+            executeRequest(request)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error calling RPC $functionName", e)
+            SupabaseResult.Error(e.message ?: "Failed to execute RPC $functionName", e)
+        }
+    }
+
+    // --- 5. Supabase Edge Functions ---
 
     suspend fun invokeEdgeFunction(
         functionName: String,
@@ -419,28 +533,55 @@ class SupabaseClient(
     // --- Helper Methods ---
 
     private fun executeRequest(request: Request): SupabaseResult<String> {
+        val requestId = "req_" + java.util.UUID.randomUUID().toString().replace("-", "").take(10)
+        val enrichedRequest = request.newBuilder()
+            .addHeader("x-request-id", requestId)
+            .build()
+
         return try {
-            val response = httpClient.newCall(request).execute()
+            val response = httpClient.newCall(enrichedRequest).execute()
             val responseBody = response.body?.string() ?: ""
             val code = response.code
 
             if (response.isSuccessful) {
                 SupabaseResult.Success(responseBody)
             } else {
-                val errorMsg = try {
+                val errorDetails = try {
                     val json = JSONObject(responseBody)
-                    json.optString("message", json.optString("error_description", json.optString("msg", "HTTP $code: $responseBody")))
+                    json.optString("message", json.optString("error_description", json.optString("msg", json.optString("hint", "HTTP $code"))))
                 } catch (e: Exception) {
-                    "HTTP $code: $responseBody"
+                    "HTTP $code"
                 }
-                SupabaseResult.Error(errorMsg, code = code)
+
+                val friendlyMsg = when (code) {
+                    401 -> "Session expired. Please re-authenticate."
+                    403 -> "Action not authorized."
+                    409 -> "Record conflict. Re-synchronizing changes."
+                    429 -> "Rate limit reached. Please wait a moment."
+                    in 500..599 -> "Cloud server temporarily busy. Saved locally."
+                    else -> "Unable to sync with cloud ($errorDetails)"
+                }
+
+                SupabaseResult.Error(
+                    message = friendlyMsg,
+                    code = code,
+                    errorId = requestId
+                )
             }
         } catch (e: IOException) {
-            Log.w(TAG, "Network error executing Supabase request: ${e.message}")
-            SupabaseResult.Error("Network error: ${e.localizedMessage}", e)
+            Log.w(TAG, "Network error executing Supabase request [$requestId]: ${e.message}")
+            SupabaseResult.Error(
+                message = "Device offline. Changes queued locally.",
+                throwable = e,
+                errorId = requestId
+            )
         } catch (e: Exception) {
-            Log.e(TAG, "Unexpected error executing Supabase request", e)
-            SupabaseResult.Error("Request error: ${e.localizedMessage}", e)
+            Log.e(TAG, "Unexpected error executing Supabase request [$requestId]", e)
+            SupabaseResult.Error(
+                message = "Something went wrong while synchronizing.",
+                throwable = e,
+                errorId = requestId
+            )
         }
     }
 

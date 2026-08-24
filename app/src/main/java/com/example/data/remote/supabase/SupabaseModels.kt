@@ -39,7 +39,12 @@ data class SupabaseStorageUploadResponse(
 
 sealed class SupabaseResult<out T> {
     data class Success<out T>(val data: T) : SupabaseResult<T>()
-    data class Error(val message: String, val throwable: Throwable? = null, val code: Int? = null) : SupabaseResult<Nothing>()
+    data class Error(
+        val message: String,
+        val throwable: Throwable? = null,
+        val code: Int? = null,
+        val errorId: String? = null
+    ) : SupabaseResult<Nothing>()
 
     val isSuccess: Boolean get() = this is Success
     fun getOrNull(): T? = (this as? Success)?.data

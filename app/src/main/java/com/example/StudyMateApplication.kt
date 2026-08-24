@@ -43,6 +43,12 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
     lateinit var examCatalogRepository: com.example.data.repository.ExamCatalogRepository
         private set
 
+    lateinit var liveExamIntelligenceEngine: com.example.service.intelligence.LiveExamIntelligenceEngine
+        private set
+
+    lateinit var recruitmentIntelligenceEngine: com.example.service.intelligence.RecruitmentIntelligenceEngine
+        private set
+
     private var imageLoaderInstance: ImageLoader? = null
 
     override fun newImageLoader(): ImageLoader {
@@ -104,6 +110,17 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
         geminiRepository = GeminiRepository()
         studyRepository = StudyRepository(database, supabaseSyncService)
         examCatalogRepository = com.example.data.repository.ExamCatalogRepository(database.examCatalogDao())
+        liveExamIntelligenceEngine = com.example.service.intelligence.LiveExamIntelligenceEngine(
+            liveExamUpdateDao = database.liveExamUpdateDao(),
+            trendingExamTopicDao = database.trendingExamTopicDao(),
+            geminiRepository = geminiRepository,
+            supabaseClient = supabaseClient
+        )
+        recruitmentIntelligenceEngine = com.example.service.intelligence.RecruitmentIntelligenceEngine(
+            recruitmentDao = database.recruitmentDao(),
+            geminiRepository = geminiRepository,
+            supabaseClient = supabaseClient
+        )
 
         // Initialize Focus Shield & Offline Notification System
         com.example.service.FocusShieldManager.init(this)
@@ -112,6 +129,7 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
 
         CoroutineScope(Dispatchers.IO).launch {
             examCatalogRepository.seedDefaultCatalogIfEmpty()
+            recruitmentIntelligenceEngine.seedInitialCatalogIfEmpty()
             studyRepository.populateInitialDataIfEmpty()
         }
     }

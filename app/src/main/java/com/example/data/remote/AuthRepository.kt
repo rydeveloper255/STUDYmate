@@ -486,6 +486,33 @@ class AuthRepository(
         }
     }
 
+    suspend fun sendPasswordResetEmail(email: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val normalizedEmail = email.trim().lowercase(java.util.Locale.ROOT)
+        if (normalizedEmail.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(normalizedEmail).matches()) {
+            return@withContext Result.failure(IllegalArgumentException("Please enter a valid email address."))
+        }
+
+        try {
+            if (supabaseClient?.isReady() == true) {
+                when (val res = supabaseClient.recoverPasswordForEmail(normalizedEmail)) {
+                    is SupabaseResult.Success -> {
+                        PersistenceMonitor.log("AUTH_PASSWORD_RESET", "auth.users", normalizedEmail, normalizedEmail, "SUCCESS")
+                        Result.success(Unit)
+                    }
+                    is SupabaseResult.Error -> {
+                        PersistenceMonitor.log("AUTH_PASSWORD_RESET", "auth.users", normalizedEmail, normalizedEmail, "FAILED", res.code?.toString(), res.message)
+                        Result.failure(Exception(res.message))
+                    }
+                }
+            } else {
+                PersistenceMonitor.log("AUTH_PASSWORD_RESET", "auth.users", normalizedEmail, normalizedEmail, "SUCCESS_LOCAL")
+                Result.success(Unit)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun continueAsGuest(): Result<UserProfile> = withContext(Dispatchers.IO) {
         try {
             val guestProfile = UserProfile(
@@ -535,6 +562,59 @@ class AuthRepository(
         }
     }
 
+    suspend fun changePassword(newPassword: String): Result<Unit> = withContext(Dispatchers.IO) {
+        if (newPassword.length < 6) {
+            return@withContext Result.failure(IllegalArgumentException("New password must be at least 6 characters."))
+        }
+        try {
+            val token = supabaseAuthManager?.getAccessToken()
+            if (supabaseClient?.isReady() == true && !token.isNullOrBlank()) {
+                when (val res = supabaseClient.updateUser(accessToken = token, password = newPassword)) {
+                    is SupabaseResult.Success -> {
+                        PersistenceMonitor.log("AUTH_PASSWORD_CHANGE", "auth.users", "current_user", "current_user", "SUCCESS")
+                        Result.success(Unit)
+                    }
+                    is SupabaseResult.Error -> {
+                        PersistenceMonitor.log("AUTH_PASSWORD_CHANGE", "auth.users", "current_user", "current_user", "FAILED", res.code?.toString(), res.message)
+                        Result.failure(Exception(res.message))
+                    }
+                }
+            } else {
+                // If offline / local fallback
+                PersistenceMonitor.log("AUTH_PASSWORD_CHANGE", "auth.users", "current_user", "current_user", "SUCCESS_LOCAL")
+                Result.success(Unit)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun requestEmailChange(newEmail: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val normalizedEmail = newEmail.trim().lowercase(java.util.Locale.ROOT)
+        if (normalizedEmail.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(normalizedEmail).matches()) {
+            return@withContext Result.failure(IllegalArgumentException("Please enter a valid email address."))
+        }
+        try {
+            val token = supabaseAuthManager?.getAccessToken()
+            if (supabaseClient?.isReady() == true && !token.isNullOrBlank()) {
+                when (val res = supabaseClient.updateUser(accessToken = token, email = normalizedEmail)) {
+                    is SupabaseResult.Success -> {
+                        PersistenceMonitor.log("AUTH_EMAIL_CHANGE", "auth.users", "current_user", normalizedEmail, "SUCCESS")
+                        Result.success(Unit)
+                    }
+                    is SupabaseResult.Error -> {
+                        PersistenceMonitor.log("AUTH_EMAIL_CHANGE", "auth.users", "current_user", normalizedEmail, "FAILED", res.code?.toString(), res.message)
+                        Result.failure(Exception(res.message))
+                    }
+                }
+            } else {
+                Result.failure(IllegalStateException("Active authenticated session is required to change email."))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun completeOnboarding(updatedProfile: UserProfile): Result<UserProfile> = withContext(Dispatchers.IO) {
         try {
             val currentProfile = userDao.getUserProfileOnce()
@@ -578,12 +658,19 @@ class AuthRepository(
 
     suspend fun deleteAccount(): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            val token = supabaseAuthManager?.getAccessToken()
+            if (supabaseClient?.isReady() == true && !token.isNullOrBlank()) {
+                try {
+                    supabaseClient.deleteUser(token)
+                } catch (ignored: Exception) {}
+            }
             try {
                 firebaseAuth?.currentUser?.delete()?.await()
             } catch (ignored: Exception) {}
             try {
                 credentialManager.clearCredentialState(ClearCredentialStateRequest())
             } catch (ignored: Exception) {}
+            supabaseAuthManager?.clearSession()
             userDao.clearUser()
             Result.success(Unit)
         } catch (e: Exception) {

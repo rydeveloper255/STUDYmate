@@ -115,6 +115,16 @@ data class UserStudyPreferences(
     val breakFrequencyMinutes: Int = 25,
     val subjectPrioritiesJson: String = "{}", // e.g. {"Physics":"HIGH","Mathematics":"MEDIUM"}
     val topicPrioritiesJson: String = "{}",
+    val personalizationEnabled: Boolean = true,
+    val dailyQuestionGoal: Int = 30,
+    val dailyStudyMinutesGoal: Int = 45,
+    val weeklyTestsGoal: Int = 3,
+    val studyTimeAvailableOption: String = "30 min",
+    val caRemindersEnabled: Boolean = true,
+    val revisionRemindersEnabled: Boolean = true,
+    val studyRemindersEnabled: Boolean = true,
+    val testRemindersEnabled: Boolean = true,
+    val goalRemindersEnabled: Boolean = true,
     val updatedAt: Long = System.currentTimeMillis()
 )
 
@@ -155,6 +165,7 @@ enum class QuestionSourceType(val displayName: String, val badge: String, val de
     CHAPTER_PRACTICE("Chapter Practice", "✨", "Syllabus-grounded practice questions for selected subject/chapter"),
     EXAM_PATTERN("Official Exam Pattern Mock", "📐", "Full exam blueprint simulation with realistic subject distribution"),
     CURRENT_AFFAIRS("Current Affairs Practice", "📰", "Questions generated strictly from verified recent Current Affairs"),
+    AI_PRACTICE("AI-Generated Practice", "🤖", "Clearly labeled AI-generated practice questions"),
     MIXED("Balanced Mixed Practice", "🔀", "Curated combination of verified PYQs and AI practice questions")
 }
 
@@ -199,6 +210,13 @@ enum class QuestionSourceFilter {
 }
 
 enum class MockTestType(val displayName: String, val description: String, val iconName: String) {
+    PYQ("PYQ Practice", "Only verified previous-year questions from official exams", "History"),
+    SUBJECT_PRACTICE("Subject Practice", "Deep dive into a specific subject of the selected exam", "MenuBook"),
+    CHAPTER_PRACTICE("Chapter Practice", "Master specific chapters or topics from your syllabus", "AutoStories"),
+    SMART_PRACTICE("Smart Practice", "Performance-driven practice targeting weak areas and revision", "Psychology"),
+    AI_PRACTICE("AI Practice", "Clearly labeled AI-generated practice questions", "AutoAwesome"),
+    MOCK_TEST("Mock Test", "Full official exam simulation following pattern and timing", "Assignment"),
+    MIXED_PRACTICE("Mixed Practice", "Combines verified PYQs, curated, and AI practice questions", "Tune"),
     FULL_MOCK("Full Mock Test", "Comprehensive multi-subject test following official exam pattern", "Assignment"),
     SUBJECT_TEST("Subject Test", "Deep dive into a specific subject of the selected exam", "MenuBook"),
     CHAPTER_TEST("Chapter Test", "Master specific chapters from your syllabus", "AutoStories"),
@@ -371,10 +389,56 @@ data class Achievement(
     val xpReward: Int
 )
 
+enum class NotificationCategory(val displayName: String, val iconName: String) {
+    STUDY("Study", "menu_book"),
+    TESTS("Tests", "quiz"),
+    CURRENT_AFFAIRS("Current Affairs", "newspaper"),
+    EXAM_UPDATES("Exam Updates", "verified"),
+    NOVA("NOVA", "auto_awesome"),
+    SYSTEM("System", "info")
+}
+
+data class AppNotification(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val category: NotificationCategory = NotificationCategory.STUDY,
+    val title: String,
+    val message: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val isRead: Boolean = false,
+    val actionText: String = "Open",
+    val deepLink: String = "HOME", // CURRENT_AFFAIRS, MOCK_TEST, REVISION, EXAM_UPDATES, FOCUS, DAILY_BRIEFING, NOVA
+    val payload: String = "",
+    val eventKey: String? = null,
+    val expiresAt: Long? = null
+)
+
+data class DailyBriefingData(
+    val dateString: String = "",
+    val greeting: String = "Good Morning 👋",
+    val focusTopic: String? = null,
+    val focusSubject: String? = null,
+    val focusReason: String? = null,
+    val currentAffairsHeadline: String? = null,
+    val currentAffairsCount: Int = 0,
+    val practiceSuggestion: String? = null,
+    val practiceQuestionCount: Int = 10,
+    val examDaysRemaining: Int? = null,
+    val examName: String? = null,
+    val unfinishedTestTitle: String? = null,
+    val unfinishedTestProgress: String? = null,
+    val revisionQuestionsCount: Int = 0,
+    val language: String = "English"
+)
+
 data class NotificationPreference(
     val masterEnabled: Boolean = true,
     val studyReminders: Boolean = true,
+    val currentAffairsReminders: Boolean = true,
+    val testReminders: Boolean = true,
     val examCountdownAlerts: Boolean = true,
+    val examUpdatesReminders: Boolean = true,
+    val novaReminders: Boolean = true,
+    val dailyBriefingEnabled: Boolean = true,
     val dailyGoalReminders: Boolean = true,
     val missedStudyReminders: Boolean = true,
     val breakReminders: Boolean = true,
@@ -389,6 +453,8 @@ data class NotificationPreference(
     val dailyGoalMinute: Int = 30,
     val motivationHour: Int = 8,
     val motivationMinute: Int = 0,
+    val briefingHour: Int = 7,
+    val briefingMinute: Int = 30,
     val activeDays: Set<String> = setOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"),
     val motivationFrequency: String = "Once Daily (Morning)",
     val quietHoursEnabled: Boolean = true,
@@ -396,7 +462,8 @@ data class NotificationPreference(
     val quietStartMinute: Int = 0,
     val quietEndHour: Int = 7,
     val quietEndMinute: Int = 0,
-    val focusReminders: Boolean = true
+    val focusReminders: Boolean = true,
+    val language: String = "English"
 )
 
 data class DocumentAnalysisResult(
@@ -644,7 +711,117 @@ enum class NovaActionType {
     EXPORT_ANSWER_PDF,
     SAVE_NOTE,
     OPEN_FULL_NOVA,
-    OPEN_ANALYTICS
+    OPEN_ANALYTICS,
+    // Step 21 Live Exam Intelligence Actions
+    OPEN_LIVE_EXAM_INTELLIGENCE,
+    OPEN_EXAM_RADAR,
+    OPEN_OFFICIAL_NOTICE,
+    OPEN_TRENDING_TOPICS,
+    SAVE_EXAM_UPDATE,
+    // Step 22 Nova Web Intelligence & Smart Search Actions
+    EXPLAIN_NEWS,
+    VERIFY_FACT,
+    WHY_STUDY_THIS,
+    OPEN_WEB_SOURCE,
+    SEARCH_WEB,
+    SAVE_WEB_CONTENT,
+    MAKE_QUIZ_FOR_TOPIC,
+    ADD_TOPIC_TO_REVISION,
+    LEARN_TOPIC,
+    // Step 23 Smart Learning System Actions
+    GENERATE_FRESH_MCQ,
+    START_SMART_REVISION,
+    SHOW_DAILY_EXAM_BRIEF,
+    VERIFY_SOURCE_TRUST,
+    // Step 33 Nova 2.0 Controlled Action System
+    OPEN_HOME,
+    OPEN_CURRENT_AFFAIRS_QUIZ,
+    OPEN_CHAPTER,
+    START_PRACTICE,
+    START_SMART_PRACTICE,
+    START_PYQ,
+    RESUME_TEST,
+    OPEN_REVISION,
+    OPEN_MISTAKES,
+    OPEN_BOOKMARKS,
+    OPEN_RESULTS,
+    OPEN_PROFILE,
+    OPEN_NOTIFICATIONS,
+    CONFIRM_HIGH_RISK_ACTION,
+    // Step 40 Smart Vacancy, Results & Admit Card Intelligence Actions
+    OPEN_VACANCIES,
+    OPEN_VACANCY_DETAILS,
+    OPEN_RECRUITMENT_DETAIL,
+    OPEN_RESULTS_HUB,
+    OPEN_ADMIT_CARDS,
+    OPEN_SAVED_JOBS,
+    OPEN_RECRUITMENT_NOTICES,
+    SET_DEADLINE_REMINDER
+}
+
+enum class NovaSearchIntent {
+    STUDY,          // Educational explanation (direct explanation, no web search needed unless requested)
+    CURRENT,        // Latest / current information (needs Serper search)
+    SOURCE,         // User wants references / sources
+    VERIFY,         // User wants fact verification (needs multi-source comparison)
+    EXAM,           // Exam-specific relevance / notifications
+    DISCOVERY,      // User wants resources / websites
+    NAVIGATION,     // User wants to open app section
+    WHY_STUDY,      // User asks why they should study this
+    EXPLAIN_NEWS,   // User asks to explain a news / event
+    FRESH_MCQ,      // Step 23: User asks to generate fresh practice questions from web / news
+    SMART_REVISION, // Step 23: User asks to revise saved / recent / weak topics
+    DAILY_BRIEF,    // Step 23: User asks for today's exam briefing
+    TRUST_SOURCE    // Step 23: User asks if a source can be trusted / verified
+}
+
+enum class VerificationStatus(val label: String, val badge: String, val icon: String) {
+    SUPPORTED("Supported", "✓ Supported", "✓"),
+    PARTIALLY_SUPPORTED("Partially Supported", "⚠ Partially Supported", "⚠"),
+    UNCLEAR("Unclear", "? Unclear", "?"),
+    CONTRADICTED("Contradicted", "✕ Contradicted", "✕")
+}
+
+data class VerificationResult(
+    val claim: String,
+    val status: VerificationStatus,
+    val statusSummary: String,
+    val explanation: String,
+    val sources: List<WebSearchSource> = emptyList(),
+    val sourcesDisagree: Boolean = false,
+    val disagreementDetails: String? = null
+)
+
+data class NewsExplanationResult(
+    val title: String,
+    val whatHappened: String,
+    val whyImportant: String,
+    val keyFacts: List<String> = emptyList(),
+    val examRelevance: String = "",
+    val practiceQuestion: Question? = null,
+    val sources: List<WebSearchSource> = emptyList(),
+    val sourceUrl: String = "",
+    val category: String = "Current Affairs"
+)
+
+data class WhyStudyThisResult(
+    val topic: String,
+    val subject: String = "",
+    val targetExam: String = "",
+    val priority: String = "HIGH", // "HIGH" (🔴), "MEDIUM" (🟡), "LOW" (🟢)
+    val priorityRationale: String = "",
+    val examRelevance: String = "",
+    val isPersonalized: Boolean = false,
+    val personalizationContext: String = "",
+    val studyRecommendations: List<String> = emptyList()
+)
+
+enum class NovaWebSearchMode(val displayName: String, val icon: String) {
+    ALL_WEB("All Web", "🌐"),
+    STUDY("Study", "📚"),
+    CURRENT_AFFAIRS("Current Affairs", "📰"),
+    EXAM("Exam", "🎯"),
+    OFFICIAL("Official", "🏛️")
 }
 
 data class NovaContextualAction(
@@ -666,7 +843,16 @@ data class NovaChatMessage(
     val attachedImageUri: String? = null,
     val isThinking: Boolean = false,
     val actionButtons: List<NovaContextualAction> = emptyList(),
-    val currentAffairsPreview: List<CurrentAffairsItem> = emptyList()
+    val currentAffairsPreview: List<CurrentAffairsItem> = emptyList(),
+    val searchStatusText: String? = null,
+    val webSources: List<WebSearchSource> = emptyList(),
+    val verificationResult: VerificationResult? = null,
+    val newsExplanation: NewsExplanationResult? = null,
+    val whyStudyResult: WhyStudyThisResult? = null,
+    val userFeedback: String? = null, // null, "HELPFUL", "NOT_HELPFUL"
+    val sourceCategory: String? = null, // "APP_DATA", "WEB_INFO", "AI_EXPLANATION"
+    val isPdfGenerating: Boolean = false,
+    val pdfDownloadedUri: String? = null
 )
 
 enum class NovaVoiceState {
@@ -900,7 +1086,7 @@ data class CurrentAffairsItem(
     val title: String,
     val summary: String,
     val examRelevance: String,
-    val category: String, // "National", "International", "Science & Tech", "Economy", "Environment", "Polity"
+    val category: String, // "National", "International", "Science & Tech", "Economy", "Environment", "Polity", "Banking", "Defence", etc.
     val targetExams: List<String> = listOf("UPSC", "SSC", "State PSC", "General"),
     val subject: String = "Current Affairs",
     val sourceName: String,
@@ -908,6 +1094,13 @@ data class CurrentAffairsItem(
     val publishedDate: String,
     val mcqs: List<Question> = emptyList(),
     val isSavedForRevision: Boolean = false,
+    val keyPoints: List<String> = emptyList(),
+    val whyItMatters: String = "",
+    val isImportant: Boolean = false,
+    val language: String = "en",
+    val sourcesCount: Int = 1,
+    val fetchedDate: String = "",
+    val canonicalUrl: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -1233,6 +1426,19 @@ data class QuestionQualityReportEntity(
     val notes: String = "",
     val status: String = "UNDER_REVIEW", // ACTIVE, UNDER_REVIEW, DISABLED
     val timestamp: Long = System.currentTimeMillis()
+)
+
+data class CurrentAffairsQuizSession(
+    val title: String,
+    val questions: List<Question>,
+    val currentIndex: Int = 0,
+    val selectedAnswers: Map<Int, Int> = emptyMap(),
+    val isSubmitted: Boolean = false,
+    val score: Int = 0,
+    val correctCount: Int = 0,
+    val incorrectCount: Int = 0,
+    val unansweredCount: Int = 0,
+    val language: String = "English"
 )
 
 

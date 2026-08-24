@@ -45,7 +45,7 @@ fun MockTestSetupDialog(
 
     var selectedExam by remember { mutableStateOf(defaultExam) }
     var selectedQuestionSource by remember { mutableStateOf(QuestionSourceType.PYQ) }
-    var selectedTestType by remember { mutableStateOf(MockTestType.FULL_MOCK) }
+    var selectedTestType by remember { mutableStateOf(MockTestType.MOCK_TEST) }
     var selectedSubject by remember { mutableStateOf("All Subjects") }
     var selectedChapter by remember { mutableStateOf("All Chapters") }
     var selectedTopic by remember { mutableStateOf("All Topics") }
@@ -56,6 +56,7 @@ fun MockTestSetupDialog(
     var questionCount by remember { mutableIntStateOf(20) }
     var timeLimitMinutes by remember { mutableIntStateOf(25) }
     var selectedCustomMaterialId by remember { mutableStateOf<Long?>(null) }
+    var showPreviewModal by remember { mutableStateOf(false) }
 
     val examOptions = listOf(
         "RRB NTPC (Railway)",
@@ -192,44 +193,92 @@ fun MockTestSetupDialog(
                             }
                         }
 
-                        // 2. Question Source Engine Selector (PYQ, Chapter Practice, Exam Pattern, Current Affairs, Mixed)
+                        // 2. Test Mode & Source Engine Selector
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            ConfigSectionTitle(icon = Icons.Filled.Source, title = "Question Source Engine")
+                            ConfigSectionTitle(icon = Icons.Filled.Source, title = "Test Mode & Source Engine")
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 QuestionSourceOptionCard(
-                                    title = "🎯 Authentic Previous Year Questions (PYQs)",
-                                    description = "Real, verified exam questions tagged by official year & shift",
-                                    badgeText = "Verified Official",
-                                    isSelected = selectedQuestionSource == QuestionSourceType.PYQ,
+                                    title = "📜 Authentic Previous Year Questions (PYQ)",
+                                    description = "Only verified previous-year questions with official year & shift",
+                                    badgeText = "100% Official PYQs",
+                                    isSelected = selectedTestType == MockTestType.PYQ,
                                     accentColor = GoldenSpark,
-                                    onClick = { selectedQuestionSource = QuestionSourceType.PYQ }
+                                    onClick = {
+                                        selectedTestType = MockTestType.PYQ
+                                        selectedQuestionSource = QuestionSourceType.PYQ
+                                    }
                                 )
 
                                 QuestionSourceOptionCard(
-                                    title = "📖 Chapter-wise Practice Drill",
-                                    description = "Target specific chapters and syllabus topics with structured MCQs",
-                                    badgeText = "Syllabus Focused",
-                                    isSelected = selectedQuestionSource == QuestionSourceType.CHAPTER_PRACTICE,
+                                    title = "📖 Subject Practice",
+                                    description = "Focused deep-dive practice on a single chosen subject",
+                                    badgeText = "Subject Specific",
+                                    isSelected = selectedTestType == MockTestType.SUBJECT_PRACTICE || selectedTestType == MockTestType.SUBJECT_TEST,
                                     accentColor = ElectricViolet,
-                                    onClick = { selectedQuestionSource = QuestionSourceType.CHAPTER_PRACTICE }
+                                    onClick = {
+                                        selectedTestType = MockTestType.SUBJECT_PRACTICE
+                                        selectedQuestionSource = QuestionSourceType.CHAPTER_PRACTICE
+                                    }
                                 )
 
                                 QuestionSourceOptionCard(
-                                    title = "⚡ Full Exam Pattern Simulation",
-                                    description = "Standard exam weightage, section ratio, and real negative marking",
-                                    badgeText = "Real CBT",
-                                    isSelected = selectedQuestionSource == QuestionSourceType.EXAM_PATTERN,
+                                    title = "📚 Chapter & Topic Drill",
+                                    description = "Syllabus-grounded MCQs targeting specific chapters and topics",
+                                    badgeText = "Chapter Scope",
+                                    isSelected = selectedTestType == MockTestType.CHAPTER_PRACTICE || selectedTestType == MockTestType.CHAPTER_TEST,
+                                    accentColor = Color(0xFF8B5CF6),
+                                    onClick = {
+                                        selectedTestType = MockTestType.CHAPTER_PRACTICE
+                                        selectedQuestionSource = QuestionSourceType.CHAPTER_PRACTICE
+                                    }
+                                )
+
+                                QuestionSourceOptionCard(
+                                    title = "🧠 Smart Adaptive Practice",
+                                    description = "Adaptive questions targeting your weak areas, mistakes, and revision queue",
+                                    badgeText = "Performance Engine",
+                                    isSelected = selectedTestType == MockTestType.SMART_PRACTICE,
+                                    accentColor = EmeraldSuccess,
+                                    onClick = {
+                                        selectedTestType = MockTestType.SMART_PRACTICE
+                                        selectedQuestionSource = QuestionSourceType.MIXED
+                                    }
+                                )
+
+                                QuestionSourceOptionCard(
+                                    title = "🤖 AI Practice Drill",
+                                    description = "Clearly labeled AI-generated conceptual practice MCQs",
+                                    badgeText = "AI Generated",
+                                    isSelected = selectedTestType == MockTestType.AI_PRACTICE,
                                     accentColor = NeonCyan,
-                                    onClick = { selectedQuestionSource = QuestionSourceType.EXAM_PATTERN }
+                                    onClick = {
+                                        selectedTestType = MockTestType.AI_PRACTICE
+                                        selectedQuestionSource = QuestionSourceType.AI_PRACTICE
+                                    }
                                 )
 
                                 QuestionSourceOptionCard(
-                                    title = "📰 Current Affairs 2024 & GK",
-                                    description = "Latest national, international, science & sports events for exams",
-                                    badgeText = "2024 Updated",
-                                    isSelected = selectedQuestionSource == QuestionSourceType.CURRENT_AFFAIRS,
+                                    title = "🏆 Full CBT Mock Test",
+                                    description = "Full official exam simulation with realistic blueprint & preview",
+                                    badgeText = "Exam Pattern",
+                                    isSelected = selectedTestType == MockTestType.MOCK_TEST || selectedTestType == MockTestType.FULL_MOCK,
+                                    accentColor = CoralRose,
+                                    onClick = {
+                                        selectedTestType = MockTestType.MOCK_TEST
+                                        selectedQuestionSource = QuestionSourceType.EXAM_PATTERN
+                                    }
+                                )
+
+                                QuestionSourceOptionCard(
+                                    title = "🔀 Mixed Practice Drill",
+                                    description = "Curated blend of verified PYQs, curated bank, and AI practice questions",
+                                    badgeText = "Balanced Blend",
+                                    isSelected = selectedTestType == MockTestType.MIXED_PRACTICE,
                                     accentColor = Color(0xFF38BDF8),
-                                    onClick = { selectedQuestionSource = QuestionSourceType.CURRENT_AFFAIRS }
+                                    onClick = {
+                                        selectedTestType = MockTestType.MIXED_PRACTICE
+                                        selectedQuestionSource = QuestionSourceType.MIXED
+                                    }
                                 )
                             }
                         }
@@ -490,28 +539,195 @@ fun MockTestSetupDialog(
 
                     // Launch CTA Button
                     GlassButton(
-                        text = "🚀 Launch CBT Test ($questionCount Qs • ${timeLimitMinutes} mins)",
+                        text = if (selectedTestType == MockTestType.MOCK_TEST || selectedTestType == MockTestType.FULL_MOCK) "📋 Preview & Start Test ($questionCount Qs • ${timeLimitMinutes}m)" else "🚀 Launch Test ($questionCount Qs • ${timeLimitMinutes}m)",
                         onClick = {
-                            val config = MockTestConfig(
-                                exam = selectedExam,
-                                testType = selectedTestType,
-                                questionSource = selectedQuestionSource,
-                                subject = selectedSubject,
-                                chapter = selectedChapter,
-                                topic = if (selectedChapter != "All Chapters") selectedChapter else selectedTopic,
-                                pyqYear = selectedPyqYear,
-                                pyqShift = selectedPyqShift,
-                                difficulty = selectedDifficulty,
-                                language = selectedLanguage,
-                                questionCount = questionCount,
-                                timeLimitMinutes = timeLimitMinutes,
-                                customMaterialId = selectedCustomMaterialId
-                            )
-                            onStartTest(config)
+                            if (selectedTestType == MockTestType.MOCK_TEST || selectedTestType == MockTestType.FULL_MOCK) {
+                                showPreviewModal = true
+                            } else {
+                                val config = MockTestConfig(
+                                    exam = selectedExam,
+                                    testType = selectedTestType,
+                                    questionSource = selectedQuestionSource,
+                                    subject = selectedSubject,
+                                    chapter = selectedChapter,
+                                    topic = if (selectedChapter != "All Chapters") selectedChapter else selectedTopic,
+                                    pyqYear = selectedPyqYear,
+                                    pyqShift = selectedPyqShift,
+                                    difficulty = selectedDifficulty,
+                                    language = selectedLanguage,
+                                    questionCount = questionCount,
+                                    timeLimitMinutes = timeLimitMinutes,
+                                    customMaterialId = selectedCustomMaterialId
+                                )
+                                onStartTest(config)
+                            }
                         },
                         isPrimary = true,
                         testTag = "start_configured_mock_test_btn"
                     )
+                }
+            }
+        }
+    }
+
+    if (showPreviewModal) {
+        Dialog(
+            onDismissRequest = { showPreviewModal = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xE0050814))
+                    .padding(20.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                GlassCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .wrapContentHeight()
+                        .testTag("cbt_preview_instructions_dialog"),
+                    shape = RoundedCornerShape(24.dp),
+                    fillAlpha = 0.96f
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        // Header
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.Assignment, null, tint = GoldenSpark, modifier = Modifier.size(24.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Mock Test Preview & Rules",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                            IconButton(onClick = { showPreviewModal = false }) {
+                                Icon(Icons.Filled.Close, "Close", tint = Color(0xFF94A3B8))
+                            }
+                        }
+
+                        HorizontalDivider(color = Color(0x20FFFFFF))
+
+                        // Test Details Summary Grid
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0x18FFFFFF),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("EXAM", style = MaterialTheme.typography.labelSmall, color = Color(0xFF94A3B8))
+                                    Text(selectedExam, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = NeonCyan)
+                                }
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0x18FFFFFF),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("QUESTIONS", style = MaterialTheme.typography.labelSmall, color = Color(0xFF94A3B8))
+                                    Text("$questionCount Qs", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = GoldenSpark)
+                                }
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0x18FFFFFF),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("TIME LIMIT", style = MaterialTheme.typography.labelSmall, color = Color(0xFF94A3B8))
+                                    Text("${timeLimitMinutes} Mins", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = CoralRose)
+                                }
+                            }
+                        }
+
+                        // Marking Scheme & Rules
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0x12FFFFFF),
+                            border = BorderStroke(1.dp, Color(0x25FFFFFF))
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "Marking Scheme: +1.0 for Correct | -0.33 for Incorrect",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EmeraldSuccess
+                                )
+                                Text(
+                                    text = "1. Real-time Persistence: Every answer is saved locally immediately.\n" +
+                                           "2. CBT Timer: Clock counts down continuously across orientation changes.\n" +
+                                           "3. Question Palette: Color codes indicate Answered, Marked, or Unvisited questions.\n" +
+                                           "4. Auto Submit: Test auto-submits when time expires.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFFCBD5E1),
+                                    lineHeight = 18.sp
+                                )
+                            }
+                        }
+
+                        // Actions
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { showPreviewModal = false },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, Color(0x40FFFFFF))
+                            ) {
+                                Text("Edit Config", color = Color.White)
+                            }
+
+                            Button(
+                                onClick = {
+                                    showPreviewModal = false
+                                    val config = MockTestConfig(
+                                        exam = selectedExam,
+                                        testType = selectedTestType,
+                                        questionSource = selectedQuestionSource,
+                                        subject = selectedSubject,
+                                        chapter = selectedChapter,
+                                        topic = if (selectedChapter != "All Chapters") selectedChapter else selectedTopic,
+                                        pyqYear = selectedPyqYear,
+                                        pyqShift = selectedPyqShift,
+                                        difficulty = selectedDifficulty,
+                                        language = selectedLanguage,
+                                        questionCount = questionCount,
+                                        timeLimitMinutes = timeLimitMinutes,
+                                        customMaterialId = selectedCustomMaterialId
+                                    )
+                                    onStartTest(config)
+                                },
+                                modifier = Modifier.weight(1.5f),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = GoldenSpark)
+                            ) {
+                                Text("🚀 Start CBT Test Now", color = Color(0xFF050814), fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                 }
             }
         }

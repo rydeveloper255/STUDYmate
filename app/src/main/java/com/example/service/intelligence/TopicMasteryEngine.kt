@@ -179,7 +179,7 @@ object TopicMasteryEngine {
             return if (totalStudyMinutes > 0) "LEARNING" else "NOT_STARTED"
         }
 
-        if (repeatedMistakes >= 2 || score < Config.WEAK_SCORE_THRESHOLD) {
+        if (repeatedMistakes >= 2 || (totalAttempts >= 3 && score < Config.WEAK_SCORE_THRESHOLD)) {
             return "WEAK"
         }
 

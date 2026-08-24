@@ -60,6 +60,14 @@ fun NovaScreen(
     val audioRms by viewModel.voiceManager.audioLevelRms.collectAsState()
     val recognizedText by viewModel.voiceManager.recognizedText.collectAsState()
 
+    // Step 23 Smart Learning System States
+    val showMcqConfigDialog by viewModel.showMcqConfigDialog.collectAsState()
+    val showRevisionDialog by viewModel.showRevisionDialog.collectAsState()
+    val showDailyBriefDialog by viewModel.showDailyBriefDialog.collectAsState()
+    val activeRevisionTopic by viewModel.activeRevisionTopic.collectAsState()
+    val dailyExamBriefing by viewModel.dailyExamBriefing.collectAsState()
+    val studyContext by viewModel.studyContext.collectAsState()
+
     var showVoiceModal by remember { mutableStateOf(false) }
     var showQuickSwitchMenu by remember { mutableStateOf(false) }
 
@@ -217,6 +225,56 @@ fun NovaScreen(
                     onSelectTab = { tab ->
                         viewModel.setTab(tab)
                         showQuickSwitchMenu = false
+                    }
+                )
+            }
+
+            // Step 23 Smart Learning System Dialogs
+            if (showMcqConfigDialog) {
+                NovaWebMcqGeneratorDialog(
+                    initialTopic = "Recent Space Missions & Science Updates",
+                    examName = studyContext.targetExam,
+                    onDismiss = { viewModel.setShowMcqConfigDialog(false) },
+                    onGenerate = { config ->
+                        viewModel.generateFreshWebMcqs(config)
+                    }
+                )
+            }
+
+            if (showRevisionDialog && activeRevisionTopic != null) {
+                SmartRevisionSessionDialog(
+                    item = activeRevisionTopic!!,
+                    examName = studyContext.targetExam,
+                    onDismiss = { viewModel.setShowRevisionDialog(false) },
+                    onComplete = { score, total ->
+                        viewModel.completeRevisionSession(score, total)
+                        viewModel.setShowRevisionDialog(false)
+                    },
+                    onAskNova = { prompt ->
+                        viewModel.setShowRevisionDialog(false)
+                        viewModel.sendMessage(prompt)
+                    }
+                )
+            }
+
+            if (showDailyBriefDialog && dailyExamBriefing != null) {
+                DailyExamBriefingDialog(
+                    briefing = dailyExamBriefing,
+                    onDismiss = { viewModel.setShowDailyBriefDialog(false) },
+                    onStartPractice = { topic ->
+                        viewModel.setShowDailyBriefDialog(false)
+                        viewModel.generateFreshWebMcqs(
+                            com.example.data.model.SmartMcqConfig(
+                                topicQuery = topic,
+                                questionCount = 10,
+                                difficulty = "Medium",
+                                examName = studyContext.targetExam
+                            )
+                        )
+                    },
+                    onAskNova = { prompt ->
+                        viewModel.setShowDailyBriefDialog(false)
+                        viewModel.sendMessage(prompt)
                     }
                 )
             }

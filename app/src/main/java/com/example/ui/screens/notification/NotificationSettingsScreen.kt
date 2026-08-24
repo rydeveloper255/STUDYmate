@@ -94,13 +94,19 @@ fun NotificationSettingsScreen(
     // Editable state
     var masterEnabled by remember(currentPrefs) { mutableStateOf(currentPrefs.masterEnabled) }
     var studyReminders by remember(currentPrefs) { mutableStateOf(currentPrefs.studyReminders) }
+    var currentAffairsReminders by remember(currentPrefs) { mutableStateOf(currentPrefs.currentAffairsReminders) }
+    var testReminders by remember(currentPrefs) { mutableStateOf(currentPrefs.testReminders) }
     var examCountdownAlerts by remember(currentPrefs) { mutableStateOf(currentPrefs.examCountdownAlerts) }
+    var examUpdatesReminders by remember(currentPrefs) { mutableStateOf(currentPrefs.examUpdatesReminders) }
+    var novaReminders by remember(currentPrefs) { mutableStateOf(currentPrefs.novaReminders) }
+    var dailyBriefingEnabled by remember(currentPrefs) { mutableStateOf(currentPrefs.dailyBriefingEnabled) }
     var dailyGoalReminders by remember(currentPrefs) { mutableStateOf(currentPrefs.dailyGoalReminders) }
     var missedStudyReminders by remember(currentPrefs) { mutableStateOf(currentPrefs.missedStudyReminders) }
     var breakReminders by remember(currentPrefs) { mutableStateOf(currentPrefs.breakReminders) }
     var focusStartedAlerts by remember(currentPrefs) { mutableStateOf(currentPrefs.focusStartedAlerts) }
     var focusCompletedAlerts by remember(currentPrefs) { mutableStateOf(currentPrefs.focusCompletedAlerts) }
     var motivationalQuotes by remember(currentPrefs) { mutableStateOf(currentPrefs.motivationalQuotes) }
+    var briefingLanguage by remember(currentPrefs) { mutableStateOf(currentPrefs.language) }
 
     var reminderHour by remember(currentPrefs) { mutableIntStateOf(currentPrefs.reminderHour) }
     var reminderMinute by remember(currentPrefs) { mutableIntStateOf(currentPrefs.reminderMinute) }
@@ -171,7 +177,12 @@ fun NotificationSettingsScreen(
                             val newPrefs = NotificationPreference(
                                 masterEnabled = masterEnabled,
                                 studyReminders = studyReminders,
+                                currentAffairsReminders = currentAffairsReminders,
+                                testReminders = testReminders,
                                 examCountdownAlerts = examCountdownAlerts,
+                                examUpdatesReminders = examUpdatesReminders,
+                                novaReminders = novaReminders,
+                                dailyBriefingEnabled = dailyBriefingEnabled,
                                 dailyGoalReminders = dailyGoalReminders,
                                 missedStudyReminders = missedStudyReminders,
                                 breakReminders = breakReminders,
@@ -190,7 +201,8 @@ fun NotificationSettingsScreen(
                                 quietStartHour = quietStartHour,
                                 quietStartMinute = quietStartMinute,
                                 quietEndHour = quietEndHour,
-                                quietEndMinute = quietEndMinute
+                                quietEndMinute = quietEndMinute,
+                                language = briefingLanguage
                             )
                             onSavePrefs(newPrefs)
                             Toast.makeText(context, "Notification preferences saved & scheduled! ✅", Toast.LENGTH_SHORT).show()
@@ -655,7 +667,47 @@ fun NotificationSettingsScreen(
             )
 
             NotificationTypeSwitchTile(
-                title = "2. Exam Countdown Reminder",
+                title = "2. Current Affairs Alerts",
+                description = "Daily briefs and high-yield news relevant to your target exam",
+                icon = Icons.Filled.Newspaper,
+                checked = currentAffairsReminders,
+                onCheckedChange = { currentAffairsReminders = it }
+            )
+
+            NotificationTypeSwitchTile(
+                title = "3. Test & Quiz Reminders",
+                description = "Scheduled practice tests, unfinished test alerts, and score summaries",
+                icon = Icons.Filled.Quiz,
+                checked = testReminders,
+                onCheckedChange = { testReminders = it }
+            )
+
+            NotificationTypeSwitchTile(
+                title = "4. Verified Exam Updates",
+                description = "Official exam date announcements, registration alerts, and syllabus changes",
+                icon = Icons.Filled.Verified,
+                checked = examUpdatesReminders,
+                onCheckedChange = { examUpdatesReminders = it }
+            )
+
+            NotificationTypeSwitchTile(
+                title = "5. Daily Preparation Briefing",
+                description = "Morning ☀️ personalized summary of focus topic, practice, and radar",
+                icon = Icons.Filled.WbSunny,
+                checked = dailyBriefingEnabled,
+                onCheckedChange = { dailyBriefingEnabled = it }
+            )
+
+            NotificationTypeSwitchTile(
+                title = "6. NOVA AI Nudges & Coaching",
+                description = "Proactive study strategies, streak milestones, and AI recommendations",
+                icon = Icons.Filled.AutoAwesome,
+                checked = novaReminders,
+                onCheckedChange = { novaReminders = it }
+            )
+
+            NotificationTypeSwitchTile(
+                title = "7. Exam Countdown Reminder",
                 description = "Days remaining countdowns and high-yield topic prompts",
                 icon = Icons.Filled.HourglassTop,
                 checked = examCountdownAlerts,
@@ -663,7 +715,7 @@ fun NotificationSettingsScreen(
             )
 
             NotificationTypeSwitchTile(
-                title = "3. Daily Study Goal Reminder",
+                title = "8. Daily Study Goal Reminder",
                 description = "Daily target minute checks and mission reminders",
                 icon = Icons.Filled.TrackChanges,
                 checked = dailyGoalReminders,
@@ -671,7 +723,7 @@ fun NotificationSettingsScreen(
             )
 
             NotificationTypeSwitchTile(
-                title = "4. Missed-Study Reminder",
+                title = "9. Missed-Study Reminder",
                 description = "Gentle, non-intrusive nudges if you missed your scheduled study slot",
                 icon = Icons.Filled.Visibility,
                 checked = missedStudyReminders,
@@ -679,35 +731,11 @@ fun NotificationSettingsScreen(
             )
 
             NotificationTypeSwitchTile(
-                title = "5. Break Reminder",
-                description = "Prompts to stretch, hydrate, and relax your eyes after study sprints",
+                title = "10. Break & Focus Alerts",
+                description = "Prompts to stretch after sprints and focus session milestone alerts",
                 icon = Icons.Filled.SelfImprovement,
                 checked = breakReminders,
                 onCheckedChange = { breakReminders = it }
-            )
-
-            NotificationTypeSwitchTile(
-                title = "6. Focus Session Started Alert",
-                description = "Live ongoing status banner when deep focus timer is active",
-                icon = Icons.Filled.PlayCircle,
-                checked = focusStartedAlerts,
-                onCheckedChange = { focusStartedAlerts = it }
-            )
-
-            NotificationTypeSwitchTile(
-                title = "7. Focus Session Completed Alert",
-                description = "XP rewards and session summary right after finishing a focus session",
-                icon = Icons.Filled.Stars,
-                checked = focusCompletedAlerts,
-                onCheckedChange = { focusCompletedAlerts = it }
-            )
-
-            NotificationTypeSwitchTile(
-                title = "8. Daily Motivational Boost",
-                description = "Inspiring study quotes personalized with your name and exam",
-                icon = Icons.Filled.AutoAwesome,
-                checked = motivationalQuotes,
-                onCheckedChange = { motivationalQuotes = it }
             )
 
             // =========================================================================

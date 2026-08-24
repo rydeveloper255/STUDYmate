@@ -46,6 +46,10 @@ import com.example.ui.components.GlassCard
 import com.example.ui.components.springClickable
 import com.example.ui.theme.*
 import com.example.viewmodel.ActiveTestState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.persistence.PersistenceMonitor
+import com.example.data.persistence.PersistenceStatus
+import com.example.data.model.MockTestType
 
 @Composable
 fun ActiveMockTestScreen(
@@ -107,6 +111,8 @@ fun ActiveMockTestScreen(
     val chosenOption = state.selectedAnswers[currentIdx]
     val isMarked = state.markedForReview.contains(currentIdx)
 
+    val activePersistenceStatus by PersistenceMonitor.activeStatus.collectAsStateWithLifecycle()
+
     val remainingMins = state.remainingSeconds / 60
     val remainingSecs = state.remainingSeconds % 60
     val timerText = String.format("%02d:%02d", remainingMins, remainingSecs)
@@ -161,7 +167,7 @@ fun ActiveMockTestScreen(
                             currentIdx = currentIdx,
                             total = total,
                             timerText = timerText,
-                            isLowTime = isLowTime,
+                            remainingSeconds = state.remainingSeconds,
                             currentSubject = currentQ.subject,
                             subjects = subjects,
                             onSelectSubject = { subj ->
@@ -170,7 +176,8 @@ fun ActiveMockTestScreen(
                             },
                             isPaletteOpen = isRightPaletteExpanded,
                             onTogglePalette = { isRightPaletteExpanded = !isRightPaletteExpanded },
-                            onSubmitPrompt = { onSetSubmitConfirmOpen(true) }
+                            onSubmitPrompt = { onSetSubmitConfirmOpen(true) },
+                            autoSaveStatus = activePersistenceStatus
                         )
 
                         if (state.submissionError != null) {
@@ -750,20 +757,79 @@ fun ActiveMockTestScreen(
     }
 }
 
+private data class CbtTimerVisual(
+    val bg: Color,
+    val border: Color,
+    val color: Color,
+    val prefix: String
+)
+
+private data class CbtSavePillVisual(
+    val bg: Color,
+    val border: Color,
+    val textColor: Color,
+    val label: String
+)
+
 @Composable
 private fun CbtTopHeaderBar(
     title: String,
     currentIdx: Int,
     total: Int,
     timerText: String,
-    isLowTime: Boolean,
+    remainingSeconds: Int,
     currentSubject: String,
     subjects: List<String>,
     onSelectSubject: (String) -> Unit,
     isPaletteOpen: Boolean,
     onTogglePalette: () -> Unit,
-    onSubmitPrompt: () -> Unit
+    onSubmitPrompt: () -> Unit,
+    autoSaveStatus: PersistenceStatus = PersistenceStatus.Saved(System.currentTimeMillis())
 ) {
+    // Timer 3-State Visuals: Normal (>300s), Warning (121-300s), Critical (<=120s)
+    val timerVisual = when {
+        remainingSeconds <= 120 -> CbtTimerVisual(
+            CoralRose.copy(alpha = 0.25f),
+            CoralRose,
+            CoralRose,
+            "🚨 "
+        )
+        remainingSeconds <= 300 -> CbtTimerVisual(
+            GoldenSpark.copy(alpha = 0.2f),
+            GoldenSpark,
+            GoldenSpark,
+            "⚠️ "
+        )
+        else -> CbtTimerVisual(
+            Color(0x2038BDF8),
+            NeonCyan.copy(alpha = 0.5f),
+            NeonCyan,
+            "⏱ "
+        )
+    }
+
+    // Auto-Save Status Pill Visuals
+    val saveVisual = when (autoSaveStatus) {
+        is PersistenceStatus.Saving, is PersistenceStatus.Syncing -> CbtSavePillVisual(
+            Color(0x2038BDF8),
+            Color(0xFF38BDF8).copy(alpha = 0.5f),
+            NeonCyan,
+            "↻ Syncing"
+        )
+        is PersistenceStatus.Offline -> CbtSavePillVisual(
+            Color(0x20F59E0B),
+            Color(0xFFF59E0B).copy(alpha = 0.5f),
+            GoldenSpark,
+            "○ Offline"
+        )
+        else -> CbtSavePillVisual(
+            Color(0x2010B981),
+            Color(0xFF10B981).copy(alpha = 0.5f),
+            EmeraldSuccess,
+            "✓ Saved"
+        )
+    }
+
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = Color(0xFF0F172A),
@@ -776,17 +842,19 @@ private fun CbtTopHeaderBar(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Exam Title & Question Position
+                // Exam Title, Question Number & Auto-Save Pill
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f, fill = false)
                 ) {
                     Text(
                         text = title,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
                         fontSize = 13.sp,
-                        maxLines = 1
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     Surface(
                         shape = RoundedCornerShape(6.dp),
@@ -801,7 +869,22 @@ private fun CbtTopHeaderBar(
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = saveVisual.bg,
+                        border = BorderStroke(1.dp, saveVisual.border)
+                    ) {
+                        Text(
+                            text = saveVisual.label,
+                            color = saveVisual.textColor,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                 }
+
+                Spacer(Modifier.width(8.dp))
 
                 // Timer & Controls
                 Row(
@@ -811,8 +894,8 @@ private fun CbtTopHeaderBar(
                     // Timer Display
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = if (isLowTime) CoralRose.copy(alpha = 0.25f) else Color(0x2038BDF8),
-                        border = BorderStroke(1.dp, if (isLowTime) CoralRose else NeonCyan.copy(alpha = 0.5f))
+                        color = timerVisual.bg,
+                        border = BorderStroke(1.dp, timerVisual.border)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -821,13 +904,13 @@ private fun CbtTopHeaderBar(
                             Icon(
                                 Icons.Filled.Timer,
                                 contentDescription = "$timerText remaining",
-                                tint = if (isLowTime) CoralRose else NeonCyan,
+                                tint = timerVisual.color,
                                 modifier = Modifier.size(14.dp)
                             )
                             Spacer(Modifier.width(4.dp))
                             Text(
-                                text = timerText,
-                                color = if (isLowTime) CoralRose else NeonCyan,
+                                text = "${timerVisual.prefix}$timerText",
+                                color = timerVisual.color,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp
                             )

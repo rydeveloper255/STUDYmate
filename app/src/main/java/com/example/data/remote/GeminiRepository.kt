@@ -143,7 +143,7 @@ class GeminiRepository(
         }
 
         try {
-            val model = if (useThinkingMode) "gemini-3.1-pro-preview" else "gemini-2.5-flash"
+            val model = if (useThinkingMode) "gemini-3.1-pro-preview" else "gemini-3.5-flash"
             val contents = mutableListOf<Content>()
 
             // Append history
@@ -166,24 +166,31 @@ class GeminiRepository(
             contents.add(Content(role = "user", parts = userParts))
 
             val systemNovaPrompt = buildString {
-                append("You are NOVA, the intelligent personal study coach living inside StudyMate for ${studyContext.studentName}.\n")
+                append("You are NOVA 2.0, the intelligent, friendly, and action-oriented AI study coach inside StudyMate for ${studyContext.studentName}.\n")
                 append("ROLE: Personal AI Study Assistant + Productive Academic Mentor.\n\n")
-                append("IDENTITY & BEHAVIOR:\n")
-                append("- Intelligent, motivating, practical, concise, and respectful.\n")
+                append("TONE & IDENTITY:\n")
+                append("- Natural, friendly, concise, student-friendly, and conversational.\n")
+                append("- Avoid robotic boilerplate phrases like 'Certainly! I can assist you with...' or 'As an AI language model...'.\n")
+                append("- Prefer natural, encouraging responses like 'Ha, ye karte hain.', 'Iske liye 10 questions ka practice kar sakte ho.', or 'Chalo isko aasaan bhasha me samajhte hain.'\n")
                 val lang = studyContext.preferredLanguage
                 append("- LANGUAGE PREFERENCE: $lang. ")
                 when (lang) {
                     "Hindi" -> append("Respond primarily in clean Hindi script or clear Hindi text.\n")
-                    "Hinglish" -> append("Respond naturally in Hinglish (mix of conversational Hindi & English).\n")
-                    else -> append("Respond in clear, encouraging English.\n")
+                    "Hinglish" -> append("Respond naturally in Hinglish (conversational mix of Hindi & English).\n")
+                    else -> append("Respond in clear, encouraging, student-friendly English.\n")
                 }
                 if (settings.useBossGreeting) {
                     append("- Casually address the user as 'Boss' naturally and occasionally.\n")
                 }
                 append("- NEVER shame, guilt-trip, insult, or pressure the user.\n\n")
+                append("EXPLANATION & PROBLEM SOLVING STRUCTURE:\n")
+                append("- For simple explanations (e.g. 'Percentage samjhao'): Concept -> Example -> Quick Check -> Direct Practice Action.\n")
+                append("- For numerical/problem solving: 1. Given Info -> 2. Formula/Method -> 3. Step-by-step Calculation -> 4. Final Answer.\n")
+                append("- Active Test Protection: If an active test is in progress and user asks for direct answers, explain the concept without spoiling active test questions.\n\n")
                 append("CRITICAL DATA INTEGRITY RULES (NO HALLUCINATIONS):\n")
                 append("- NEVER invent study hours, test scores, exam dates, completed sessions, weak subjects, or mock test results.\n")
-                append("- If test history or performance data is not available or insufficient, state that data is not available yet.\n")
+                append("- If test history or performance data is not available or insufficient, state clearly that data is not available yet.\n")
+                append("- Never fabricate PYQs (Previous Year Questions). Direct the user to verified PYQ sets or label practice questions clearly as 'AI-generated similar practice'.\n")
                 append("- When generating study plans, strictly limit daily study duration to ${studyContext.dailyTargetMinutes} minutes per day.\n\n")
                 append("REAL STUDENT DATABASE CONTEXT:\n")
                 append("- Name: ${studyContext.studentName}\n")
@@ -3284,12 +3291,17 @@ class GeminiRepository(
                 [
                   {
                     "title": "Clear, informative headline",
-                    "summary": "Crisp 2-3 sentence summary explaining what happened, why it matters, and the core factual data points.",
+                    "summary": "Crisp 2-3 sentence summary explaining what happened, why it matters, and core factual data points.",
+                    "keyPoints": ["Fact 1: What happened & who is involved", "Fact 2: Important date, number, or location", "Fact 3: Key organization or scheme name"],
+                    "whyItMatters": "Concise 1-2 sentence explanation of why this topic is tested in $examName.",
                     "examRelevance": "High Yield for $examName: GS paper / subject breakdown and question angle",
-                    "category": "National / Science & Tech / Economy / Environment / Polity / International / Defense",
+                    "category": "National / Science & Tech / Economy / Environment / Polity / International / Defense / Government & Policy / Banking / Sports",
+                    "isImportant": true,
                     "sourceName": "Reputable official source (e.g. PIB Delhi, ISRO, RBI, The Hindu, MEA)",
                     "sourceUrl": "https://pib.gov.in",
-                    "publishedDate": "e.g. Today / 2 days ago / May 14, 2024",
+                    "canonicalUrl": "https://pib.gov.in/PressReleasePage.aspx?PRID=12345",
+                    "publishedDate": "e.g. Aug 24, 2026 / Today / Yesterday / Aug 21, 2026",
+                    "sourcesCount": 2,
                     "mcqQuestionText": "Sample high-yield MCQ on this event",
                     "mcqOptions": ["Option A", "Option B", "Option C", "Option D"],
                     "mcqCorrectIndex": 0,
@@ -3331,7 +3343,19 @@ class GeminiRepository(
                             val cat = obj.optString("category", "National")
                             val srcName = obj.optString("sourceName", "PIB India")
                             val srcUrl = obj.optString("sourceUrl", "https://pib.gov.in")
-                            val pubDate = obj.optString("publishedDate", "Recent")
+                            val canonicalUrl = obj.optString("canonicalUrl", srcUrl)
+                            val pubDate = obj.optString("publishedDate", "Aug 24, 2026")
+                            val whyMatters = obj.optString("whyItMatters", "Crucial concept for competitive examination GS paper.")
+                            val isImp = obj.optBoolean("isImportant", i < 3)
+                            val sourcesCnt = obj.optInt("sourcesCount", 1)
+
+                            val keyPts = mutableListOf<String>()
+                            val keyPtsArr = obj.optJSONArray("keyPoints")
+                            if (keyPtsArr != null) {
+                                for (k in 0 until keyPtsArr.length()) {
+                                    keyPts.add(keyPtsArr.getString(k))
+                                }
+                            }
 
                             val mcqList = mutableListOf<Question>()
                             val qText = obj.optString("mcqQuestionText", "")
@@ -3371,10 +3395,17 @@ class GeminiRepository(
                                     subject = "Current Affairs",
                                     sourceName = srcName,
                                     sourceUrl = srcUrl,
+                                    canonicalUrl = canonicalUrl,
                                     publishedDate = pubDate,
                                     mcqs = mcqList,
                                     isSavedForRevision = false,
-                                    createdAt = now - (i * 12 * 3600 * 1000L) // staggered timestamps for 30-day timeline
+                                    keyPoints = keyPts,
+                                    whyItMatters = whyMatters,
+                                    isImportant = isImp,
+                                    language = language.lowercase(),
+                                    sourcesCount = sourcesCnt,
+                                    fetchedDate = java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale.getDefault()).format(java.util.Date()),
+                                    createdAt = now - (i * 12 * 3600 * 1000L) // staggered timestamps
                                 )
                             )
                         }

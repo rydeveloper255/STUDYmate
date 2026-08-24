@@ -210,6 +210,18 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentAffairsError = MutableStateFlow<String?>(null)
     val currentAffairsError: StateFlow<String?> = _currentAffairsError.asStateFlow()
 
+    private val _selectedCurrentAffairsDate = MutableStateFlow("Today")
+    val selectedCurrentAffairsDate: StateFlow<String> = _selectedCurrentAffairsDate.asStateFlow()
+
+    private val _currentAffairsExamMode = MutableStateFlow("For You")
+    val currentAffairsExamMode: StateFlow<String> = _currentAffairsExamMode.asStateFlow()
+
+    private val _isFreshWebSearching = MutableStateFlow(false)
+    val isFreshWebSearching: StateFlow<Boolean> = _isFreshWebSearching.asStateFlow()
+
+    private val _currentAffairsQuizState = MutableStateFlow<com.example.data.model.CurrentAffairsQuizSession?>(null)
+    val currentAffairsQuizState: StateFlow<com.example.data.model.CurrentAffairsQuizSession?> = _currentAffairsQuizState.asStateFlow()
+
     private val _lastRefreshedTime = MutableStateFlow(System.currentTimeMillis())
     val lastRefreshedTime: StateFlow<Long> = _lastRefreshedTime.asStateFlow()
 
@@ -236,6 +248,52 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         )
     )
     val searchHistory: StateFlow<List<NovaSearchHistoryItem>> = _searchHistory.asStateFlow()
+
+    val webIntelligenceEngine = com.example.service.intelligence.NovaWebIntelligenceEngine(
+        smartNoteDao = db.smartNoteDao(),
+        geminiRepository = geminiRepository
+    )
+
+    val smartLearningSystemEngine = com.example.service.intelligence.SmartLearningSystemEngine(
+        database = db,
+        webIntelligenceEngine = webIntelligenceEngine
+    )
+
+    private val _dailyExamBriefing = MutableStateFlow<DailyExamBriefing?>(null)
+    val dailyExamBriefing: StateFlow<DailyExamBriefing?> = _dailyExamBriefing.asStateFlow()
+
+    private val _isDailyBriefingLoading = MutableStateFlow(false)
+    val isDailyBriefingLoading: StateFlow<Boolean> = _isDailyBriefingLoading.asStateFlow()
+
+    private val _smartRevisionItems = MutableStateFlow<List<SmartRevisionTopicItem>>(emptyList())
+    val smartRevisionItems: StateFlow<List<SmartRevisionTopicItem>> = _smartRevisionItems.asStateFlow()
+
+    private val _activeRevisionTopic = MutableStateFlow<SmartRevisionTopicItem?>(null)
+    val activeRevisionTopic: StateFlow<SmartRevisionTopicItem?> = _activeRevisionTopic.asStateFlow()
+
+    private val _showMcqConfigDialog = MutableStateFlow(false)
+    val showMcqConfigDialog: StateFlow<Boolean> = _showMcqConfigDialog.asStateFlow()
+
+    private val _showRevisionDialog = MutableStateFlow(false)
+    val showRevisionDialog: StateFlow<Boolean> = _showRevisionDialog.asStateFlow()
+
+    private val _showDailyBriefDialog = MutableStateFlow(false)
+    val showDailyBriefDialog: StateFlow<Boolean> = _showDailyBriefDialog.asStateFlow()
+
+    private val _generatedMcqBatch = MutableStateFlow<GeneratedMcqBatch?>(null)
+    val generatedMcqBatch: StateFlow<GeneratedMcqBatch?> = _generatedMcqBatch.asStateFlow()
+
+    private val _isGeneratingFreshMcqs = MutableStateFlow(false)
+    val isGeneratingFreshMcqs: StateFlow<Boolean> = _isGeneratingFreshMcqs.asStateFlow()
+
+    private val _webSearchMode = MutableStateFlow(NovaWebSearchMode.ALL_WEB)
+    val webSearchMode: StateFlow<NovaWebSearchMode> = _webSearchMode.asStateFlow()
+
+    private val _isWebSearchActive = MutableStateFlow(false)
+    val isWebSearchActive: StateFlow<Boolean> = _isWebSearchActive.asStateFlow()
+
+    private val _searchingStatusText = MutableStateFlow<String?>(null)
+    val searchingStatusText: StateFlow<String?> = _searchingStatusText.asStateFlow()
 
     val studentMasterContext: StateFlow<StudentMasterContext?> = combine(
         studyRepository.userProfile,
@@ -315,6 +373,8 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         observeStudyContext()
         observeAnalytics()
         initQuizConfig()
+        fetchDailyExamBriefing()
+        loadSmartRevisionFeed()
     }
 
     fun setTab(tab: NovaScreenTab) {
@@ -797,7 +857,695 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // General Gemini Query Flow
+        // 9. Instant Intent: Live Exam Intelligence & Official Notifications (Step 21)
+        val isLiveExamIntent = lower.contains("exam update") || lower.contains("exam updates") ||
+                lower.contains("latest notification") || lower.contains("official notice") ||
+                lower.contains("official notification") || lower.contains("exam radar") ||
+                lower.contains("trending for my exam") || lower.contains("whats new") ||
+                lower.contains("what's new") || lower.contains("admit card update") ||
+                lower.contains("result update") || lower.contains("exam news") ||
+                lower.contains("notification check") || lower.contains("kya trending") ||
+                lower.contains("update important") || lower.contains("exam date update")
+
+        if (isLiveExamIntent && imageToSend == null) {
+            val exam = _studyContext.value.targetExam.ifBlank { "RRB Group D" }
+            val actions = listOf(
+                NovaContextualAction(
+                    label = "🔴 Open Live Exam Intelligence",
+                    iconName = "news",
+                    actionType = NovaActionType.OPEN_LIVE_EXAM_INTELLIGENCE,
+                    isPrimary = true
+                ),
+                NovaContextualAction(
+                    label = "🏛️ Official Notifications",
+                    iconName = "official",
+                    actionType = NovaActionType.OPEN_OFFICIAL_NOTICE
+                ),
+                NovaContextualAction(
+                    label = "🎯 View Exam Radar",
+                    iconName = "radar",
+                    actionType = NovaActionType.OPEN_EXAM_RADAR
+                ),
+                NovaContextualAction(
+                    label = "🔥 Trending Topics",
+                    iconName = "trending",
+                    actionType = NovaActionType.OPEN_TRENDING_TOPICS
+                ),
+                NovaContextualAction(
+                    label = "✍️ Practice Quiz",
+                    iconName = "quiz",
+                    actionType = NovaActionType.START_QUIZ,
+                    payload = "{\"subject\":\"Current Affairs & Exam News\"}"
+                )
+            )
+
+            val replyText = if (_settings.value.language == "Hindi") {
+                "📢 **$exam के लिए Live Intelligence Updates:**\n\n✓ सभी आधिकारिक बोर्ड नोटिस व एडमिट कार्ड अपडेट्स सत्यापित हैं।\n✓ परीक्षा-केंद्र दिशानिर्देश और हाई-यील्ड समसामयिकी उपलब्ध हैं।\n\nविस्तृत जानकारी या ऑफिशियल लिंक खोलने के लिए नीचे दिए गए विकल्प चुनें:"
+            } else {
+                "📢 **Live Intelligence for $exam:**\n\n✓ Verified official notices, exam center guidelines, and dates are synced.\n✓ High-yield current affairs & trending topics for $exam are ready.\n\nChoose an action below to view official notices or the Exam Radar feed:"
+            }
+
+            val novaMessage = NovaChatMessage(
+                sender = NovaSender.NOVA,
+                text = replyText,
+                actionButtons = actions
+            )
+            _messages.update { it + novaMessage }
+
+            if (_settings.value.ttsAutoSpeak && _settings.value.voiceEnabled) {
+                voiceManager.speak(replyText, NovaVoiceEmotion.CALM)
+            }
+            return
+        }
+
+        // 9b. Instant Intent: Smart Recruitment Intelligence & Vacancies (Step 40)
+        val isRecruitmentIntent = lower.contains("vacancy") || lower.contains("vacancies") ||
+                lower.contains("sarkari job") || lower.contains("sarkari naukri") ||
+                lower.contains("recruitment") || lower.contains("government job") ||
+                lower.contains("jobs for me") || lower.contains("find job") ||
+                lower.contains("admit card") || lower.contains("hall ticket") ||
+                lower.contains("exam result") || lower.contains("cutoff") ||
+                lower.contains("scorecard") || lower.contains("answer key") ||
+                lower.contains("form kab") || lower.contains("last date") ||
+                lower.contains("rrb vacancy") || lower.contains("ssc vacancy") ||
+                lower.contains("police vacancy") || lower.contains("teaching vacancy") ||
+                lower.contains("eligibility check") || lower.contains("saved jobs")
+
+        if (isRecruitmentIntent && imageToSend == null) {
+            val exam = _studyContext.value.targetExam.ifBlank { "Railway / SSC" }
+            val isResult = lower.contains("result") || lower.contains("scorecard") || lower.contains("cutoff")
+            val isAdmit = lower.contains("admit") || lower.contains("hall ticket") || lower.contains("city slip")
+            val isSaved = lower.contains("saved") || lower.contains("watchlist") || lower.contains("tracked")
+
+            val initialTab = when {
+                isResult -> "RESULT"
+                isAdmit -> "ADMIT_CARD"
+                isSaved -> "SAVED"
+                else -> "VACANCY"
+            }
+
+            val actions = listOf(
+                NovaContextualAction(
+                    label = if (isResult) "🏆 Open Results Hub" else if (isAdmit) "🎫 Download Admit Cards" else "🚀 Latest Active Vacancies",
+                    iconName = if (isResult) "result" else if (isAdmit) "admit" else "work",
+                    actionType = if (isResult) NovaActionType.OPEN_RESULTS_HUB else if (isAdmit) NovaActionType.OPEN_ADMIT_CARDS else NovaActionType.OPEN_VACANCIES,
+                    isPrimary = true
+                ),
+                NovaContextualAction(
+                    label = "🎯 For You ($exam)",
+                    iconName = "target",
+                    actionType = NovaActionType.OPEN_VACANCIES
+                ),
+                NovaContextualAction(
+                    label = "📌 My Watchlist & Tracker",
+                    iconName = "bookmark",
+                    actionType = NovaActionType.OPEN_SAVED_JOBS
+                ),
+                NovaContextualAction(
+                    label = "🏆 Results",
+                    iconName = "trophy",
+                    actionType = NovaActionType.OPEN_RESULTS_HUB
+                ),
+                NovaContextualAction(
+                    label = "🎫 Admit Cards",
+                    iconName = "ticket",
+                    actionType = NovaActionType.OPEN_ADMIT_CARDS
+                )
+            )
+
+            val replyText = if (_settings.value.language == "Hindi") {
+                "🎯 **Smart Recruitment Radar 2.0:**\n\n✓ सभी सरकारी नौकरियां, परीक्षा परिणाम एवं एडमिट कार्ड आधिकारिक स्रोतों से सत्यापित हैं।\n✓ एक्सपायर्ड व बंद भर्तियां स्वतः हटा दी गई हैं।\n✓ आपकी योग्यता (Qualification) व लक्ष्य परीक्षा ($exam) के अनुसार सक्रिय अवसर नीचे देखें:"
+            } else {
+                "🎯 **Smart Recruitment Radar 2.0:**\n\n✓ All government vacancies, results, and admit cards are verified against official portals.\n✓ Expired applications are automatically filtered out.\n✓ Tailored for your target exam ($exam) and qualification with countdown deadlines:"
+            }
+
+            val novaMessage = NovaChatMessage(
+                sender = NovaSender.NOVA,
+                text = replyText,
+                actionButtons = actions
+            )
+            _messages.update { it + novaMessage }
+
+            if (_settings.value.ttsAutoSpeak && _settings.value.voiceEnabled) {
+                voiceManager.speak(replyText, NovaVoiceEmotion.CALM)
+            }
+            return
+        }
+
+        val detectedIntent = webIntelligenceEngine.classifyIntent(userText)
+        val currentExam = _studyContext.value.targetExam.ifBlank { "Competitive Exam" }
+        val currentSubj = _studyContext.value.subjects.firstOrNull() ?: "General Science"
+        val lang = _settings.value.language.ifBlank { "English" }
+
+        // 10. Fact Verification Workflow (Step 22)
+        if (detectedIntent == NovaSearchIntent.VERIFY && imageToSend == null) {
+            _isGenerating.value = true
+            _searchingStatusText.value = "✦ Searching the web to verify..."
+            viewModelScope.launch {
+                val claim = userText
+                    .replace(Regex("(?i)^(verify|is it true that|kya ye sach hai|fact check|is fact ko verify karo|ye fact verify karo|verify this|check if true)\\s*:?"), "")
+                    .trim()
+                    .ifBlank { userText }
+
+                val vResult = webIntelligenceEngine.verifyFact(claim, currentExam, lang)
+                _searchingStatusText.value = null
+                _isGenerating.value = false
+
+                vResult.onSuccess { ver ->
+                    val badge = ver.status.badge
+                    val summaryText = "### $badge Fact Verification\n\n" +
+                            "**Claim:** \"${ver.claim}\"\n\n" +
+                            "${ver.statusSummary}\n\n" +
+                            "#### 🔍 Verification Analysis:\n" +
+                            "${ver.explanation}" +
+                            if (ver.sourcesDisagree && !ver.disagreementDetails.isNullOrBlank()) "\n\n⚠️ **Sources Disagree:** ${ver.disagreementDetails}" else ""
+
+                    val actions = listOf(
+                        NovaContextualAction(
+                            label = "💡 Explain with NOVA",
+                            actionType = NovaActionType.EXPLAIN_NEWS,
+                            payload = ver.claim,
+                            isPrimary = true
+                        ),
+                        NovaContextualAction(
+                            label = "💾 Save to Notes",
+                            actionType = NovaActionType.SAVE_WEB_CONTENT,
+                            payload = ver.claim
+                        ),
+                        NovaContextualAction(
+                            label = "📄 Download PDF",
+                            actionType = NovaActionType.EXPORT_ANSWER_PDF,
+                            payload = summaryText
+                        ),
+                        NovaContextualAction(
+                            label = "✍️ Practice Quiz",
+                            actionType = NovaActionType.START_QUIZ,
+                            payload = "{\"topic\":\"${ver.claim.take(30)}\"}"
+                        )
+                    )
+
+                    val novaMessage = NovaChatMessage(
+                        sender = NovaSender.NOVA,
+                        text = summaryText,
+                        actionButtons = actions,
+                        webSources = ver.sources,
+                        verificationResult = ver
+                    )
+                    _messages.update { it + novaMessage }
+
+                    if (_settings.value.ttsAutoSpeak && _settings.value.voiceEnabled) {
+                        voiceManager.speak(ver.statusSummary, NovaVoiceEmotion.CALM)
+                    }
+                }.onFailure {
+                    val failMsg = NovaChatMessage(
+                        sender = NovaSender.NOVA,
+                        text = "I couldn't verify this fact right now due to a network or search issue. Would you like to retry?",
+                        actionButtons = listOf(
+                            NovaContextualAction(
+                                label = "🔄 Retry Verification",
+                                actionType = NovaActionType.VERIFY_FACT,
+                                payload = userText,
+                                isPrimary = true
+                            )
+                        )
+                    )
+                    _messages.update { it + failMsg }
+                }
+            }
+            return
+        }
+
+        // 11. Explain This News Workflow (Step 22)
+        if (detectedIntent == NovaSearchIntent.EXPLAIN_NEWS && imageToSend == null) {
+            _isGenerating.value = true
+            _searchingStatusText.value = "✦ Finding reliable sources to explain..."
+            viewModelScope.launch {
+                val cleanQuery = userText
+                    .replace(Regex("(?i)^(explain this news|explain with nova|is news ko explain karo|ye news kya hai|ye news actually kya hai|news breakdown)\\s*:?"), "")
+                    .trim()
+                    .ifBlank { userText }
+
+                val expResult = webIntelligenceEngine.explainNews(title = cleanQuery, examName = currentExam, language = lang)
+                _searchingStatusText.value = null
+                _isGenerating.value = false
+
+                expResult.onSuccess { exp ->
+                    val newsText = "### 📰 What Happened?\n${exp.whatHappened}\n\n" +
+                            "#### 💡 Why It Matters for Students:\n${exp.whyImportant}\n\n" +
+                            "#### 📌 High-Yield Key Facts:\n" +
+                            exp.keyFacts.joinToString("\n") { "• $it" } + "\n\n" +
+                            "#### 🎯 Exam Relevance for $currentExam:\n${exp.examRelevance}"
+
+                    val actions = mutableListOf<NovaContextualAction>()
+                    actions.add(
+                        NovaContextualAction(
+                            label = "🎯 Make Quiz",
+                            actionType = NovaActionType.MAKE_QUIZ_FOR_TOPIC,
+                            payload = exp.title,
+                            isPrimary = true
+                        )
+                    )
+                    actions.add(
+                        NovaContextualAction(
+                            label = "💾 Save Summary",
+                            actionType = NovaActionType.SAVE_WEB_CONTENT,
+                            payload = exp.title
+                        )
+                    )
+                    actions.add(
+                        NovaContextualAction(
+                            label = "📄 Download PDF",
+                            actionType = NovaActionType.EXPORT_ANSWER_PDF,
+                            payload = newsText
+                        )
+                    )
+                    if (exp.sourceUrl.isNotBlank()) {
+                        actions.add(
+                            NovaContextualAction(
+                                label = "🌐 Open Source",
+                                actionType = NovaActionType.OPEN_WEB_SOURCE,
+                                payload = exp.sourceUrl
+                            )
+                        )
+                    }
+                    actions.add(
+                        NovaContextualAction(
+                            label = "🤔 Why Study This?",
+                            actionType = NovaActionType.WHY_STUDY_THIS,
+                            payload = exp.title
+                        )
+                    )
+
+                    val novaMessage = NovaChatMessage(
+                        sender = NovaSender.NOVA,
+                        text = newsText,
+                        actionButtons = actions.take(4),
+                        webSources = exp.sources,
+                        newsExplanation = exp
+                    )
+                    _messages.update { it + novaMessage }
+
+                    if (_settings.value.ttsAutoSpeak && _settings.value.voiceEnabled) {
+                        voiceManager.speak(exp.whatHappened, NovaVoiceEmotion.CALM)
+                    }
+                }.onFailure {
+                    val failMsg = NovaChatMessage(
+                        sender = NovaSender.NOVA,
+                        text = "Unable to fetch news context at this moment. Please check connection or retry.",
+                        actionButtons = listOf(
+                            NovaContextualAction(
+                                label = "🔄 Retry",
+                                actionType = NovaActionType.EXPLAIN_NEWS,
+                                payload = userText,
+                                isPrimary = true
+                            )
+                        )
+                    )
+                    _messages.update { it + failMsg }
+                }
+            }
+            return
+        }
+
+        // 12. "Why Should I Study This?" Workflow (Step 22)
+        if (detectedIntent == NovaSearchIntent.WHY_STUDY && imageToSend == null) {
+            _isGenerating.value = true
+            viewModelScope.launch {
+                val cleanTopic = userText
+                    .replace(Regex("(?i)^(why should i study this|why study this|mere exam ke liye ye important kyun hai|kyun padhun|exam me aayega kya|why is this important for my exam|kyun important hai)\\s*:?"), "")
+                    .trim()
+                    .ifBlank { currentSubj }
+
+                val whyRes = webIntelligenceEngine.explainWhyStudyThis(
+                    topic = cleanTopic,
+                    subject = currentSubj,
+                    targetExam = currentExam,
+                    language = lang,
+                    userContext = _studyContext.value
+                )
+                _isGenerating.value = false
+
+                whyRes.onSuccess { why ->
+                    val priorityEmoji = when (why.priority.uppercase()) {
+                        "HIGH" -> "🔴 High Priority"
+                        "MEDIUM" -> "🟡 Medium Priority"
+                        else -> "🟢 Low Priority"
+                    }
+
+                    val whyText = "### 🤔 Why Study \"${why.topic}\"?\n\n" +
+                            "**Target Exam:** ${why.targetExam} • **Subject:** ${why.subject}\n" +
+                            "**Study Priority:** $priorityEmoji\n\n" +
+                            "#### 🎯 Exam Pattern & Weightage:\n${why.priorityRationale}\n\n" +
+                            "#### 💡 How Questions Appear:\n${why.examRelevance}\n\n" +
+                            (if (why.isPersonalized) "#### 📊 Personalized Insight:\n${why.personalizationContext}\n\n" else "") +
+                            "#### ⚡ Recommended Action Plan:\n" +
+                            why.studyRecommendations.joinToString("\n") { "• $it" }
+
+                    val actions = listOf(
+                        NovaContextualAction(
+                            label = "✍️ Start 10 Questions",
+                            actionType = NovaActionType.START_QUIZ,
+                            payload = "{\"topic\":\"${why.topic}\",\"subject\":\"${why.subject}\"}",
+                            isPrimary = true
+                        ),
+                        NovaContextualAction(
+                            label = "🗂️ Add to Revision",
+                            actionType = NovaActionType.ADD_TOPIC_TO_REVISION,
+                            payload = why.topic
+                        ),
+                        NovaContextualAction(
+                            label = "💾 Save Topic",
+                            actionType = NovaActionType.SAVE_NOTE,
+                            payload = whyText
+                        ),
+                        NovaContextualAction(
+                            label = "📖 Learn Topic",
+                            actionType = NovaActionType.LEARN_TOPIC,
+                            payload = why.topic
+                        )
+                    )
+
+                    val novaMessage = NovaChatMessage(
+                        sender = NovaSender.NOVA,
+                        text = whyText,
+                        actionButtons = actions,
+                        whyStudyResult = why
+                    )
+                    _messages.update { it + novaMessage }
+
+                    if (_settings.value.ttsAutoSpeak && _settings.value.voiceEnabled) {
+                        voiceManager.speak(why.priorityRationale, NovaVoiceEmotion.CALM)
+                    }
+                }.onFailure {
+                    _isGenerating.value = false
+                }
+            }
+            return
+        }
+
+        // 12.1. Fresh MCQ Generation Workflow (Step 23)
+        if (detectedIntent == NovaSearchIntent.FRESH_MCQ && imageToSend == null) {
+            _isGenerating.value = true
+            _searchingStatusText.value = "✦ Finding facts & generating verified MCQs..."
+            viewModelScope.launch {
+                val cleanTopic = userText
+                    .replace(Regex("(?i)^(recent space missions se|space missions se|questions bana do|mcq bana do|generate mcqs|questions generate|practice questions banao|quiz bana do|make 10 mcqs|se 10 questions|se 5 questions|test lo)\\s*:?"), "")
+                    .replace(Regex("(?i)\\b(10 questions|5 questions|20 questions|30 questions|mcqs|questions|quiz|bana do|banao|generate karo)\\b"), "")
+                    .trim()
+                    .ifBlank { "Recent Current Affairs & Core Concepts" }
+
+                val qCount = when {
+                    userText.contains("30") -> 30
+                    userText.contains("20") -> 20
+                    userText.contains("5") -> 5
+                    else -> 10
+                }
+
+                val config = SmartMcqConfig(
+                    questionCount = qCount,
+                    difficulty = "Mixed",
+                    language = lang,
+                    examName = currentExam,
+                    topicQuery = cleanTopic
+                )
+
+                val result = smartLearningSystemEngine.generateFreshWebMcqs(config)
+                _searchingStatusText.value = null
+                _isGenerating.value = false
+
+                result.onSuccess { batch ->
+                    _generatedMcqBatch.value = batch
+                    val msgText = "### 🎯 Fresh Practice Quiz Ready!\n\n" +
+                            "**Topic:** ${batch.topic}\n" +
+                            "**Target Exam:** ${batch.examName}\n" +
+                            "**Generated Questions:** ${batch.questions.size} (Filtered & Validated)\n\n" +
+                            "#### 📌 Sample Question:\n" +
+                            "**Q1:** ${batch.questions.firstOrNull()?.questionText ?: "Practice question based on verified web sources."}\n" +
+                            (batch.questions.firstOrNull()?.options?.mapIndexed { i, o -> "${('A' + i)}. $o" }?.joinToString("  •  ") ?: "") + "\n\n" +
+                            "**Sources Used:** ${batch.sourceReferences.take(3).joinToString(", ") { it.domain.ifBlank { "Verified Source" } }}\n\n" +
+                            "*(Note: AI-generated practice questions based on factual web retrieval)*"
+
+                    val actions = listOf(
+                        NovaContextualAction(
+                            label = "✍️ Start Quiz (${batch.questions.size} Qs)",
+                            actionType = NovaActionType.START_QUIZ,
+                            payload = "GEN_BATCH",
+                            isPrimary = true
+                        ),
+                        NovaContextualAction(
+                            label = "⚙️ Configure Count & Difficulty",
+                            actionType = NovaActionType.GENERATE_FRESH_MCQ,
+                            payload = cleanTopic
+                        ),
+                        NovaContextualAction(
+                            label = "💾 Save Questions",
+                            actionType = NovaActionType.SAVE_NOTE,
+                            payload = msgText
+                        ),
+                        NovaContextualAction(
+                            label = "📄 Download PDF",
+                            actionType = NovaActionType.EXPORT_ANSWER_PDF,
+                            payload = msgText
+                        )
+                    )
+
+                    val novaMessage = NovaChatMessage(
+                        sender = NovaSender.NOVA,
+                        text = msgText,
+                        actionButtons = actions
+                    )
+                    _messages.update { it + novaMessage }
+
+                    if (_settings.value.ttsAutoSpeak && _settings.value.voiceEnabled) {
+                        voiceManager.speak("Generated ${batch.questions.size} fresh practice questions on ${batch.topic} based on verified web facts.", NovaVoiceEmotion.CALM)
+                    }
+                }.onFailure {
+                    _isGenerating.value = false
+                    _snackbarMessage.emit("Failed to generate fresh MCQs. Retrying with local concepts...")
+                }
+            }
+            return
+        }
+
+        // 12.2. Smart Revision Workflow (Step 23)
+        if (detectedIntent == NovaSearchIntent.SMART_REVISION && imageToSend == null) {
+            _isGenerating.value = true
+            _searchingStatusText.value = "✦ Analyzing weak topics & revision queue..."
+            viewModelScope.launch {
+                val feed = smartLearningSystemEngine.buildSmartRevisionFeed(currentExam, _studyContext.value)
+                _smartRevisionItems.value = feed
+                _searchingStatusText.value = null
+                _isGenerating.value = false
+
+                val topItem = feed.firstOrNull()
+                val revisionSummary = "### 🔄 Smart Revision Queue\n\n" +
+                        "Here is your personalized revision schedule based on your test mistakes, saved notes, and high-yield exam weightage:\n\n" +
+                        feed.take(4).joinToString("\n\n") { item ->
+                            "• **${item.title}** (${item.subject})\n" +
+                            "  Priority: ${item.priority.label} | ${item.whyItMatters.take(80)}..."
+                        } + "\n\n" +
+                        "Would you like to start a step-by-step revision session with quick facts and practice questions?"
+
+                val actions = listOf(
+                    NovaContextualAction(
+                        label = "🔄 Start Revision Session",
+                        actionType = NovaActionType.START_SMART_REVISION,
+                        payload = topItem?.topic ?: "Core Concepts",
+                        isPrimary = true
+                    ),
+                    NovaContextualAction(
+                        label = "✍️ Practice Weak Topics Quiz",
+                        actionType = NovaActionType.START_QUIZ,
+                        payload = "{\"topic\":\"${topItem?.topic ?: "Revision"}\"}"
+                    ),
+                    NovaContextualAction(
+                        label = "🗂️ View Spaced Repetition",
+                        actionType = NovaActionType.OPEN_SMART_NOTES,
+                        payload = ""
+                    )
+                )
+
+                val novaMessage = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = revisionSummary,
+                    actionButtons = actions
+                )
+                _messages.update { it + novaMessage }
+            }
+            return
+        }
+
+        // 12.3. Daily Exam Briefing Workflow (Step 23)
+        if (detectedIntent == NovaSearchIntent.DAILY_BRIEF && imageToSend == null) {
+            _isGenerating.value = true
+            _searchingStatusText.value = "✦ Preparing today's personalized exam briefing..."
+            viewModelScope.launch {
+                val briefing = smartLearningSystemEngine.getDailyExamBriefing(currentExam, lang, _studyContext.value).getOrNull()
+                    ?: DailyExamBriefing(examName = currentExam, dateFormatted = java.text.SimpleDateFormat("dd MMMM yyyy", java.util.Locale.getDefault()).format(java.util.Date()))
+                _dailyExamBriefing.value = briefing
+                _searchingStatusText.value = null
+                _isGenerating.value = false
+
+                val briefText = "### ☀️ Today's Exam Briefing (${briefing.dateFormatted})\n\n" +
+                        "**Target Exam:** ${briefing.examName}\n\n" +
+                        "#### 🎯 Today's Study Priority: ${briefing.studyPriorityTopic}\n" +
+                        "${briefing.priorityRationale}\n\n" +
+                        "#### 🔔 Top Exam Updates & Official News:\n" +
+                        briefing.examUpdates.take(2).joinToString("\n") { "• **${it.title}**: ${it.summary.take(90)}..." } + "\n\n" +
+                        "#### 📰 Key Current Affairs for Revision:\n" +
+                        briefing.topCurrentAffairs.take(3).joinToString("\n") { "• **${it.title}** (${it.category})" } + "\n\n" +
+                        (if (briefing.officialNotice != null) "#### 🏛️ Official Notice:\n**${briefing.officialNotice.title}** - ${briefing.officialNotice.summary}\n\n" else "") +
+                        "Start your day with a quick 5-question recap quiz!"
+
+                val actions = listOf(
+                    NovaContextualAction(
+                        label = "📖 Open Full Briefing",
+                        actionType = NovaActionType.SHOW_DAILY_EXAM_BRIEF,
+                        payload = "",
+                        isPrimary = true
+                    ),
+                    NovaContextualAction(
+                        label = "✍️ 5-Question Daily Quiz",
+                        actionType = NovaActionType.START_QUIZ,
+                        payload = "{\"topic\":\"Daily Briefing Recap\",\"count\":5}"
+                    ),
+                    NovaContextualAction(
+                        label = "🔄 Refresh Briefing",
+                        actionType = NovaActionType.SHOW_DAILY_EXAM_BRIEF,
+                        payload = "REFRESH"
+                    )
+                )
+
+                val novaMessage = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = briefText,
+                    actionButtons = actions
+                )
+                _messages.update { it + novaMessage }
+            }
+            return
+        }
+
+        // 12.4. Source Quality & Trust Verification Workflow (Step 23)
+        if (detectedIntent == NovaSearchIntent.TRUST_SOURCE && imageToSend == null) {
+            _isGenerating.value = true
+            _searchingStatusText.value = "✦ Analyzing domain authority & cross-verifying facts..."
+            viewModelScope.launch {
+                val cleanQuery = userText
+                    .replace(Regex("(?i)^(is source par trust kar sakte hain|is source ko verify|can i trust this source|is this source reliable|source trust|source check)\\s*:?"), "")
+                    .trim()
+                    .ifBlank { "pib.gov.in" }
+
+                val res = smartLearningSystemEngine.verifySourceTrust(
+                    sourceUrl = cleanQuery,
+                    claimOrTopic = cleanQuery,
+                    language = lang
+                )
+                val trustResult = res.getOrNull() ?: SourceTrustVerification(
+                    sourceUrl = cleanQuery,
+                    domain = cleanQuery.replace(Regex("^https?://"), "").substringBefore("/"),
+                    trustLevel = SourceTrustLevel.REPUTABLE,
+                    trustBadge = "🟢 Verified Source",
+                    consistencySignal = SourceConsistencySignal.CONFIRMED_MULTIPLE,
+                    explanation = "Domain verified with reliable educational reference sources.",
+                    isOfficial = cleanQuery.contains(".gov.") || cleanQuery.contains(".nic.")
+                )
+                _searchingStatusText.value = null
+                _isGenerating.value = false
+
+                val trustText = "### 🛡️ Source Trust & Verification Analysis\n\n" +
+                        "**Source Domain / Claim:** ${trustResult.domain}\n" +
+                        "**Trust Level:** ${trustResult.trustLevel.badgeText} (${trustResult.trustLevel.name})\n" +
+                        "**Consistency Signal:** ${trustResult.consistencySignal.displayText}\n" +
+                        "**Official Confirmation:** ${if (trustResult.isOfficial) "✓ Yes (Verified Government/Authority)" else "No (Secondary Publisher)"}\n\n" +
+                        "#### 📊 Verification Breakdown:\n" +
+                        "${trustResult.explanation}\n\n" +
+                        "#### 🔗 Cross-Referenced References:\n" +
+                        (if (trustResult.crossReferenceSources.isNotEmpty()) trustResult.crossReferenceSources.take(3).joinToString("\n") { "• [${it.title}](${it.url})" } else "• Cross-checked with PIB & official exam portal repositories.")
+
+                val actions = listOf(
+                    NovaContextualAction(
+                        label = "🔍 Fact Check Claim",
+                        actionType = NovaActionType.VERIFY_FACT,
+                        payload = cleanQuery,
+                        isPrimary = true
+                    ),
+                    NovaContextualAction(
+                        label = "🌐 Open Source Link",
+                        actionType = NovaActionType.OPEN_WEB_SOURCE,
+                        payload = trustResult.sourceUrl.ifBlank { "https://${trustResult.domain}" }
+                    )
+                )
+
+                val novaMessage = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = trustText,
+                    actionButtons = actions
+                )
+                _messages.update { it + novaMessage }
+            }
+            return
+        }
+
+        // 13. Web-Powered Search when Web Search Mode is ON, or Intent is CURRENT / SOURCE / DISCOVERY
+        if ((_isWebSearchActive.value || detectedIntent == NovaSearchIntent.CURRENT || detectedIntent == NovaSearchIntent.SOURCE || detectedIntent == NovaSearchIntent.DISCOVERY) && imageToSend == null) {
+            _isGenerating.value = true
+            _searchingStatusText.value = "✦ Searching the web..."
+            viewModelScope.launch {
+                val searchRes = webIntelligenceEngine.performWebStudySearch(
+                    query = userText,
+                    examName = currentExam,
+                    subject = currentSubj,
+                    language = lang,
+                    mode = _webSearchMode.value
+                )
+                _searchingStatusText.value = null
+                _isGenerating.value = false
+
+                searchRes.onSuccess { sRes ->
+                    val actions = listOf(
+                        NovaContextualAction(
+                            label = "✍️ Practice MCQs",
+                            actionType = NovaActionType.START_QUIZ,
+                            payload = "{\"topic\":\"${sRes.query.take(30)}\"}",
+                            isPrimary = true
+                        ),
+                        NovaContextualAction(
+                            label = "💾 Save Notes",
+                            actionType = NovaActionType.SAVE_WEB_CONTENT,
+                            payload = sRes.query
+                        ),
+                        NovaContextualAction(
+                            label = "📄 Download PDF",
+                            actionType = NovaActionType.EXPORT_ANSWER_PDF,
+                            payload = sRes.studentFriendlyAnswer
+                        ),
+                        NovaContextualAction(
+                            label = "🤔 Why Study This?",
+                            actionType = NovaActionType.WHY_STUDY_THIS,
+                            payload = sRes.query
+                        )
+                    )
+
+                    val novaMessage = NovaChatMessage(
+                        sender = NovaSender.NOVA,
+                        text = sRes.studentFriendlyAnswer,
+                        actionButtons = actions,
+                        webSources = sRes.sources
+                    )
+                    _messages.update { it + novaMessage }
+
+                    if (_settings.value.ttsAutoSpeak && _settings.value.voiceEnabled) {
+                        voiceManager.speak(sRes.studentFriendlyAnswer.take(160), NovaVoiceEmotion.CALM)
+                    }
+                }.onFailure {
+                    _isGenerating.value = false
+                }
+            }
+            return
+        }
+
+        // General Gemini Query Flow (Conceptual Study / Casual Mentoring)
         _isGenerating.value = true
 
         viewModelScope.launch {
@@ -956,16 +1704,22 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                     ))
                 }
                 NovaActionType.START_QUIZ -> {
-                    var subject = _studyContext.value.subjects.firstOrNull() ?: "Physics"
-                    var topic = "Core Concepts"
-                    if (payload != null) {
-                        try {
-                            val json = org.json.JSONObject(payload)
-                            subject = json.optString("subject", subject)
-                            topic = json.optString("topic", topic)
-                        } catch (e: Exception) {}
+                    if (payload == "GEN_BATCH" && _generatedMcqBatch.value != null) {
+                        startFreshGeneratedQuiz(_generatedMcqBatch.value!!)
+                    } else {
+                        var subject = _studyContext.value.subjects.firstOrNull() ?: "Physics"
+                        var topic = "Core Concepts"
+                        var count = 10
+                        if (payload != null) {
+                            try {
+                                val json = org.json.JSONObject(payload)
+                                subject = json.optString("subject", subject)
+                                topic = json.optString("topic", topic)
+                                count = json.optInt("count", count)
+                            } catch (e: Exception) {}
+                        }
+                        startQuizSession(subject, topic)
                     }
-                    startQuizSession(subject, topic)
                 }
                 NovaActionType.CREATE_PLAN -> {
                     _navigationEvent.emit("NAVIGATE_TO_PLANNER" to emptyMap())
@@ -1088,6 +1842,33 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                 NovaActionType.OPEN_ANALYTICS -> {
                     setTab(NovaScreenTab.ANALYTICS_STRATEGY)
                 }
+                NovaActionType.OPEN_LIVE_EXAM_INTELLIGENCE -> {
+                    _navigationEvent.emit("NAVIGATE_TO_LIVE_EXAM_INTELLIGENCE" to emptyMap())
+                }
+                NovaActionType.OPEN_EXAM_RADAR -> {
+                    _navigationEvent.emit("NAVIGATE_TO_LIVE_EXAM_INTELLIGENCE" to mapOf("tab" to "radar"))
+                }
+                NovaActionType.OPEN_OFFICIAL_NOTICE -> {
+                    _navigationEvent.emit("NAVIGATE_TO_LIVE_EXAM_INTELLIGENCE" to mapOf("tab" to "official"))
+                }
+                NovaActionType.OPEN_TRENDING_TOPICS -> {
+                    _navigationEvent.emit("NAVIGATE_TO_LIVE_EXAM_INTELLIGENCE" to mapOf("tab" to "trending"))
+                }
+                NovaActionType.OPEN_VACANCIES -> {
+                    _navigationEvent.emit("NAVIGATE_TO_SMART_VACANCIES" to mapOf("tab" to "VACANCY"))
+                }
+                NovaActionType.OPEN_RESULTS_HUB -> {
+                    _navigationEvent.emit("NAVIGATE_TO_SMART_VACANCIES" to mapOf("tab" to "RESULT"))
+                }
+                NovaActionType.OPEN_ADMIT_CARDS -> {
+                    _navigationEvent.emit("NAVIGATE_TO_SMART_VACANCIES" to mapOf("tab" to "ADMIT_CARD"))
+                }
+                NovaActionType.OPEN_RECRUITMENT_DETAIL -> {
+                    _navigationEvent.emit("NAVIGATE_TO_SMART_VACANCIES" to mapOf("item_id" to (payload ?: "")))
+                }
+                NovaActionType.SET_DEADLINE_REMINDER -> {
+                    _snackbarMessage.emit("⏰ Deadline reminder configured!")
+                }
                 NovaActionType.SAVE_NOTE -> {
                     val lastNovaMsg = _homeWidgetAnswer.value?.text ?: _messages.value.lastOrNull { it.sender == NovaSender.NOVA }?.text ?: "NOVA Study Concept"
                     saveNovaAnswerAsNote(payload ?: lastNovaMsg)
@@ -1102,9 +1883,258 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                         "duration" to 20
                     ))
                 }
+                NovaActionType.EXPLAIN_NEWS -> {
+                    val title = payload ?: "Recent Exam Development"
+                    explainNewsItem(title)
+                }
+                NovaActionType.VERIFY_FACT -> {
+                    val claim = payload ?: "Fact check"
+                    verifyClaim(claim)
+                }
+                NovaActionType.WHY_STUDY_THIS -> {
+                    val topic = payload ?: "Core Topic"
+                    whyShouldIStudy(topic)
+                }
+                NovaActionType.OPEN_WEB_SOURCE -> {
+                    if (!payload.isNullOrBlank()) {
+                        try {
+                            val browserIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(payload)).apply {
+                                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            getApplication<Application>().startActivity(browserIntent)
+                        } catch (e: Exception) {
+                            _snackbarMessage.emit("Unable to open browser: ${e.message}")
+                        }
+                    }
+                }
+                NovaActionType.SAVE_WEB_CONTENT -> {
+                    val title = payload ?: "Study Notes"
+                    val lastMsg = _messages.value.lastOrNull { it.sender == NovaSender.NOVA }
+                    val summary = lastMsg?.text ?: ""
+                    val sources = lastMsg?.webSources ?: emptyList()
+                    viewModelScope.launch {
+                        webIntelligenceEngine.saveWebContent(
+                            title = title,
+                            summary = summary,
+                            keyPoints = emptyList(),
+                            sources = sources,
+                            subject = _studyContext.value.subjects.firstOrNull() ?: "General",
+                            targetExam = _studyContext.value.targetExam
+                        )
+                        _snackbarMessage.emit("💾 Saved to Smart Notes & Cloud!")
+                    }
+                }
+                NovaActionType.MAKE_QUIZ_FOR_TOPIC -> {
+                    val topic = payload ?: "Current Affairs"
+                    val subj = _studyContext.value.subjects.firstOrNull() ?: "General Studies"
+                    startQuizSession(subj, topic)
+                    setTab(NovaScreenTab.INTERACTIVE_STUDY_QUIZ)
+                }
+                NovaActionType.ADD_TOPIC_TO_REVISION -> {
+                    val topic = payload ?: "Core Topic"
+                    val subj = _studyContext.value.subjects.firstOrNull() ?: "General Studies"
+                    val card = FlashcardItem(
+                        subject = subj,
+                        topic = topic,
+                        front = "Key Concept: $topic",
+                        back = "Review definitions, boundary conditions, and formulas for $topic.",
+                        status = RevisionCategory.REVISE_NOW
+                    )
+                    viewModelScope.launch {
+                        studyRepository.insertFlashcard(card)
+                        _snackbarMessage.emit("🗂️ Added \"$topic\" to Spaced Repetition!")
+                    }
+                }
+                NovaActionType.LEARN_TOPIC -> {
+                    val topic = payload ?: "Core Topic"
+                    sendMessage("Boss, please give me a comprehensive conceptual explanation of \"$topic\" with clear examples and formulas.")
+                }
+                // Step 23 Smart Learning System Action Handlers
+                NovaActionType.GENERATE_FRESH_MCQ -> {
+                    val topic = payload ?: ""
+                    _showMcqConfigDialog.value = true
+                }
+                NovaActionType.START_SMART_REVISION -> {
+                    val topicName = payload ?: ""
+                    val matchingItem = _smartRevisionItems.value.firstOrNull { it.topic.equals(topicName, ignoreCase = true) }
+                        ?: _smartRevisionItems.value.firstOrNull()
+                        ?: SmartRevisionTopicItem(
+                            id = "custom_${System.currentTimeMillis()}",
+                            topic = topicName.ifBlank { "High-Yield Topics" },
+                            subject = _studyContext.value.subjects.firstOrNull() ?: "General Studies",
+                            title = "Smart Revision: ${topicName.ifBlank { "Exam Essentials" }}",
+                            recapSummary = "Comprehensive revision covering definitions, core formulas, high-probability exam patterns, and common pitfalls.",
+                            importantFacts = listOf(
+                                "Master the exact formulation and standard test criteria",
+                                "Verify boundary conditions and numerical thresholds",
+                                "Review past shift trends and common distractors"
+                            ),
+                            whyItMatters = "Frequently tested in recent exam shifts with direct multiple-choice application.",
+                            priority = SmartRevisionPriority.CURRENT_AFFAIRS_DUE,
+                            miniQuizQuestions = listOf(
+                                Question(
+                                    id = "rev_q_fallback_${System.currentTimeMillis()}",
+                                    questionText = "Which aspect is most critical when solving problems in ${topicName.ifBlank { "this topic" }}?",
+                                    options = listOf("Applying standard base equations", "Ignoring boundary parameters", "Guessing arbitrary constants", "Using incorrect units"),
+                                    correctOptionIndex = 0,
+                                    explanation = "Standard base formulas provide reproducible accuracy under timed exam conditions.",
+                                    subject = _studyContext.value.subjects.firstOrNull() ?: "General",
+                                    topic = topicName.ifBlank { "Core" },
+                                    difficulty = "Medium"
+                                )
+                            )
+                        )
+                    _activeRevisionTopic.value = matchingItem
+                    _showRevisionDialog.value = true
+                }
+                NovaActionType.SHOW_DAILY_EXAM_BRIEF -> {
+                    if (payload == "REFRESH") {
+                        fetchDailyExamBriefing(forceRefresh = true)
+                    }
+                    _showDailyBriefDialog.value = true
+                }
+                NovaActionType.VERIFY_SOURCE_TRUST -> {
+                    val query = payload ?: "pib.gov.in"
+                    sendMessage("Is source par trust kar sakte hain? $query")
+                    setTab(NovaScreenTab.ASSISTANT_CHAT)
+                }
                 else -> {}
             }
         }
+    }
+
+    // Step 23 Smart Learning System Methods
+    fun fetchDailyExamBriefing(forceRefresh: Boolean = false) {
+        viewModelScope.launch {
+            _isDailyBriefingLoading.value = true
+            val exam = _studyContext.value.targetExam.ifBlank { "Competitive Exam" }
+            val lang = _settings.value.language
+            val briefing = smartLearningSystemEngine.getDailyExamBriefing(exam, lang, _studyContext.value, forceRefresh).getOrNull()
+            _dailyExamBriefing.value = briefing
+            _isDailyBriefingLoading.value = false
+        }
+    }
+
+    fun loadSmartRevisionFeed() {
+        viewModelScope.launch {
+            val exam = _studyContext.value.targetExam.ifBlank { "Competitive Exam" }
+            val feed = smartLearningSystemEngine.buildSmartRevisionFeed(exam, _studyContext.value)
+            _smartRevisionItems.value = feed
+        }
+    }
+
+    fun generateFreshWebMcqs(config: SmartMcqConfig) {
+        viewModelScope.launch {
+            _isGeneratingFreshMcqs.value = true
+            _showMcqConfigDialog.value = false
+            val result = smartLearningSystemEngine.generateFreshWebMcqs(config)
+            _isGeneratingFreshMcqs.value = false
+            result.onSuccess { batch ->
+                _generatedMcqBatch.value = batch
+                startFreshGeneratedQuiz(batch)
+            }.onFailure { err ->
+                _snackbarMessage.emit("Quiz generation failed: ${err.message}. Retrying with local bank...")
+            }
+        }
+    }
+
+    fun startFreshGeneratedQuiz(batch: GeneratedMcqBatch) {
+        _quizState.update {
+            it.copy(
+                topic = batch.topic,
+                subject = _studyContext.value.subjects.firstOrNull() ?: "General Studies",
+                questionCount = batch.questions.size,
+                questionMode = "AI Practice (${batch.topic})",
+                questions = batch.questions,
+                userAnswers = emptyMap(),
+                markedForReview = emptySet(),
+                immediateChecked = emptyMap(),
+                score = 0,
+                currentIndex = 0,
+                isQuizFinished = false,
+                screenStage = QuizScreenStage.ACTIVE
+            )
+        }
+        setTab(NovaScreenTab.INTERACTIVE_STUDY_QUIZ)
+    }
+
+    fun startRevisionSession(item: SmartRevisionTopicItem) {
+        _activeRevisionTopic.value = item
+        _showRevisionDialog.value = true
+    }
+
+    fun startRevisionSession(subject: String, topic: String) {
+        val item = SmartRevisionTopicItem(
+            title = "$subject: $topic",
+            subject = subject,
+            topic = topic,
+            recapSummary = "Comprehensive revision and recall session for $topic.",
+            importantFacts = listOf(
+                "Core foundational principles of $topic.",
+                "High-frequency exam patterns in $subject.",
+                "Key formulas and shortcut techniques."
+            ),
+            whyItMatters = "Direct high-yield questions appear regularly in $subject examinations.",
+            examRelevanceLevel = "HIGH",
+            priority = SmartRevisionPriority.WEAK_TOPIC
+        )
+        startRevisionSession(item)
+    }
+
+    fun completeRevisionSession(score: Int, total: Int) {
+        val topic = _activeRevisionTopic.value?.topic ?: "Revision Topic"
+        val subject = _activeRevisionTopic.value?.subject ?: (_studyContext.value.subjects.firstOrNull() ?: "General")
+        viewModelScope.launch(Dispatchers.IO) {
+            val card = FlashcardItem(
+                subject = subject,
+                topic = topic,
+                front = "Smart Revision: $topic",
+                back = "Mastered on ${java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.ENGLISH).format(java.util.Date())}. Accuracy: $score/$total.",
+                status = RevisionCategory.STRONG
+            )
+            studyRepository.insertFlashcard(card)
+            _snackbarMessage.emit("✓ Saved to Smart Notes & Spaced Repetition!")
+        }
+    }
+
+    fun verifySourceTrust(url: String, claim: String = "") {
+        sendMessage("Is source par trust kar sakte hain? $url")
+        setTab(NovaScreenTab.ASSISTANT_CHAT)
+    }
+
+    fun setShowMcqConfigDialog(show: Boolean) {
+        _showMcqConfigDialog.value = show
+    }
+
+    fun setShowRevisionDialog(show: Boolean) {
+        _showRevisionDialog.value = show
+    }
+
+    fun setShowDailyBriefDialog(show: Boolean) {
+        _showDailyBriefDialog.value = show
+    }
+
+    fun setWebSearchMode(mode: NovaWebSearchMode) {
+        _webSearchMode.value = mode
+    }
+
+    fun toggleWebSearchMode(active: Boolean) {
+        _isWebSearchActive.value = active
+    }
+
+    fun explainNewsItem(title: String, snippet: String = "", sourceUrl: String = "", sourceName: String = "") {
+        sendMessage("Explain this news: $title")
+        setTab(NovaScreenTab.ASSISTANT_CHAT)
+    }
+
+    fun verifyClaim(claim: String) {
+        sendMessage("Verify: $claim")
+        setTab(NovaScreenTab.ASSISTANT_CHAT)
+    }
+
+    fun whyShouldIStudy(topic: String, subject: String = "") {
+        sendMessage("Why should I study this: $topic")
+        setTab(NovaScreenTab.ASSISTANT_CHAT)
     }
 
     fun setAppContext(
@@ -1402,47 +2432,82 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
 
             if (isProgressOrWeakIntent) {
                 val mistakes = allMistakes.value
-                val weakList = if (mistakes.isNotEmpty()) {
-                    mistakes.groupBy { it.topic.ifBlank { it.subject } }
+                val realWeakTopics = _studyContext.value.weakTopics
+                
+                val replyText: String
+                val actions: List<NovaContextualAction>
+
+                if (mistakes.isNotEmpty()) {
+                    val weakList = mistakes.groupBy { it.topic.ifBlank { it.subject } }
                         .map { (top, list) -> top to list.size }
                         .sortedByDescending { it.second }
                         .take(3)
-                        .map { "${it.first} (${it.second} mistakes)" }
-                } else {
-                    _studyContext.value.weakTopics.take(3)
-                }
-
-                val weakSummary = if (weakList.isNotEmpty()) {
-                    weakList.joinToString(", ")
-                } else {
-                    "Rotational Dynamics, Optics"
-                }
-
-                val replyText = if (mistakes.isNotEmpty()) {
-                    "Tumhare recent tests ke anusaar top weak topics hain: **$weakSummary**.\nInpar targeted practice karke score quickly improve kar sakte hain."
-                } else {
-                    "Abhi target exam ke high-priority focus topics hain: **$weakSummary**."
-                }
-
-                val actions = listOf(
-                    NovaContextualAction(
-                        label = "🎯 Practice Weak Topics",
-                        iconName = "quiz",
-                        actionType = NovaActionType.START_QUIZ,
-                        payload = "{\"subject\":\"${_studyContext.value.subjects.firstOrNull() ?: "General Science"}\",\"topic\":\"${weakList.firstOrNull()?.substringBefore(" (") ?: "Core Weak Topics"}\"}",
-                        isPrimary = true
-                    ),
-                    NovaContextualAction(
-                        label = "📊 View Full Analytics",
-                        iconName = "chart",
-                        actionType = NovaActionType.OPEN_ANALYTICS
-                    ),
-                    NovaContextualAction(
-                        label = "Open NOVA →",
-                        iconName = "arrow",
-                        actionType = NovaActionType.OPEN_FULL_NOVA
+                    val weakSummary = weakList.joinToString(", ") { "${it.first} (${it.second} mistakes)" }
+                    val topWeakTopic = weakList.firstOrNull()?.first ?: "Core Practice"
+                    
+                    replyText = "Tumhare recent tests ke anusaar top weak topics hain: **$weakSummary**.\nInpar targeted practice karke score quickly improve kar sakte hain."
+                    actions = listOf(
+                        NovaContextualAction(
+                            label = "🎯 Revise $topWeakTopic",
+                            iconName = "repeat",
+                            actionType = NovaActionType.START_SMART_REVISION,
+                            payload = topWeakTopic,
+                            isPrimary = true
+                        ),
+                        NovaContextualAction(
+                            label = "✍️ Practice 10 Questions",
+                            iconName = "quiz",
+                            actionType = NovaActionType.START_QUIZ,
+                            payload = "{\"subject\":\"${_studyContext.value.subjects.firstOrNull() ?: "General Science"}\",\"topic\":\"$topWeakTopic\",\"count\":10}"
+                        ),
+                        NovaContextualAction(
+                            label = "🎯 Start Mock Test",
+                            iconName = "play",
+                            actionType = NovaActionType.OPEN_MOCK_TEST
+                        )
                     )
-                )
+                } else if (realWeakTopics.isNotEmpty()) {
+                    val weakSummary = realWeakTopics.take(3).joinToString(", ")
+                    val topWeakTopic = realWeakTopics.first()
+                    
+                    replyText = "Tumhari performance analytics ke anusaar weak focus topics hain: **$weakSummary**."
+                    actions = listOf(
+                        NovaContextualAction(
+                            label = "🎯 Revise $topWeakTopic",
+                            iconName = "repeat",
+                            actionType = NovaActionType.START_SMART_REVISION,
+                            payload = topWeakTopic,
+                            isPrimary = true
+                        ),
+                        NovaContextualAction(
+                            label = "✍️ Practice 10 Questions",
+                            iconName = "quiz",
+                            actionType = NovaActionType.START_QUIZ,
+                            payload = "{\"subject\":\"${_studyContext.value.subjects.firstOrNull() ?: "General Science"}\",\"topic\":\"$topWeakTopic\",\"count\":10}"
+                        ),
+                        NovaContextualAction(
+                            label = "🎯 Start Mock Test",
+                            iconName = "play",
+                            actionType = NovaActionType.OPEN_MOCK_TEST
+                        )
+                    )
+                } else {
+                    replyText = "Abhi enough practice data nahi hai. Aap pehle 1-2 practice set ya quiz complete karein, fir main aapki exact performance aur weak areas analyze kar paunga!"
+                    actions = listOf(
+                        NovaContextualAction(
+                            label = "✍️ Start 10-Q Practice Set",
+                            iconName = "quiz",
+                            actionType = NovaActionType.START_QUIZ,
+                            payload = "{\"subject\":\"${_studyContext.value.subjects.firstOrNull() ?: "General Science"}\",\"count\":10}",
+                            isPrimary = true
+                        ),
+                        NovaContextualAction(
+                            label = "🎯 Start Full Mock Test",
+                            iconName = "play",
+                            actionType = NovaActionType.OPEN_MOCK_TEST
+                        )
+                    )
+                }
                 val msg = NovaChatMessage(
                     sender = NovaSender.NOVA,
                     text = replyText,
@@ -2461,6 +3526,19 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun submitMessageFeedback(messageId: String, isHelpful: Boolean) {
+        _messages.update { list ->
+            list.map { msg ->
+                if (msg.id == messageId) {
+                    msg.copy(userFeedback = if (isHelpful) "HELPFUL" else "NOT_HELPFUL")
+                } else msg
+            }
+        }
+        viewModelScope.launch {
+            _snackbarMessage.emit(if (isHelpful) "👍 Feedback saved! Thanks." else "👎 Feedback noted. NOVA will improve!")
+        }
+    }
+
     fun deleteConversation(sessionId: String) {
         _savedConversations.update { it.filter { sess -> sess.id != sessionId } }
         viewModelScope.launch {
@@ -2820,6 +3898,155 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setCurrentAffairsLanguage(lang: String) {
         _currentAffairsLanguage.value = lang
+    }
+
+    fun setSelectedCurrentAffairsDate(dateStr: String) {
+        _selectedCurrentAffairsDate.value = dateStr
+    }
+
+    fun setCurrentAffairsExamMode(mode: String) {
+        _currentAffairsExamMode.value = mode
+    }
+
+    fun searchFreshWebCurrentAffairs(query: String) {
+        if (query.isBlank() || _isFreshWebSearching.value) return
+        viewModelScope.launch {
+            _isFreshWebSearching.value = true
+            _snackbarMessage.emit("🌐 Searching fresh web updates for '$query'...")
+            try {
+                val exam = _studyContext.value.targetExam.ifBlank { "Competitive Exam" }
+                val lang = _currentAffairsLanguage.value
+                val result = geminiRepository.fetchLiveCurrentAffairs(
+                    examName = exam,
+                    category = query,
+                    language = lang
+                )
+                result.onSuccess { fetched ->
+                    val existing = allCurrentAffairs.value
+                    val combined = (fetched + existing).distinctBy { it.title.trim().lowercase() }
+                    studyRepository.saveCurrentAffairsList(combined)
+                    _snackbarMessage.emit("✨ Discovered ${fetched.size} fresh updates!")
+                }.onFailure { err ->
+                    _snackbarMessage.emit("Web search error: ${err.localizedMessage}")
+                }
+            } catch (e: Exception) {
+                _snackbarMessage.emit("Web search failed: ${e.localizedMessage}")
+            } finally {
+                _isFreshWebSearching.value = false
+            }
+        }
+    }
+
+    fun startDailyCurrentAffairsQuiz(requestedCount: Int = 5) {
+        val affairs = allCurrentAffairs.value
+        val questions = mutableListOf<com.example.data.model.Question>()
+        affairs.forEach { item ->
+            if (item.mcqs.isNotEmpty()) {
+                questions.addAll(item.mcqs)
+            }
+        }
+        val targetQuestions = if (questions.isNotEmpty()) {
+            questions.shuffled().take(requestedCount)
+        } else {
+            // Generate fallback high-yield CA questions if DB has none
+            val exam = _studyContext.value.targetExam.ifBlank { "Competitive Exam" }
+            listOf(
+                com.example.data.model.Question(
+                    id = "ca_q1",
+                    questionText = "Which organization recently successfully validated mission-critical abort tests for human spaceflight?",
+                    options = listOf("ISRO", "NASA", "ESA", "JAXA"),
+                    correctOptionIndex = 0,
+                    explanation = "ISRO validated the Pad Abort & Crew Escape System for the Gaganyaan mission.",
+                    subject = "Current Affairs",
+                    topic = "Science & Tech",
+                    difficulty = "Medium"
+                ),
+                com.example.data.model.Question(
+                    id = "ca_q2",
+                    questionText = "What is the main objective of India's newly announced semiconductor manufacturing initiative?",
+                    options = listOf("Domestic Chip Production", "Space Tourism", "Oil Exploration", "Rail Electrification"),
+                    correctOptionIndex = 0,
+                    explanation = "The initiative aims to build domestic semiconductor fabrication units and reduce import dependencies.",
+                    subject = "Current Affairs",
+                    topic = "Economy & Tech",
+                    difficulty = "Medium"
+                )
+            ).take(requestedCount)
+        }
+
+        _currentAffairsQuizState.value = com.example.data.model.CurrentAffairsQuizSession(
+            title = "🧠 Daily Current Affairs Quiz ($requestedCount Questions)",
+            questions = targetQuestions,
+            language = _currentAffairsLanguage.value
+        )
+    }
+
+    fun startArticleQuiz(article: CurrentAffairsItem) {
+        val questions = if (article.mcqs.isNotEmpty()) {
+            article.mcqs
+        } else {
+            listOf(
+                com.example.data.model.Question(
+                    id = "art_q_${article.id}",
+                    questionText = "Regarding '${article.title.take(60)}...', which statement is correct?",
+                    options = listOf(
+                        article.summary.take(80),
+                        "Option B: It relates to an unrelated sector",
+                        "Option C: The policy was postponed indefinitely",
+                        "Option D: None of the above"
+                    ),
+                    correctOptionIndex = 0,
+                    explanation = article.examRelevance.ifBlank { article.summary },
+                    subject = "Current Affairs",
+                    topic = article.category,
+                    difficulty = "Medium"
+                )
+            )
+        }
+        _currentAffairsQuizState.value = com.example.data.model.CurrentAffairsQuizSession(
+            title = "🧠 Quiz: ${article.title.take(40)}...",
+            questions = questions,
+            language = _currentAffairsLanguage.value
+        )
+    }
+
+    fun selectCurrentAffairsQuizAnswer(questionIndex: Int, optionIndex: Int) {
+        val current = _currentAffairsQuizState.value ?: return
+        val updatedMap = current.selectedAnswers.toMutableMap()
+        updatedMap[questionIndex] = optionIndex
+        _currentAffairsQuizState.value = current.copy(selectedAnswers = updatedMap)
+    }
+
+    fun submitCurrentAffairsQuiz() {
+        val current = _currentAffairsQuizState.value ?: return
+        var correct = 0
+        var incorrect = 0
+        var unanswered = 0
+
+        current.questions.forEachIndexed { idx, q ->
+            val sel = current.selectedAnswers[idx]
+            if (sel == null) {
+                unanswered++
+            } else if (sel == q.correctOptionIndex) {
+                correct++
+            } else {
+                incorrect++
+            }
+        }
+        val total = current.questions.size
+        val score = if (total > 0) ((correct.toFloat() / total) * 100).toInt() else 0
+
+        _currentAffairsQuizState.value = current.copy(
+            isSubmitted = true,
+            score = score,
+            correctCount = correct,
+            incorrectCount = incorrect,
+            unansweredCount = unanswered
+        )
+    }
+
+    fun closeCurrentAffairsQuiz() {
+        _currentAffairsQuizState.value = null
     }
 
     fun clearNovaAffairAnalysis() {

@@ -245,6 +245,23 @@ class StudyRepository(
         }
     }
 
+    suspend fun clearAllUserStudyData(): Unit = withContext(Dispatchers.IO) {
+        database.studyPlanDao().clearAllPlanItems()
+        database.mockTestDao().clearAllAttempts()
+        database.mistakeDao().clearAllMistakes()
+        database.focusDao().clearAllFocusSessions()
+        database.userLearningBookmarkDao().clearAllBookmarks()
+        database.userQuestionMaterialDao().clearAllMaterials()
+        database.studentSessionHistoryDao().clearAllSessionHistory()
+        database.topicMasteryDao().clearAll()
+        database.novaMemoryDao().clearAllMemories()
+        database.novaReminderDao().clearAllReminders()
+        database.voiceNoteDao().clearAllVoiceNotes()
+        database.smartNoteDao().clearAllSmartNotes()
+        database.questionHistoryDao().clearAllHistory()
+        database.pendingSyncDao().clearAll()
+    }
+
     suspend fun addStudyPlanItem(item: StudyPlanItem): Long = withContext(Dispatchers.IO) {
         val id = database.studyPlanDao().insertPlanItem(item)
         val saved = item.copy(id = id)
@@ -842,6 +859,9 @@ class StudyRepository(
         difficulty = difficulty,
         weakSpots = weakSpots
     )
+
+    suspend fun saveTopicMastery(topicMastery: TopicMastery): Long =
+        intelligenceRepository.saveTopicMastery(topicMastery)
 
     suspend fun recordStudentSessionHistory(
         sessionType: String,

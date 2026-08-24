@@ -14,6 +14,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.example.ui.screens.progress.ActiveMockTestScreen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -39,12 +41,18 @@ import com.example.ui.screens.auth.SplashScreen
 import com.example.ui.screens.document.DocumentSummarizerScreen
 import com.example.ui.screens.focus.FocusModeScreen
 import com.example.ui.screens.home.HomeScreen
+import com.example.ui.screens.intelligence.LiveExamIntelligenceScreen
 import com.example.ui.screens.nova.NovaScreen
 import com.example.ui.screens.nova.NovaFloatingAssistant
 import com.example.ui.screens.planner.StudyPlannerScreen
 import com.example.ui.screens.planner.StudySessionTimerView
 import com.example.data.model.ExamContext
+import com.example.data.model.NovaRecruitmentActionType
 import com.example.ui.screens.profile.ProfileSettingsScreen
+import com.example.ui.screens.notification.NotificationCenterScreen
+import com.example.ui.screens.notification.DailyBriefingScreen
+import com.example.ui.screens.vacancy.SmartVacancyScreen
+import com.example.ui.components.InAppNotificationBanner
 import com.example.ui.screens.progress.ProgressDashboardScreen
 import com.example.ui.screens.progress.ExamReadinessCenterScreen
 import com.example.ui.screens.tutor.GeminiTutorScreen
@@ -89,20 +97,23 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val authErrorMessage by viewModel.authErrorMessage.collectAsStateWithLifecycle()
 
     var isSplashFinished by remember { mutableStateOf(false) }
-    var tabStack by remember { mutableStateOf(listOf(AppNavTab.HOME)) }
+    var tabNames by rememberSaveable { mutableStateOf(listOf(AppNavTab.HOME.name)) }
+    val tabStack = remember(tabNames) {
+        tabNames.mapNotNull { name -> runCatching { AppNavTab.valueOf(name) }.getOrNull() }.ifEmpty { listOf(AppNavTab.HOME) }
+    }
     val currentTab = tabStack.lastOrNull() ?: AppNavTab.HOME
     var showProfileSettings by remember { mutableStateOf(false) }
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
 
     val onSelectTab: (AppNavTab) -> Unit = { selected ->
         if (selected == AppNavTab.HOME) {
-            tabStack = listOf(AppNavTab.HOME)
+            tabNames = listOf(AppNavTab.HOME.name)
         } else {
-            val idx = tabStack.indexOf(selected)
-            tabStack = if (idx >= 0) {
-                tabStack.subList(0, idx + 1)
+            val idx = tabNames.indexOf(selected.name)
+            tabNames = if (idx >= 0) {
+                tabNames.subList(0, idx + 1)
             } else {
-                tabStack + selected
+                tabNames + selected.name
             }
         }
     }
@@ -136,6 +147,13 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
             onEmailSignIn = { email, pass -> viewModel.signInWithEmail(email, pass) },
             onEmailSignUp = { email, pass, name, exam -> viewModel.signUpWithEmail(email, pass, name, exam) },
             onGuestSignIn = { viewModel.continueAsGuest() },
+            onForgotPassword = { email ->
+                viewModel.sendPasswordResetEmail(email) { _, msg ->
+                    if (!msg.isNullOrBlank()) {
+                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    }
+                }
+            },
             onDismissError = { viewModel.clearAuthError() }
         )
         return
@@ -240,6 +258,99 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val allLearningBookmarks by viewModel.allLearningBookmarks.collectAsStateWithLifecycle()
     val smartNotes by viewModel.allSmartNotes.collectAsStateWithLifecycle()
 
+    // Step 21 Live Exam Intelligence State
+    val liveExamFeedState by viewModel.liveExamFeedState.collectAsStateWithLifecycle()
+    val isRefreshingLiveExam by viewModel.isRefreshingLiveExam.collectAsStateWithLifecycle()
+    val showLiveExamIntelligenceScreen by viewModel.showLiveExamIntelligenceScreen.collectAsStateWithLifecycle()
+
+    // Step 40 Smart Vacancy, Results & Admit Card Intelligence State
+    val recruitmentFeedState by viewModel.recruitmentFeedState.collectAsStateWithLifecycle()
+    val isRefreshingRecruitment by viewModel.isRefreshingRecruitment.collectAsStateWithLifecycle()
+    val showSmartVacancyScreen by viewModel.showSmartVacancyScreen.collectAsStateWithLifecycle()
+    val selectedRecruitmentDetail by viewModel.selectedRecruitmentDetail.collectAsStateWithLifecycle()
+    val recruitmentNotificationSettings by viewModel.recruitmentNotificationSettings.collectAsStateWithLifecycle()
+    val recruitmentOutbox by viewModel.recruitmentOutbox.collectAsStateWithLifecycle()
+    val recruitmentDailyDigest by viewModel.recruitmentDailyDigest.collectAsStateWithLifecycle()
+    val recruitmentDiagnostics by viewModel.recruitmentDiagnostics.collectAsStateWithLifecycle()
+
+    // Step 30 Notification Center & Daily Briefing State
+    val appNotifications by viewModel.appNotifications.collectAsStateWithLifecycle()
+    val activeInAppBanner by viewModel.activeInAppBanner.collectAsStateWithLifecycle()
+    val dailyBriefingData by viewModel.dailyBriefingData.collectAsStateWithLifecycle()
+    var showNotificationCenter by remember { mutableStateOf(false) }
+    var showDailyBriefingScreen by remember { mutableStateOf(false) }
+
+    val handleDeepLink: (String, String) -> Unit = { link, payload ->
+        showNotificationCenter = false
+        showDailyBriefingScreen = false
+        when {
+            link.startsWith("recruitment://vacancy/") -> {
+                val vId = link.removePrefix("recruitment://vacancy/")
+                viewModel.setShowSmartVacancyScreen(true, initialTab = "VACANCY")
+                val item = recruitmentFeedState.allActiveVacancies.find { it.id == vId }
+                    ?: recruitmentFeedState.latestForYouVacancies.find { it.id == vId }
+                if (item != null) viewModel.selectRecruitmentDetail(item)
+            }
+            link.startsWith("recruitment://result/") -> {
+                val rId = link.removePrefix("recruitment://result/")
+                viewModel.setShowSmartVacancyScreen(true, initialTab = "RESULT")
+                val item = recruitmentFeedState.resultsList.find { it.id == rId }
+                if (item != null) viewModel.selectRecruitmentDetail(item)
+            }
+            link.startsWith("recruitment://admit_card/") -> {
+                val aId = link.removePrefix("recruitment://admit_card/")
+                viewModel.setShowSmartVacancyScreen(true, initialTab = "ADMIT_CARD")
+                val item = recruitmentFeedState.admitCardsList.find { it.id == aId }
+                if (item != null) viewModel.selectRecruitmentDetail(item)
+            }
+            link.startsWith("recruitment://alerts") || link == "RECRUITMENT_ALERTS" -> {
+                viewModel.setShowSmartVacancyScreen(true, initialTab = "ALERTS")
+            }
+            link.startsWith("recruitment://tracker") -> {
+                viewModel.setShowSmartVacancyScreen(true, initialTab = "SAVED")
+            }
+            link == "CURRENT_AFFAIRS" || link == "EXAM_UPDATES" -> {
+                viewModel.setShowLiveExamIntelligenceScreen(true)
+            }
+            link in listOf("VACANCY", "VACANCIES", "JOBS") -> {
+                viewModel.setShowSmartVacancyScreen(true, initialTab = "VACANCY")
+            }
+            link in listOf("RESULTS", "RESULT") -> {
+                viewModel.setShowSmartVacancyScreen(true, initialTab = "RESULT")
+            }
+            link in listOf("ADMIT_CARD", "ADMIT_CARDS", "HALL_TICKET") -> {
+                viewModel.setShowSmartVacancyScreen(true, initialTab = "ADMIT_CARD")
+            }
+            link in listOf("NOTICES", "CORRECTION") -> {
+                viewModel.setShowSmartVacancyScreen(true, initialTab = "NOTIFICATION")
+            }
+            link == "DAILY_BRIEFING" -> {
+                showDailyBriefingScreen = true
+            }
+            link == "MOCK_TEST" -> {
+                if (pendingResumeSession != null) {
+                    viewModel.resumePendingTestSession()
+                } else {
+                    onSelectTab(AppNavTab.PROGRESS)
+                }
+            }
+            link == "REVISION" -> {
+                onSelectTab(AppNavTab.PROGRESS)
+            }
+            link == "FOCUS" -> {
+                onSelectTab(AppNavTab.FOCUS)
+            }
+            link == "NOVA" -> {
+                if (payload.isNotBlank()) {
+                    novaViewModel.sendMessage(payload)
+                }
+                onSelectTab(AppNavTab.AI_TUTOR)
+            }
+            else -> {
+                onSelectTab(AppNavTab.HOME)
+            }
+        }
+    }
 
     var studySubTab by remember { mutableIntStateOf(0) } // 0: Study Planner & Cards, 1: Smart Content Engine
     var selectedLearningSubject by remember { mutableStateOf<String?>(null) }
@@ -257,11 +368,28 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
         )
     }
 
+    LaunchedEffect(Unit) {
+        novaViewModel.navigationEvent.collect { (event, data) ->
+            if (event == "NAVIGATE_TO_LIVE_EXAM_INTELLIGENCE") {
+                viewModel.setShowLiveExamIntelligenceScreen(true)
+            } else if (event == "NAVIGATE_TO_SMART_VACANCIES") {
+                val tab = data["tab"] as? String
+                viewModel.setShowSmartVacancyScreen(true, initialTab = tab)
+            }
+        }
+    }
+
     val activity = context as? Activity
     var lastBackPressTime by remember { mutableLongStateOf(0L) }
 
     BackHandler(enabled = true) {
         when {
+            showNotificationCenter -> {
+                showNotificationCenter = false
+            }
+            showDailyBriefingScreen -> {
+                showDailyBriefingScreen = false
+            }
             showSavedLearning -> {
                 showSavedLearning = false
             }
@@ -274,7 +402,12 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
             showProfileSettings -> {
                 showProfileSettings = false
             }
-
+            showLiveExamIntelligenceScreen -> {
+                viewModel.setShowLiveExamIntelligenceScreen(false)
+            }
+            showSmartVacancyScreen -> {
+                viewModel.setShowSmartVacancyScreen(false)
+            }
             showDocumentSummarizer -> {
                 showDocumentSummarizer = false
             }
@@ -290,8 +423,8 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
             activeTestState.isCompleted -> {
                 viewModel.exitTest()
             }
-            tabStack.size > 1 -> {
-                tabStack = tabStack.dropLast(1)
+            tabNames.size > 1 -> {
+                tabNames = tabNames.dropLast(1)
             }
             else -> {
                 val currentTime = System.currentTimeMillis()
@@ -310,8 +443,8 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
         contentWindowInsets = WindowInsets.safeDrawing,
         bottomBar = {
-            // Hide bottom bar during active fullscreen mock test, document summarizer, or profile settings
-            if (!activeTestState.isTestInProgress && !activeTestState.isCompleted && !showDocumentSummarizer && !showProfileSettings) {
+            // Hide bottom bar during active fullscreen mock test, document summarizer, profile settings, or notification screens
+            if (!activeTestState.isTestInProgress && !activeTestState.isCompleted && !showDocumentSummarizer && !showProfileSettings && !showLiveExamIntelligenceScreen && !showSmartVacancyScreen && !showNotificationCenter && !showDailyBriefingScreen) {
                 FloatingGlassNavBar(
                     currentTab = currentTab,
                     onTabSelected = { onSelectTab(it) }
@@ -325,7 +458,168 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                 .background(appBackgroundGradient(isDarkTheme, themeMode))
                 .padding(innerPadding)
         ) {
-            if (showProfileSettings) {
+            if (activeTestState.isTestInProgress || activeTestState.isCompleted) {
+                ActiveMockTestScreen(
+                    state = activeTestState,
+                    onSelectAnswer = { qIdx, optIdx -> viewModel.selectTestAnswer(qIdx, optIdx) },
+                    onClearAnswer = { qIdx -> viewModel.clearTestAnswer(qIdx) },
+                    onToggleMarkForReview = { qIdx -> viewModel.toggleMarkForReview(qIdx) },
+                    onSkipQuestion = { qIdx -> viewModel.skipQuestion(qIdx) },
+                    onNavigateQuestion = { idx -> viewModel.navigateTestQuestion(idx) },
+                    onSetPaletteOpen = { isOpen -> viewModel.setPaletteOpen(isOpen) },
+                    onSetSubmitConfirmOpen = { isOpen -> viewModel.setSubmitConfirmOpen(isOpen) },
+                    onSubmitTest = { viewModel.submitMockTest() },
+                    onExitTest = { viewModel.saveAndExitActiveTest() },
+                    onRetakeTest = {
+                        activeTestState.completedAttempt?.let { viewModel.retakeMockTest(it) }
+                    },
+                    onRetakeWrongQuestions = { viewModel.retryWrongQuestions() },
+                    onRetryUnanswered = { viewModel.retrySkippedQuestions() },
+                    onStartPractice = { rec -> viewModel.startTargetedPractice(rec) },
+                    onSaveAndNext = { viewModel.saveAndNext() },
+                    onMarkForReviewAndNext = { viewModel.markForReviewAndNext() },
+                    onPreviousQuestion = { viewModel.previousQuestion() }
+                )
+            } else if (showLiveExamIntelligenceScreen) {
+                LiveExamIntelligenceScreen(
+                    feedState = liveExamFeedState,
+                    isRefreshing = isRefreshingLiveExam,
+                    onRefresh = { viewModel.refreshLiveExamIntelligence(force = true) },
+                    onToggleSaveUpdate = { id, s -> viewModel.toggleSaveLiveExamUpdate(id, s) },
+                    onToggleSaveTrending = { id, s -> viewModel.toggleSaveTrendingTopic(id, s) },
+                    onStartQuizForTopic = { category, topic ->
+                        viewModel.startInteractiveStudyQuiz(category, topic)
+                        viewModel.setShowLiveExamIntelligenceScreen(false)
+                        onSelectTab(AppNavTab.AI_TUTOR)
+                    },
+                    onAskNovaAboutUpdate = { prompt ->
+                        novaViewModel.sendMessage(prompt)
+                        viewModel.setShowLiveExamIntelligenceScreen(false)
+                        onSelectTab(AppNavTab.AI_TUTOR)
+                    },
+                    onBack = { viewModel.setShowLiveExamIntelligenceScreen(false) }
+                )
+            } else if (showSmartVacancyScreen) {
+                SmartVacancyScreen(
+                    feedState = recruitmentFeedState,
+                    isRefreshing = isRefreshingRecruitment,
+                    onRefresh = { viewModel.refreshRecruitmentCatalog(force = true) },
+                    onCategorySelected = { viewModel.setRecruitmentCategory(it) },
+                    onStateSelected = { viewModel.setRecruitmentState(it) },
+                    onTabSelected = { viewModel.setRecruitmentTab(it) },
+                    onSearchQueryChanged = { viewModel.setRecruitmentSearch(it) },
+                    onSortOptionSelected = { viewModel.setRecruitmentSort(it) },
+                    onToggleSave = { id, saved -> viewModel.toggleSaveRecruitment(id, saved) },
+                    onSetReminder = { id, enabled, days -> viewModel.setDeadlineReminder(id, enabled, days) },
+                    selectedDetailItem = selectedRecruitmentDetail,
+                    onSelectDetailItem = { viewModel.selectRecruitmentDetail(it) },
+                    onUpdateProfile = { viewModel.updateRecruitmentProfile(it) },
+                    onUpdateApplicationStatus = { id, status, appNo, rollNo, post, notes ->
+                        viewModel.updateUserApplicationStatus(id, status, appNo, rollNo, post, notes)
+                    },
+                    onUpdateDocumentsReady = { id, docs -> viewModel.updateDocumentReadyStatus(id, docs) },
+                    onUpdateChecklistChecked = { id, list -> viewModel.updateChecklistChecked(id, list) },
+                    onFindJobsForMe = { category, state, qual, age ->
+                        viewModel.findJobsForMe(category, state, qual, age)
+                    },
+                    onSubmitReport = { id, category, comment ->
+                        Toast.makeText(context, "Thank you. Your report has been recorded.", Toast.LENGTH_SHORT).show()
+                    },
+                    notificationSettings = recruitmentNotificationSettings,
+                    onUpdateNotificationSettings = { viewModel.updateRecruitmentNotificationSettings(it) },
+                    outboxItems = recruitmentOutbox,
+                    dailyDigest = recruitmentDailyDigest,
+                    diagnostics = recruitmentDiagnostics,
+                    onMuteRecruitment = { viewModel.muteRecruitment(it) },
+                    onUnmuteRecruitment = { viewModel.unmuteRecruitment(it) },
+                    onMuteCategory = { viewModel.muteRecruitmentCategory(it) },
+                    onUnmuteCategory = { viewModel.unmuteRecruitmentCategory(it) },
+                    onMarkOutboxRead = { viewModel.markRecruitmentOutboxItemRead(it) },
+                    onMarkAllOutboxRead = { viewModel.markAllRecruitmentOutboxItemsRead() },
+                    onDeleteOutboxItem = { viewModel.deleteRecruitmentOutboxItem(it) },
+                    onClearAllOutbox = { viewModel.clearAllRecruitmentOutbox() },
+                    onNovaQuery = { query ->
+                        viewModel.handleNovaRecruitmentQuery(query) { action ->
+                            when (action) {
+                                NovaRecruitmentActionType.OPEN_VACANCIES -> {
+                                    viewModel.setShowSmartVacancyScreen(true, initialTab = "VACANCY")
+                                }
+                                NovaRecruitmentActionType.OPEN_RESULTS -> {
+                                    viewModel.setShowSmartVacancyScreen(true, initialTab = "RESULT")
+                                }
+                                NovaRecruitmentActionType.OPEN_ADMIT_CARDS -> {
+                                    viewModel.setShowSmartVacancyScreen(true, initialTab = "ADMIT_CARD")
+                                }
+                                NovaRecruitmentActionType.OPEN_SAVED_RECRUITMENTS -> {
+                                    viewModel.setShowSmartVacancyScreen(true, initialTab = "SAVED")
+                                }
+                                NovaRecruitmentActionType.OPEN_RECRUITMENT -> {
+                                    viewModel.setShowSmartVacancyScreen(true, initialTab = "VACANCY")
+                                }
+                                NovaRecruitmentActionType.ENABLE_DEADLINE_ALERTS -> {
+                                    viewModel.updateRecruitmentNotificationSettings(
+                                        recruitmentNotificationSettings.copy(deadlineAlertsEnabled = true)
+                                    )
+                                    Toast.makeText(context, "Deadline closing alerts enabled", Toast.LENGTH_SHORT).show()
+                                }
+                                NovaRecruitmentActionType.OPEN_NOTIFICATION_SETTINGS -> {
+                                    viewModel.setShowSmartVacancyScreen(true)
+                                }
+                            }
+                        }
+                    },
+                    onBack = { viewModel.setShowSmartVacancyScreen(false) }
+                )
+            } else if (showNotificationCenter) {
+                NotificationCenterScreen(
+                    notifications = appNotifications,
+                    onMarkAsRead = { viewModel.markNotificationAsRead(it) },
+                    onMarkAllAsRead = { viewModel.markAllNotificationsAsRead() },
+                    onDeleteNotification = { viewModel.deleteNotification(it) },
+                    onClearAll = { viewModel.clearAllNotifications() },
+                    onNavigateDeepLink = handleDeepLink,
+                    onOpenSettings = {
+                        showNotificationCenter = false
+                        showProfileSettings = true
+                    },
+                    onBack = { showNotificationCenter = false }
+                )
+            } else if (showDailyBriefingScreen) {
+                DailyBriefingScreen(
+                    briefingData = dailyBriefingData,
+                    onStartPractice = { sub, top ->
+                        viewModel.startFocusSession(sub, top, 25)
+                        showDailyBriefingScreen = false
+                        onSelectTab(AppNavTab.FOCUS)
+                    },
+                    onReadCurrentAffairs = {
+                        showDailyBriefingScreen = false
+                        viewModel.setShowLiveExamIntelligenceScreen(true)
+                    },
+                    onResumeTest = {
+                        showDailyBriefingScreen = false
+                        if (pendingResumeSession != null) {
+                            viewModel.resumePendingTestSession()
+                        } else {
+                            onSelectTab(AppNavTab.PROGRESS)
+                        }
+                    },
+                    onStartRevision = {
+                        showDailyBriefingScreen = false
+                        onSelectTab(AppNavTab.PROGRESS)
+                    },
+                    onAskNova = { prompt ->
+                        showDailyBriefingScreen = false
+                        novaViewModel.sendMessage(prompt)
+                        onSelectTab(AppNavTab.AI_TUTOR)
+                    },
+                    onChangeLanguage = { lang ->
+                        viewModel.updateNotificationPrefs(notifPrefs.copy(language = lang))
+                        viewModel.computeDailyBriefingData()
+                    },
+                    onBack = { showDailyBriefingScreen = false }
+                )
+            } else if (showProfileSettings) {
                 ProfileSettingsScreen(
                     user = userProfile,
                     themeMode = themeMode,
@@ -360,7 +654,13 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     isAiThinkingMode = useThinkingMode,
                     onSetAiThinkingMode = { viewModel.setThinkingMode(it) },
                     tutorPersona = tutorPersona,
-                    onSetTutorPersona = { viewModel.setTutorPersona(it) }
+                    onSetTutorPersona = { viewModel.setTutorPersona(it) },
+                    onChangePassword = { newPass, cb -> viewModel.changePassword(newPass, cb) },
+                    onRequestEmailChange = { newEmail, cb -> viewModel.requestEmailChange(newEmail, cb) },
+                    onTriggerSync = { cb -> viewModel.triggerManualSync(cb) },
+                    onExportData = { viewModel.exportUserDataJson() },
+                    onResetPersonalization = { viewModel.resetPersonalization {} },
+                    onClearCache = { viewModel.clearAllLocalStudyData {} }
                 )
             } else if (showExamReadinessCenter) {
                 ExamReadinessCenterScreen(
@@ -436,7 +736,43 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onScanQuestion = { onSelectTab(AppNavTab.AI_TUTOR) },
                             onOpenDocumentSummarizer = { showDocumentSummarizer = true },
                             onUpdateUserProfile = { updatedProfile -> viewModel.updateUserProfile(updatedProfile) },
-                            novaViewModel = novaViewModel
+                            novaViewModel = novaViewModel,
+                            liveExamFeedState = liveExamFeedState,
+                            isRefreshingLiveExam = isRefreshingLiveExam,
+                            onRefreshLiveExam = { viewModel.refreshLiveExamIntelligence(force = true) },
+                            onOpenLiveExamUpdateDetail = { update ->
+                                viewModel.selectLiveUpdateForDetail(update)
+                                viewModel.setShowLiveExamIntelligenceScreen(true)
+                            },
+                            onToggleSaveLiveExamUpdate = { id, s -> viewModel.toggleSaveLiveExamUpdate(id, s) },
+                            onToggleSaveTrendingTopic = { id, s -> viewModel.toggleSaveTrendingTopic(id, s) },
+                            onStartQuizForTopic = { category, topic ->
+                                viewModel.startInteractiveStudyQuiz(category, topic)
+                                onSelectTab(AppNavTab.AI_TUTOR)
+                            },
+                            onOpenFullLiveExamIntelligence = {
+                                viewModel.setShowLiveExamIntelligenceScreen(true)
+                            },
+                            recruitmentFeedState = recruitmentFeedState,
+                            onOpenSmartVacancy = { tab ->
+                                viewModel.setShowSmartVacancyScreen(true, initialTab = tab)
+                            },
+                            pendingResumeSession = pendingResumeSession,
+                            onResumePendingTest = { viewModel.resumePendingTestSession() },
+                            onDiscardPendingTest = { viewModel.discardPendingTestSession() },
+                            unreadNotificationCount = appNotifications.count { !it.isRead },
+                            onOpenNotificationCenter = { showNotificationCenter = true },
+                            dailyBriefingData = dailyBriefingData,
+                            onOpenDailyBriefing = { showDailyBriefingScreen = true },
+                            userStudyPreferences = userStudyPreferences,
+                            allTopicMasteries = allTopicMasteries,
+                            mockAttempts = mockAttempts,
+                            mistakes = mistakes,
+                            focusSessions = allFocusSessions,
+                            onStartPracticeWithConfig = { config ->
+                                viewModel.startMockTestWithConfig(config)
+                                onSelectTab(AppNavTab.STUDY)
+                            }
                         )
 
                         AppNavTab.AI_TUTOR -> {
@@ -709,7 +1045,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onReviewPastTest = { attempt -> viewModel.reviewPastTest(attempt) },
                             onRetakeTest = { attempt -> viewModel.retakeMockTest(attempt) },
                             onRetakeWrongQuestions = { viewModel.retryWrongQuestions() },
-                            onRetryUnanswered = { viewModel.retryUnansweredQuestions() },
+                            onRetryUnanswered = { viewModel.retrySkippedQuestions() },
                             onStartPractice = { rec -> viewModel.startTargetedPractice(rec) },
                             onDeletePastTest = { id -> viewModel.deletePastTest(id) },
                             onClearGenerationError = { viewModel.clearGenerationError() },
@@ -720,6 +1056,9 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onSaveAndNext = { viewModel.saveAndNext() },
                             onMarkForReviewAndNext = { viewModel.markForReviewAndNext() },
                             onPreviousQuestion = { viewModel.previousQuestion() },
+                            pendingResumeSession = pendingResumeSession,
+                            onResumePendingTest = { viewModel.resumePendingTestSession() },
+                            onDiscardPendingTest = { viewModel.discardPendingTestSession() },
                             onSaveUserMaterial = { title, exam, subject, topic, rawText ->
                                 viewModel.saveUserQuestionMaterial(title, exam, subject, topic, rawText)
                             },
@@ -738,9 +1077,13 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onSetManualTopicOverride = { sub, top, override -> viewModel.setUserManualTopicOverride(sub, top, override) },
                             onResetPreparationData = { viewModel.resetActiveExamPreparationData() },
                             onOpenReadinessCenter = { showExamReadinessCenter = true },
+                            userPreferences = userStudyPreferences,
+                            onUpdatePersonalizationSettings = { settings -> viewModel.updatePersonalizationSettings(settings) },
+                            onResetPersonalizationSignals = { viewModel.resetPersonalizationSignals() },
+                            onRecordSpacedRevisionFeedback = { sub, top, fb -> viewModel.recordSpacedRevisionFeedback(sub, top, fb) },
                             onBack = {
-                                if (tabStack.size > 1) {
-                                    tabStack = tabStack.dropLast(1)
+                                if (tabNames.size > 1) {
+                                    tabNames = tabNames.dropLast(1)
                                 } else {
                                     onSelectTab(AppNavTab.HOME)
                                 }
@@ -838,6 +1181,16 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
                 )
             }
+
+            // Step 30 In-App Notification Floating Banner Overlay
+            InAppNotificationBanner(
+                notification = activeInAppBanner,
+                onDismiss = { viewModel.dismissInAppBanner() },
+                onClick = {
+                    activeInAppBanner?.let { handleDeepLink(it.deepLink, it.payload) }
+                    viewModel.dismissInAppBanner()
+                }
+            )
         }
     }
 }

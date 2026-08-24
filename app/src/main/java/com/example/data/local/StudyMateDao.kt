@@ -71,6 +71,9 @@ interface FocusDao {
 
     @Query("SELECT SUM(actualMinutesSpent) FROM focus_sessions")
     fun getTotalFocusMinutes(): Flow<Int?>
+
+    @Query("DELETE FROM focus_sessions")
+    suspend fun clearAllFocusSessions()
 }
 
 @Dao
@@ -83,6 +86,9 @@ interface MockTestDao {
 
     @Query("DELETE FROM mock_test_attempts WHERE id = :id")
     suspend fun deleteAttempt(id: Long)
+
+    @Query("DELETE FROM mock_test_attempts")
+    suspend fun clearAllAttempts()
 }
 
 @Dao
@@ -95,6 +101,9 @@ interface UserQuestionMaterialDao {
 
     @Query("DELETE FROM user_question_materials WHERE id = :id")
     suspend fun deleteMaterial(id: Long)
+
+    @Query("DELETE FROM user_question_materials")
+    suspend fun clearAllMaterials()
 }
 
 @Dao
@@ -122,6 +131,9 @@ interface MistakeDao {
 
     @Query("DELETE FROM mistakes WHERE examId = :examId")
     suspend fun clearMistakesForExam(examId: String)
+
+    @Query("DELETE FROM mistakes")
+    suspend fun clearAllMistakes()
 }
 
 @Dao
@@ -454,6 +466,9 @@ interface StudentSessionHistoryDao {
 
     @Query("DELETE FROM student_session_history WHERE id = :id")
     suspend fun deleteSession(id: Long)
+
+    @Query("DELETE FROM student_session_history")
+    suspend fun clearAllSessionHistory()
 }
 
 @Dao
@@ -568,6 +583,9 @@ interface UserLearningBookmarkDao {
 
     @Query("DELETE FROM user_learning_bookmarks WHERE title = :title AND topic = :topic")
     suspend fun deleteBookmarkByTitle(title: String, topic: String)
+
+    @Query("DELETE FROM user_learning_bookmarks")
+    suspend fun clearAllBookmarks()
 }
 
 @Dao
@@ -583,6 +601,75 @@ interface QuestionHistoryDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateHistory(history: QuestionHistoryEntity)
+
+    @Query("DELETE FROM question_history WHERE userId = :userId")
+    suspend fun clearHistoryForUser(userId: String = "current_user")
+
+    @Query("DELETE FROM question_history")
+    suspend fun clearAllHistory()
+}
+
+@Dao
+interface LiveExamUpdateDao {
+    @Query("SELECT * FROM live_exam_updates ORDER BY retrievedAt DESC")
+    fun getAllLiveUpdates(): Flow<List<LiveExamUpdateEntity>>
+
+    @Query("SELECT * FROM live_exam_updates WHERE examName = :examName OR examId = :examId ORDER BY retrievedAt DESC")
+    fun getUpdatesForExam(examName: String, examId: String): Flow<List<LiveExamUpdateEntity>>
+
+    @Query("SELECT * FROM live_exam_updates WHERE (examName = :examName OR examId = :examId) ORDER BY retrievedAt DESC")
+    suspend fun getUpdatesForExamOnce(examName: String, examId: String): List<LiveExamUpdateEntity>
+
+    @Query("SELECT * FROM live_exam_updates WHERE isSaved = 1 ORDER BY retrievedAt DESC")
+    fun getSavedUpdates(): Flow<List<LiveExamUpdateEntity>>
+
+    @Query("SELECT * FROM live_exam_updates WHERE id = :id LIMIT 1")
+    suspend fun getUpdateById(id: String): LiveExamUpdateEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLiveUpdates(items: List<LiveExamUpdateEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLiveUpdate(item: LiveExamUpdateEntity)
+
+    @Query("UPDATE live_exam_updates SET isSaved = :isSaved WHERE id = :id")
+    suspend fun toggleSaved(id: String, isSaved: Boolean)
+
+    @Query("UPDATE live_exam_updates SET isRead = 1 WHERE id = :id")
+    suspend fun markAsRead(id: String)
+
+    @Query("DELETE FROM live_exam_updates WHERE examId = :examId AND isSaved = 0")
+    suspend fun deleteUnsavedForExam(examId: String)
+
+    @Query("DELETE FROM live_exam_updates WHERE id = :id")
+    suspend fun deleteUpdate(id: String)
+
+    @Query("DELETE FROM live_exam_updates")
+    suspend fun clearAll()
+}
+
+@Dao
+interface TrendingExamTopicDao {
+    @Query("SELECT * FROM trending_exam_topics ORDER BY retrievedAt DESC")
+    fun getAllTrendingTopics(): Flow<List<TrendingExamTopicEntity>>
+
+    @Query("SELECT * FROM trending_exam_topics WHERE examName = :examName ORDER BY retrievedAt DESC")
+    fun getTrendingForExam(examName: String): Flow<List<TrendingExamTopicEntity>>
+
+    @Query("SELECT * FROM trending_exam_topics WHERE examName = :examName ORDER BY retrievedAt DESC")
+    suspend fun getTrendingForExamOnce(examName: String): List<TrendingExamTopicEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTrendingTopics(items: List<TrendingExamTopicEntity>)
+
+    @Query("UPDATE trending_exam_topics SET isSaved = :isSaved WHERE id = :id")
+    suspend fun toggleSaved(id: String, isSaved: Boolean)
+
+    @Query("DELETE FROM trending_exam_topics WHERE examName = :examName AND isSaved = 0")
+    suspend fun deleteUnsavedForExam(examName: String)
+
+    @Query("DELETE FROM trending_exam_topics")
+    suspend fun clearAll()
 }
 
 @Dao

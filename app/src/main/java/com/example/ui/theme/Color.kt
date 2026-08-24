@@ -78,6 +78,9 @@ val SemanticWarning = Color(0xFFF59E0B)
 // Error / Danger: Coral Rose
 val CoralRose = Color(0xFFF43F5E)
 val CoralPink = Color(0xFFF43F5E)
+val CoralOrange = Color(0xFFF97316)
+val CrimsonRed = Color(0xFFEF4444)
+val AmberWarning = Color(0xFFF59E0B)
 val SemanticError = Color(0xFFF43F5E)
 
 // ==========================================

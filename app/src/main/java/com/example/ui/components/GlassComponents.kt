@@ -1411,3 +1411,277 @@ fun ThemeToggleButton(
         )
     }
 }
+
+// =========================================================================
+// 14. ADDITIONAL PRIMITIVES (BOTTOM SHEET, ERROR STATE, SKELETON, TOAST)
+// =========================================================================
+
+/**
+ * Standardized Liquid Glass Bottom Sheet container.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GlassBottomSheet(
+    onDismissRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    title: String? = null,
+    subtitle: String? = null,
+    icon: ImageVector? = null,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val themeMode = currentThemeMode()
+    val isGlassLight = themeMode == AppThemeMode.GLASS_LIGHT
+    val containerColor = when (themeMode) {
+        AppThemeMode.AMOLED_BLACK -> Color(0xF0000000)
+        AppThemeMode.GLASS_LIGHT -> Color(0xF2FFFFFF)
+        AppThemeMode.NOVA_DARK -> Color(0xF00F172A)
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismissRequest,
+        modifier = modifier,
+        containerColor = containerColor,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        scrimColor = Color.Black.copy(alpha = 0.6f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
+                .navigationBarsPadding()
+        ) {
+            if (title != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        if (icon != null) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background((if (isGlassLight) DeepIndigo else NeonCyan).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = null,
+                                    tint = if (isGlassLight) DeepIndigo else NeonCyan,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                        }
+                        Column {
+                            Text(
+                                text = title,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isGlassLight) Color(0xFF0F172A) else Color.White
+                            )
+                            if (subtitle != null) {
+                                Text(
+                                    text = subtitle,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isGlassLight) Color(0xFF64748B) else Color(0xFF94A3B8)
+                                )
+                            }
+                        }
+                    }
+                    GlassCloseButton(onClose = onDismissRequest)
+                }
+            }
+            content()
+        }
+    }
+}
+
+/**
+ * Standardized Glass Error State component with retry action.
+ */
+@Composable
+fun GlassErrorState(
+    message: String,
+    modifier: Modifier = Modifier,
+    title: String = "Something went wrong",
+    onRetry: (() -> Unit)? = null,
+    retryTestTag: String = "error_retry_button"
+) {
+    val themeMode = currentThemeMode()
+    val primaryTextColor = if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFF0F172A) else Color.White
+    val secondaryTextColor = if (themeMode == AppThemeMode.GLASS_LIGHT) Color(0xFF64748B) else Color(0xFF94A3B8)
+
+    GlassCard(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        shape = RoundedCornerShape(20.dp),
+        fillAlpha = 0.6f,
+        borderColor = CoralRose.copy(alpha = 0.5f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(CoralRose.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.ErrorOutline,
+                    contentDescription = "Error",
+                    tint = CoralRose,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = primaryTextColor,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = secondaryTextColor,
+                textAlign = TextAlign.Center
+            )
+
+            if (onRetry != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = onRetry,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = CoralRose,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.testTag(retryTestTag)
+                ) {
+                    Icon(Icons.Filled.Refresh, null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Try Again", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Standardized Glass Skeleton placeholder shimmer.
+ */
+@Composable
+fun GlassSkeleton(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(12.dp)
+) {
+    val themeMode = currentThemeMode()
+    val infiniteTransition = rememberInfiniteTransition(label = "skeleton_shimmer")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.2f,
+        targetValue = 0.6f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "skeleton_alpha"
+    )
+
+    val color = if (themeMode == AppThemeMode.GLASS_LIGHT) {
+        Color(0xFFCBD5E1).copy(alpha = alpha)
+    } else {
+        Color(0xFF1E293B).copy(alpha = alpha)
+    }
+
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(color)
+    )
+}
+
+/**
+ * Glass Toast notification banner.
+ */
+enum class GlassToastType { SUCCESS, WARNING, ERROR, INFO }
+
+@Composable
+fun GlassToast(
+    message: String,
+    type: GlassToastType = GlassToastType.INFO,
+    modifier: Modifier = Modifier,
+    onDismiss: (() -> Unit)? = null
+) {
+    val (accentColor, icon) = when (type) {
+        GlassToastType.SUCCESS -> EmeraldSuccess to Icons.Filled.CheckCircle
+        GlassToastType.WARNING -> AmberWarning to Icons.Filled.Warning
+        GlassToastType.ERROR -> CoralRose to Icons.Filled.Error
+        GlassToastType.INFO -> NeonCyan to Icons.Filled.Info
+    }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .border(1.dp, accentColor.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+            .shadow(8.dp, RoundedCornerShape(16.dp)),
+        color = Color(0xFF0F172A).copy(alpha = 0.92f)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = accentColor,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f)
+            )
+            if (onDismiss != null) {
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Dismiss",
+                        tint = Color(0xFF94A3B8),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+

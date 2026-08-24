@@ -35,7 +35,12 @@ import com.example.data.model.*
 import com.example.ui.components.*
 import com.example.ui.theme.*
 import com.example.ui.screens.nova.NovaHomeUniversalWidget
+import com.example.ui.screens.nova.TodayExamBriefWidget
+import com.example.ui.screens.nova.NovaWebMcqGeneratorDialog
+import com.example.ui.screens.nova.SmartRevisionSessionDialog
 import com.example.viewmodel.NovaViewModel
+import com.example.viewmodel.ActiveTestState
+import com.example.service.intelligence.*
 import org.json.JSONArray
 import java.text.SimpleDateFormat
 import java.util.*
@@ -67,6 +72,29 @@ fun HomeScreen(
     onOpenDocumentSummarizer: () -> Unit = {},
     onUpdateUserProfile: (UserProfile) -> Unit = {},
     novaViewModel: NovaViewModel? = null,
+    liveExamFeedState: LiveExamFeedState = LiveExamFeedState(),
+    isRefreshingLiveExam: Boolean = false,
+    onRefreshLiveExam: () -> Unit = {},
+    onOpenLiveExamUpdateDetail: (LiveExamUpdateEntity) -> Unit = {},
+    onToggleSaveLiveExamUpdate: (String, Boolean) -> Unit = { _, _ -> },
+    onToggleSaveTrendingTopic: (String, Boolean) -> Unit = { _, _ -> },
+    onStartQuizForTopic: (String, String) -> Unit = { _, _ -> },
+    onOpenFullLiveExamIntelligence: () -> Unit = {},
+    recruitmentFeedState: RecruitmentFeedState = RecruitmentFeedState(),
+    onOpenSmartVacancy: (String?) -> Unit = {},
+    pendingResumeSession: ActiveTestState? = null,
+    onResumePendingTest: () -> Unit = {},
+    onDiscardPendingTest: () -> Unit = {},
+    unreadNotificationCount: Int = 0,
+    onOpenNotificationCenter: () -> Unit = {},
+    dailyBriefingData: DailyBriefingData = DailyBriefingData(),
+    onOpenDailyBriefing: () -> Unit = {},
+    userStudyPreferences: UserStudyPreferences = UserStudyPreferences(),
+    allTopicMasteries: List<TopicMastery> = emptyList(),
+    mockAttempts: List<MockTestAttempt> = emptyList(),
+    mistakes: List<MistakeItem> = emptyList(),
+    focusSessions: List<FocusSession> = emptyList(),
+    onStartPracticeWithConfig: (MockTestConfig) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isDark = isAppInDarkTheme()
@@ -78,6 +106,39 @@ fun HomeScreen(
     var showQuickSearchDialog by remember { mutableStateOf(false) }
     var showNotificationSummaryDialog by remember { mutableStateOf(false) }
     var showAllToolsDialog by remember { mutableStateOf(false) }
+    var showQuickStudyDialog by remember { mutableStateOf(false) }
+    var showTransparencyDialog by remember { mutableStateOf(false) }
+    var selectedPlanTimeOption by remember { mutableStateOf(userStudyPreferences.studyTimeAvailableOption.ifBlank { "30 min" }) }
+
+    // Step 36 Personalization Engine Calculations
+    val personalizationSettings = remember(userStudyPreferences) {
+        PersonalizationSettings(
+            isEnabled = userStudyPreferences.personalizationEnabled,
+            dailyQuestionGoal = userStudyPreferences.dailyQuestionGoal,
+            dailyStudyMinutesGoal = userStudyPreferences.dailyStudyMinutesGoal,
+            weeklyTestsGoal = userStudyPreferences.weeklyTestsGoal,
+            studyTimeAvailableOption = userStudyPreferences.studyTimeAvailableOption
+        )
+    }
+
+    val topicPerformances = remember(allTopicMasteries, mockAttempts, mistakes) {
+        PersonalizationEngine.computeTopicPerformances(mockAttempts, mistakes, allTopicMasteries)
+    }
+
+    val todayFocusRec = remember(user, topicPerformances, allTopicMasteries, personalizationSettings) {
+        PersonalizationEngine.computeTodayFocusRecommendation(user, topicPerformances, allTopicMasteries, personalizationSettings)
+    }
+
+    val timeBasedPlan = remember(selectedPlanTimeOption, topicPerformances, allTopicMasteries, user) {
+        PersonalizationEngine.generateTimeBasedStudyPlan(selectedPlanTimeOption, topicPerformances, allTopicMasteries, user)
+    }
+
+    // Step 23 Smart Learning States
+    val dailyExamBriefing = novaViewModel?.dailyExamBriefing?.collectAsState()?.value
+    val isBriefingLoading = novaViewModel?.isDailyBriefingLoading?.collectAsState()?.value ?: false
+    val showMcqDialog = novaViewModel?.showMcqConfigDialog?.collectAsState()?.value ?: false
+    val showRevisionDialog = novaViewModel?.showRevisionDialog?.collectAsState()?.value ?: false
+    val activeRevisionTopic = novaViewModel?.activeRevisionTopic?.collectAsState()?.value
 
     // 1. Time-based dynamic greeting
     val currentHour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
@@ -276,7 +337,7 @@ fun HomeScreen(
                     // Notification
                     Box {
                         IconButton(
-                            onClick = { showNotificationSummaryDialog = true },
+                            onClick = onOpenNotificationCenter,
                             modifier = Modifier
                                 .size(38.dp)
                                 .clip(CircleShape)
@@ -291,13 +352,23 @@ fun HomeScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .align(Alignment.TopEnd)
-                                .clip(CircleShape)
-                                .background(GoldenSpark)
-                        )
+                        if (unreadNotificationCount > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .align(Alignment.TopEnd)
+                                    .clip(CircleShape)
+                                    .background(NeonCyan),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (unreadNotificationCount > 9) "9+" else "$unreadNotificationCount",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF070B19)
+                                )
+                            }
+                        }
                     }
 
                     // Profile Avatar
@@ -327,6 +398,132 @@ fun HomeScreen(
                                 fontWeight = FontWeight.Bold,
                                 color = if (isDark) NeonCyan else DeepIndigo
                             )
+                        }
+                    }
+                }
+            }
+        }
+
+        // =========================================================================
+        // RESUME UNFINISHED MOCK TEST BANNER (IF ACTIVE SESSION EXISTS)
+        // =========================================================================
+        if (pendingResumeSession != null && pendingResumeSession.questions.isNotEmpty()) {
+            item {
+                val answeredCount = pendingResumeSession.selectedAnswers.size
+                val totalCount = pendingResumeSession.questions.size
+                val remainingSec = pendingResumeSession.remainingSeconds
+                val mins = remainingSec / 60
+                val secs = remainingSec % 60
+                val timeFormatted = String.format(Locale.getDefault(), "%02d:%02d", mins, secs)
+
+                GlassCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("resume_mock_test_banner"),
+                    shape = RoundedCornerShape(18.dp),
+                    backgroundColor = Color(0xFF1E1428).copy(alpha = 0.95f),
+                    borderColor = AmberWarning.copy(alpha = 0.6f),
+                    borderWidth = 1.5.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(AmberWarning.copy(alpha = 0.2f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.PlayCircleFilled,
+                                        contentDescription = null,
+                                        tint = AmberWarning,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = "Unfinished Mock Test",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = AmberWarning,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                    Text(
+                                        text = pendingResumeSession.title,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = AmberWarning.copy(alpha = 0.15f),
+                                border = androidx.compose.foundation.BorderStroke(0.5.dp, AmberWarning.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = "⏳ $timeFormatted",
+                                    color = AmberWarning,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "Question ${pendingResumeSession.currentQuestionIndex + 1} of $totalCount • $answeredCount answered",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFCBD5E1)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = onResumePendingTest,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = AmberWarning,
+                                    contentColor = Color(0xFF0F172A)
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("resume_test_button")
+                            ) {
+                                Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Resume Test", fontWeight = FontWeight.Bold)
+                            }
+
+                            OutlinedButton(
+                                onClick = onDiscardPendingTest,
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = Color(0xFF94A3B8)
+                                ),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x30FFFFFF)),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.testTag("discard_test_button")
+                            ) {
+                                Text("Discard")
+                            }
                         }
                     }
                 }
@@ -445,6 +642,124 @@ fun HomeScreen(
                     modifier = Modifier.testTag("nova_home_widget")
                 )
             }
+        }
+
+        // =========================================================================
+        // 2.6. WHAT'S NEW FOR YOU (STEP 21 LIVE EXAM INTELLIGENCE)
+        // =========================================================================
+        item {
+            WhatsNewForYouSection(
+                feedState = liveExamFeedState,
+                isRefreshing = isRefreshingLiveExam,
+                onRefresh = onRefreshLiveExam,
+                onOpenUpdateDetail = onOpenLiveExamUpdateDetail,
+                onToggleSave = onToggleSaveLiveExamUpdate,
+                onViewAll = onOpenFullLiveExamIntelligence
+            )
+        }
+
+        // =========================================================================
+        // 2.65. STEP 40: SMART VACANCY, RESULTS & ADMIT CARD RADAR
+        // =========================================================================
+        item {
+            HomeRecruitmentRadarSection(
+                feedState = recruitmentFeedState,
+                onOpenHub = onOpenSmartVacancy
+            )
+        }
+
+        // =========================================================================
+        // 2.7. TODAY'S EXAM BRIEF (STEP 23 SMART LEARNING SYSTEM)
+        // =========================================================================
+        if (novaViewModel != null) {
+            item {
+                TodayExamBriefWidget(
+                    briefing = dailyExamBriefing,
+                    isLoading = isBriefingLoading,
+                    onRefresh = { novaViewModel.fetchDailyExamBriefing(forceRefresh = true) },
+                    onStartBriefing = onOpenDailyBriefing,
+                    onStartMiniQuiz = {
+                        novaViewModel.sendMessage("Aaj ka exam briefing quiz start karo")
+                        onNavigateToTab(AppNavTab.AI_TUTOR) // Navigate to NOVA
+                    },
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+            }
+        }
+
+        // =========================================================================
+        // 2.8. STEP 36: SMART PERSONALIZATION & TODAY'S FOCUS
+        // =========================================================================
+        item {
+            TodaysFocusWidget(
+                recommendation = todayFocusRec,
+                onStartPractice = { config ->
+                    onStartPracticeWithConfig(config)
+                },
+                onStartRevision = { sub, top ->
+                    novaViewModel?.startRevisionSession(sub, top)
+                    onNavigateToTab(AppNavTab.STUDY)
+                },
+                onOpenCurrentAffairs = {
+                    onOpenDailyBriefing()
+                },
+                onOpenQuickStudyModal = {
+                    showQuickStudyDialog = true
+                },
+                isDark = isDark
+            )
+        }
+
+        item {
+            TimeBasedStudyPlanWidget(
+                plan = timeBasedPlan,
+                onSelectTimeOption = { selectedPlanTimeOption = it },
+                onStartStep = { step ->
+                    if (step.activityType == "CURRENT_AFFAIRS") {
+                        onOpenDailyBriefing()
+                    } else if (step.activityType == "REVISION") {
+                        novaViewModel?.startRevisionSession(step.targetSubject, step.targetTopic)
+                        onNavigateToTab(AppNavTab.STUDY)
+                    } else {
+                        onStartPracticeWithConfig(
+                            MockTestConfig(
+                                exam = selectedExamName,
+                                testType = MockTestType.SUBJECT_PRACTICE,
+                                subject = step.targetSubject,
+                                chapter = step.targetTopic,
+                                topic = step.targetTopic,
+                                questionCount = 10,
+                                timeLimitMinutes = 10
+                            )
+                        )
+                    }
+                },
+                isDark = isDark
+            )
+        }
+
+        item {
+            DueForRevisionWidget(
+                topicMasteries = allTopicMasteries,
+                onReviseTopic = { sub, top ->
+                    novaViewModel?.startRevisionSession(sub, top)
+                    onNavigateToTab(AppNavTab.STUDY)
+                },
+                isDark = isDark
+            )
+        }
+
+        item {
+            PrimaryRecommendationCard(
+                recommendation = todayFocusRec,
+                onStartAction = {
+                    onStartPracticeWithConfig(todayFocusRec.config)
+                },
+                onOpenTransparencyModal = {
+                    showTransparencyDialog = true
+                },
+                isDark = isDark
+            )
         }
 
         // =========================================================================
@@ -651,6 +966,17 @@ fun HomeScreen(
                     }
                 }
             }
+        }
+
+        // =========================================================================
+        // 3.5. EXAM RADAR (STEP 21 LIVE PULSE INTELLIGENCE)
+        // =========================================================================
+        item {
+            ExamRadarSection(
+                feedState = liveExamFeedState,
+                onViewFullRadar = onOpenFullLiveExamIntelligence,
+                onOpenUpdateDetail = onOpenLiveExamUpdateDetail
+            )
         }
 
         // =========================================================================
@@ -953,6 +1279,18 @@ fun HomeScreen(
                     }
                 }
             }
+        }
+
+        // =========================================================================
+        // 6.5. TRENDING TOPICS FOR MY EXAM (STEP 21)
+        // =========================================================================
+        item {
+            TrendingExamTopicsSection(
+                feedState = liveExamFeedState,
+                onTopicClick = { onOpenFullLiveExamIntelligence() },
+                onToggleSave = onToggleSaveTrendingTopic,
+                onStartQuizForTopic = { topic -> onStartQuizForTopic(topic.category, topic.title) }
+            )
         }
 
         // =========================================================================
@@ -1626,6 +1964,62 @@ fun HomeScreen(
             }
         )
     }
+
+    // Step 23 Smart Learning Dialogs
+    if (showMcqDialog && novaViewModel != null) {
+        NovaWebMcqGeneratorDialog(
+            initialTopic = "Recent Space Missions & Technology",
+            examName = selectedExamName,
+            onDismiss = { novaViewModel.setShowMcqConfigDialog(false) },
+            onGenerate = { config ->
+                novaViewModel.generateFreshWebMcqs(config)
+            }
+        )
+    }
+
+    if (showRevisionDialog && activeRevisionTopic != null && novaViewModel != null) {
+        SmartRevisionSessionDialog(
+            item = activeRevisionTopic,
+            examName = selectedExamName,
+            onDismiss = { novaViewModel.setShowRevisionDialog(false) },
+            onComplete = { score, total ->
+                novaViewModel.completeRevisionSession(score, total)
+                novaViewModel.setShowRevisionDialog(false)
+            },
+            onAskNova = { prompt ->
+                novaViewModel.setShowRevisionDialog(false)
+                novaViewModel.sendMessage(prompt)
+                onNavigateToTab(AppNavTab.AI_TUTOR) // Navigate to NOVA
+            }
+        )
+    }
+
+    // Step 36 Quick Study & Transparency Dialogs
+    if (showQuickStudyDialog) {
+        QuickStudyModalDialog(
+            weakTopics = topicPerformances.filter { it.isWeak },
+            onStartQuickStudy = { durationMins ->
+                val config = MockTestConfig(
+                    exam = selectedExamName,
+                    testType = MockTestType.SUBJECT_PRACTICE,
+                    subject = todayFocusRec.focusSubject,
+                    chapter = todayFocusRec.focusTopic,
+                    topic = todayFocusRec.focusTopic,
+                    questionCount = durationMins,
+                    timeLimitMinutes = durationMins
+                )
+                onStartPracticeWithConfig(config)
+            },
+            onDismiss = { showQuickStudyDialog = false }
+        )
+    }
+
+    if (showTransparencyDialog) {
+        TransparencySignalDialog(
+            recommendation = todayFocusRec,
+            onDismiss = { showTransparencyDialog = false }
+        )
+    }
 }
 
 // =========================================================================
@@ -1794,5 +2188,206 @@ private fun parseCustomStudyBlocks(json: String?): List<StudyTimeBlock> {
         list
     } catch (e: Exception) {
         emptyList()
+    }
+}
+
+@Composable
+fun HomeRecruitmentRadarSection(
+    feedState: RecruitmentFeedState,
+    onOpenHub: (String?) -> Unit
+) {
+    val isDark = isAppInDarkTheme()
+    val vacanciesCount = feedState.allActiveVacancies.size
+    val resultsCount = feedState.resultsList.size
+    val admitCardsCount = feedState.admitCardsList.size
+
+    GlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("home_recruitment_radar_card"),
+        shape = RoundedCornerShape(18.dp),
+        elevation = 3.dp
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            // Header Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF3B82F6).copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("🚀", fontSize = 16.sp)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "Recruitment Radar",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) Color.White else Color(0xFF0F172A)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color(0xFF10B981).copy(alpha = 0.15f)
+                            ) {
+                                Text(
+                                    "LIVE",
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color(0xFF10B981),
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            "Verified Sarkari Jobs, Results & Admit Cards",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = 11.sp,
+                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                        )
+                    }
+                }
+
+                TextButton(
+                    onClick = { onOpenHub(null) },
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text("View All", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(2.dp))
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // Quick Category Shortcuts
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                QuickHubPill(
+                    icon = "💼",
+                    label = "Vacancies",
+                    badge = "$vacanciesCount Active",
+                    badgeColor = Color(0xFF3B82F6),
+                    modifier = Modifier.weight(1f),
+                    onClick = { onOpenHub(RecruitmentContentType.VACANCY.name) }
+                )
+                QuickHubPill(
+                    icon = "🏆",
+                    label = "Results",
+                    badge = "$resultsCount New",
+                    badgeColor = Color(0xFF10B981),
+                    modifier = Modifier.weight(1f),
+                    onClick = { onOpenHub(RecruitmentContentType.RESULT.name) }
+                )
+                QuickHubPill(
+                    icon = "🎫",
+                    label = "Admit Cards",
+                    badge = "$admitCardsCount Out",
+                    badgeColor = Color(0xFFF59E0B),
+                    modifier = Modifier.weight(1f),
+                    onClick = { onOpenHub(RecruitmentContentType.ADMIT_CARD.name) }
+                )
+            }
+
+            // Top Vacancy Teaser if available
+            val topVacancy = feedState.latestForYouVacancies.firstOrNull() ?: feedState.allActiveVacancies.firstOrNull()
+            if (topVacancy != null) {
+                Spacer(Modifier.height(10.dp))
+                Surface(
+                    onClick = { onOpenHub(RecruitmentContentType.VACANCY.name) },
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (isDark) Color(0xFF0F172A).copy(alpha = 0.6f) else Color(0xFFF8FAFC),
+                    border = androidx.compose.foundation.BorderStroke(0.5.dp, if (isDark) Color(0xFF334155) else Color(0xFFE2E8F0)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                topVacancy.title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = if (isDark) Color.White else Color(0xFF0F172A)
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "${topVacancy.organization} • ${if (topVacancy.totalVacancies != null && topVacancy.totalVacancies > 0) "${topVacancy.totalVacancies} Posts • " else ""}Closes ${topVacancy.applicationLastDate ?: "Soon"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontSize = 11.sp,
+                                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun QuickHubPill(
+    icon: String,
+    label: String,
+    badge: String,
+    badgeColor: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val isDark = isAppInDarkTheme()
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        color = if (isDark) Color(0xFF1E293B).copy(alpha = 0.7f) else Color(0xFFF1F5F9),
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, if (isDark) Color(0xFF334155) else Color(0xFFE2E8F0)),
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(icon, fontSize = 16.sp)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                label,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isDark) Color.White else Color(0xFF0F172A),
+                maxLines = 1
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                badge,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                color = badgeColor
+            )
+        }
     }
 }

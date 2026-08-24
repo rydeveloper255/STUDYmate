@@ -61,6 +61,9 @@ fun NovaAssistantChatTab(
     val context = LocalContext.current
     val messages by viewModel.messages.collectAsState()
     val isGenerating by viewModel.isGenerating.collectAsState()
+    val searchingStatusText by viewModel.searchingStatusText.collectAsState()
+    val isWebSearchActive by viewModel.isWebSearchActive.collectAsState()
+    val webSearchMode by viewModel.webSearchMode.collectAsState()
     val attachedUri by viewModel.attachedImageUri.collectAsState()
     val voiceState by viewModel.voiceManager.voiceState.collectAsState()
     val settings by viewModel.settings.collectAsState()
@@ -367,6 +370,9 @@ fun NovaAssistantChatTab(
                                 type = "text/plain"
                             }
                             context.startActivity(android.content.Intent.createChooser(sendIntent, "Share Study Notes"))
+                        },
+                        onFeedback = { messageId, isHelpful ->
+                            viewModel.submitMessageFeedback(messageId, isHelpful)
                         }
                     )
                 }
@@ -374,7 +380,7 @@ fun NovaAssistantChatTab(
                 // AI Response generation indicator
                 if (isGenerating) {
                     item {
-                        NovaThinkingBubble()
+                        NovaThinkingBubble(statusText = searchingStatusText)
                     }
                 }
             }
@@ -504,6 +510,17 @@ fun NovaAssistantChatTab(
                 }
             }
         }
+
+        // =========================================================================
+        // 5.5 WEB SEARCH MODE BAR
+        // =========================================================================
+        NovaWebSearchModeBar(
+            isActive = isWebSearchActive,
+            currentMode = webSearchMode,
+            onToggleActive = { viewModel.toggleWebSearchMode(it) },
+            onSelectMode = { viewModel.setWebSearchMode(it) },
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)
+        )
 
         // =========================================================================
         // 6. FLOATING GLASS COMPOSER
@@ -795,7 +812,8 @@ fun NovaChatMessageBubble(
     onCopyText: (String) -> Unit,
     onSaveNote: (String) -> Unit,
     onExportPdf: (String) -> Unit,
-    onShareText: (String) -> Unit
+    onShareText: (String) -> Unit,
+    onFeedback: ((String, Boolean) -> Unit)? = null
 ) {
     val isUser = message.sender == NovaSender.USER
     val timeFormatted = remember(message.timestamp) {
@@ -863,6 +881,59 @@ fun NovaChatMessageBubble(
                         color = Color.White,
                         lineHeight = 19.sp
                     )
+
+                    // Step 22: Fact Verification Result Card
+                    if (message.verificationResult != null) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        NovaVerificationResultCard(
+                            result = message.verificationResult,
+                            onOpenSource = { url ->
+                                onExecuteAction(NovaActionType.OPEN_WEB_SOURCE, url)
+                            }
+                        )
+                    }
+
+                    // Step 22: News Explanation Card
+                    if (message.newsExplanation != null) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        NovaNewsExplanationCard(
+                            explanation = message.newsExplanation,
+                            onOpenSource = { url ->
+                                onExecuteAction(NovaActionType.OPEN_WEB_SOURCE, url)
+                            },
+                            onStartQuiz = { topic ->
+                                onExecuteAction(NovaActionType.START_QUIZ, "{\"topic\":\"$topic\"}")
+                            }
+                        )
+                    }
+
+                    // Step 22: Why Study This Card
+                    if (message.whyStudyResult != null) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        NovaWhyStudyCard(
+                            result = message.whyStudyResult,
+                            onStartPractice = {
+                                onExecuteAction(
+                                    NovaActionType.START_QUIZ,
+                                    "{\"topic\":\"${message.whyStudyResult.topic}\",\"subject\":\"${message.whyStudyResult.subject}\"}"
+                                )
+                            },
+                            onAddToRevision = {
+                                onExecuteAction(NovaActionType.ADD_TOPIC_TO_REVISION, message.whyStudyResult.topic)
+                            }
+                        )
+                    }
+
+                    // Step 22: Web Sources Citations
+                    if (message.webSources.isNotEmpty() && message.verificationResult == null && message.newsExplanation == null) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        NovaWebSourcesCard(
+                            sources = message.webSources,
+                            onOpenSource = { url ->
+                                onExecuteAction(NovaActionType.OPEN_WEB_SOURCE, url)
+                            }
+                        )
+                    }
 
                     // Current Affairs preview cards (if attached)
                     if (message.currentAffairsPreview.isNotEmpty()) {
@@ -960,6 +1031,31 @@ fun NovaChatMessageBubble(
                                         imageVector = Icons.Default.ContentCopy,
                                         contentDescription = "Copy Text",
                                         tint = TextSecondary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+
+                                // Helpful Feedback Buttons
+                                IconButton(
+                                    onClick = { onFeedback?.invoke(message.id, true) },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (message.userFeedback == "HELPFUL") Icons.Default.ThumbUp else Icons.Outlined.ThumbUp,
+                                        contentDescription = "Helpful",
+                                        tint = if (message.userFeedback == "HELPFUL") NeonCyan else TextSecondary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = { onFeedback?.invoke(message.id, false) },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (message.userFeedback == "NOT_HELPFUL") Icons.Default.ThumbDown else Icons.Outlined.ThumbDown,
+                                        contentDescription = "Not Helpful",
+                                        tint = if (message.userFeedback == "NOT_HELPFUL") CoralPink else TextSecondary,
                                         modifier = Modifier.size(14.dp)
                                     )
                                 }
@@ -1178,7 +1274,7 @@ private fun NovaActionCardGroup(
 // THINKING / GENERATING BUBBLE
 // =============================================================================
 @Composable
-private fun NovaThinkingBubble() {
+private fun NovaThinkingBubble(statusText: String? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1215,7 +1311,7 @@ private fun NovaThinkingBubble() {
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "NOVA is thinking...",
+                    text = statusText ?: "NOVA is thinking...",
                     fontSize = 12.sp,
                     color = NeonCyan,
                     fontWeight = FontWeight.Medium

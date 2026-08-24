@@ -6,10 +6,12 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -114,6 +116,13 @@ fun ProgressDashboardScreen(
     novaProgressAnalysis: String? = null,
     isNovaProgressAnalyzing: Boolean = false,
     onGenerateNovaProgressAnalysis: ((examName: String, summaryText: String, language: String) -> Unit)? = null,
+    pendingResumeSession: ActiveTestState? = null,
+    onResumePendingTest: () -> Unit = {},
+    onDiscardPendingTest: () -> Unit = {},
+    userPreferences: UserStudyPreferences = UserStudyPreferences(),
+    onUpdatePersonalizationSettings: (com.example.service.intelligence.PersonalizationSettings) -> Unit = {},
+    onResetPersonalizationSignals: () -> Unit = {},
+    onRecordSpacedRevisionFeedback: (subject: String, topic: String, feedback: String) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -338,6 +347,39 @@ fun ProgressDashboardScreen(
             mistakes = mistakes,
             mockAttempts = examIsolatedAttempts,
             examDateMillis = user?.examDateMillis ?: (System.currentTimeMillis() + 30L * 24 * 3600 * 1000)
+        )
+    }
+
+    val learningProfile = remember(user, examIsolatedAttempts, mistakes, topicMasteries, allFocusSessions, userPreferences) {
+        PersonalizationEngine.computeLearningProfile(
+            user = user,
+            attempts = examIsolatedAttempts,
+            mistakes = mistakes,
+            topicMasteries = topicMasteries,
+            focusSessions = allFocusSessions,
+            settings = PersonalizationSettings(
+                isEnabled = userPreferences.personalizationEnabled,
+                dailyQuestionGoal = userPreferences.dailyQuestionGoal,
+                dailyStudyMinutesGoal = userPreferences.dailyStudyMinutesGoal,
+                weeklyTestsGoal = userPreferences.weeklyTestsGoal,
+                studyTimeAvailableOption = userPreferences.studyTimeAvailableOption
+            )
+        )
+    }
+
+    val subjectDetails = remember(user, examIsolatedAttempts, topicMasteries) {
+        PersonalizationEngine.computeSubjectPerformances(
+            user = user,
+            attempts = examIsolatedAttempts,
+            topicMasteries = topicMasteries
+        )
+    }
+
+    val topicDetails = remember(examIsolatedAttempts, mistakes, topicMasteries) {
+        PersonalizationEngine.computeTopicPerformances(
+            attempts = examIsolatedAttempts,
+            mistakes = mistakes,
+            topicMasteries = topicMasteries
         )
     }
 
@@ -626,25 +668,28 @@ fun ProgressDashboardScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Sub-navigation Switcher Tabs
+                // Sub-navigation Switcher Tabs (Step 36: 7 Sections)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
                         .background(Color(0x251E293B))
-                        .padding(3.dp),
+                        .padding(3.dp)
+                        .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     listOf(
-                        if (isHindi) "एनालिटिक्स" else "Analytics",
+                        if (isHindi) "ओवरऑल" else "Analytics",
+                        if (isHindi) "विषय" else "Subjects",
+                        if (isHindi) "टॉपिक्स मैट्रिक्स" else "Topics Matrix",
+                        if (isHindi) "टेस्ट इतिहास" else "Test History",
+                        if (isHindi) "गलतियां (${mistakes.size})" else "Mistakes (${mistakes.size})",
                         if (isHindi) "रीविजन (${revisionQueue.size})" else "Revision (${revisionQueue.size})",
-                        if (isHindi) "मास्टरी" else "Mastery",
-                        if (isHindi) "गलतियां (${mistakes.size})" else "Mistakes (${mistakes.size})"
+                        if (isHindi) "सेटिंग्स व लक्ष्य" else "Settings & Goals"
                     ).forEachIndexed { idx, label ->
                         val isSelected = selectedSubTab == idx
                         Box(
                             modifier = Modifier
-                                .weight(1f)
                                 .height(36.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(
@@ -653,7 +698,8 @@ fun ProgressDashboardScreen(
                                 )
                                 .springClickable(testTag = "progress_subtab_$idx") {
                                     selectedSubTab = idx
-                                },
+                                }
+                                .padding(horizontal = 12.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -663,6 +709,130 @@ fun ProgressDashboardScreen(
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1
                             )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (pendingResumeSession != null && pendingResumeSession.questions.isNotEmpty()) {
+            item {
+                val answeredCount = pendingResumeSession.selectedAnswers.size
+                val totalCount = pendingResumeSession.questions.size
+                val remainingSec = pendingResumeSession.remainingSeconds
+                val mins = remainingSec / 60
+                val secs = remainingSec % 60
+                val timeFormatted = String.format(Locale.getDefault(), "%02d:%02d", mins, secs)
+
+                GlassCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("progress_resume_mock_test_banner"),
+                    shape = RoundedCornerShape(18.dp),
+                    backgroundColor = Color(0xFF1E1428).copy(alpha = 0.95f),
+                    borderColor = AmberWarning.copy(alpha = 0.7f),
+                    borderWidth = 1.5.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(AmberWarning.copy(alpha = 0.2f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.PlayCircleFilled,
+                                        contentDescription = null,
+                                        tint = AmberWarning,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = if (isHindi) "अधूरा मॉक टेस्ट सत्र" else "Unfinished Mock Test Session",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = AmberWarning,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                    Text(
+                                        text = pendingResumeSession.title,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = AmberWarning.copy(alpha = 0.15f),
+                                border = androidx.compose.foundation.BorderStroke(0.5.dp, AmberWarning.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = "⏳ $timeFormatted",
+                                    color = AmberWarning,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = if (isHindi) "प्रश्न ${pendingResumeSession.currentQuestionIndex + 1} / $totalCount • $answeredCount उत्तर दिए गए"
+                            else "Question ${pendingResumeSession.currentQuestionIndex + 1} of $totalCount • $answeredCount answered",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFCBD5E1)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = onResumePendingTest,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = AmberWarning,
+                                    contentColor = Color(0xFF0F172A)
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("progress_resume_test_button")
+                            ) {
+                                Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(if (isHindi) "टेस्ट जारी रखें" else "Resume Test", fontWeight = FontWeight.Bold)
+                            }
+
+                            OutlinedButton(
+                                onClick = onDiscardPendingTest,
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = Color(0xFF94A3B8)
+                                ),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x30FFFFFF)),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.testTag("progress_discard_test_button")
+                            ) {
+                                Text(if (isHindi) "रद्द करें" else "Discard")
+                            }
                         }
                     }
                 }
@@ -1634,7 +1804,67 @@ fun ProgressDashboardScreen(
                 }
             }
         } else if (selectedSubTab == 1) {
-            // --- SUBTAB 1: SMART REVISION QUEUE ---
+            // --- SUBTAB 1: SUBJECTS PERFORMANCE BREAKDOWN ---
+            item {
+                SubjectsPerformanceView(
+                    subjectDetails = subjectDetails,
+                    onStartSubjectPractice = { subName ->
+                        onStartTestWithConfig(
+                            MockTestConfig(
+                                exam = currentExamName,
+                                testType = MockTestType.SUBJECT_TEST,
+                                subject = subName,
+                                questionCount = 15,
+                                timeLimitMinutes = 20
+                            )
+                        )
+                    }
+                )
+            }
+        } else if (selectedSubTab == 2) {
+            // --- SUBTAB 2: TOPICS SPEED & ACCURACY MATRIX ---
+            item {
+                TopicsMatrixView(
+                    topicDetails = topicDetails,
+                    onStartTopicPractice = { subName, topName ->
+                        onStartTestWithConfig(
+                            MockTestConfig(
+                                exam = currentExamName,
+                                testType = MockTestType.TOPIC_TEST,
+                                subject = subName,
+                                topic = topName,
+                                questionCount = 10,
+                                timeLimitMinutes = 15
+                            )
+                        )
+                    }
+                )
+            }
+        } else if (selectedSubTab == 3) {
+            // --- SUBTAB 3: MOCK TEST & PRACTICE HISTORY ---
+            item {
+                TestHistoryView(
+                    attempts = examIsolatedAttempts,
+                    onReviewAttempt = onReviewPastTest,
+                    onRetakeAttempt = onRetakeTest,
+                    onDeleteAttempt = onDeletePastTest
+                )
+            }
+        } else if (selectedSubTab == 4) {
+            // --- SUBTAB 4: MISTAKE BOOK & DIAGNOSTICS ---
+            item {
+                MistakeReviewView(
+                    mistakes = mistakes,
+                    onDiagnoseMistakes = onDiagnoseMistakes,
+                    onMarkMistakeMastered = onMarkMistakeMastered,
+                    onRequestAiExplanation = { mistake ->
+                        onDiagnoseMistakes(mistake.subject)
+                    },
+                    aiExplanationText = mistakeDiagnosis
+                )
+            }
+        } else if (selectedSubTab == 5) {
+            // --- SUBTAB 5: SMART SPACED REVISION QUEUE ---
             item {
                 SmartRevisionQueueView(
                     queue = revisionQueue,
@@ -1652,39 +1882,17 @@ fun ProgressDashboardScreen(
                                 timeLimitMinutes = if (count <= 5) 10 else 20
                             )
                         )
-                    }
-                )
-            }
-        } else if (selectedSubTab == 2) {
-            // --- SUBTAB 2: SYLLABUS MASTERY & OBJECTIVES ---
-            item {
-                TopicMasteryAndObjectivesView(
-                    user = user,
-                    examObjective = examObjective,
-                    topicMasteries = topicMasteries,
-                    sessionHistory = sessionHistory,
-                    snapshot = snapshot,
-                    examReadiness = examReadiness,
-                    subjectSummaries = subjectSummaries,
-                    recommendations = recommendations,
-                    dailyPlan = dailyPlan,
-                    onSaveExamObjective = onSaveExamObjective,
-                    onStartFocusOnTopic = onStartFocusOnTopic,
-                    onSetManualTopicOverride = onSetManualTopicOverride,
-                    onResetPreparationData = onResetPreparationData
-                )
-            }
-        } else {
-            // --- SUBTAB 3: MISTAKE BOOK & DIAGNOSTICS ---
-            item {
-                MistakeReviewView(
-                    mistakes = mistakes,
-                    onDiagnoseMistakes = onDiagnoseMistakes,
-                    onMarkMistakeMastered = onMarkMistakeMastered,
-                    onRequestAiExplanation = { mistake ->
-                        onDiagnoseMistakes(mistake.subject)
                     },
-                    aiExplanationText = mistakeDiagnosis
+                    onRecordFeedback = onRecordSpacedRevisionFeedback
+                )
+            }
+        } else if (selectedSubTab == 6) {
+            // --- SUBTAB 6: PERSONALIZATION SETTINGS & GOALS ---
+            item {
+                PersonalizationSettingsView(
+                    userPreferences = userPreferences,
+                    onUpdateSettings = onUpdatePersonalizationSettings,
+                    onResetSignals = onResetPersonalizationSignals
                 )
             }
         }

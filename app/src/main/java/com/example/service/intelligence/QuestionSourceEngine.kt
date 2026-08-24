@@ -117,6 +117,16 @@ class QuestionSourceEngine(
                     )
                 }
 
+                QuestionSourceType.AI_PRACTICE -> {
+                    curateChapterPracticeQuestions(
+                        config = config,
+                        targetExamName = targetExamName,
+                        targetSubject = targetSubject,
+                        targetCount = targetCount,
+                        targetLanguage = targetLanguage
+                    )
+                }
+
                 QuestionSourceType.MIXED -> {
                     curateMixedQuestions(
                         config = config,

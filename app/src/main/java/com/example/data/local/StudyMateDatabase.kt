@@ -35,9 +35,12 @@ import com.example.data.model.*
         UserLearningBookmark::class,
         QuestionHistoryEntity::class,
         QuestionQualityReportEntity::class,
+        LiveExamUpdateEntity::class,
+        TrendingExamTopicEntity::class,
+        com.example.data.model.RecruitmentEntity::class,
         com.example.data.persistence.PendingSyncEntity::class
     ],
-    version = 11,
+    version = 14,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -56,6 +59,8 @@ abstract class StudyMateDatabase : RoomDatabase() {
     abstract fun smartNoteDao(): SmartNoteDao
     abstract fun currentAffairsDao(): CurrentAffairsDao
     abstract fun examUpdateDao(): ExamUpdateDao
+    abstract fun liveExamUpdateDao(): LiveExamUpdateDao
+    abstract fun trendingExamTopicDao(): TrendingExamTopicDao
     abstract fun examObjectiveDao(): ExamObjectiveDao
     abstract fun topicMasteryDao(): TopicMasteryDao
     abstract fun studentSessionHistoryDao(): StudentSessionHistoryDao
@@ -65,6 +70,7 @@ abstract class StudyMateDatabase : RoomDatabase() {
     abstract fun userLearningBookmarkDao(): UserLearningBookmarkDao
     abstract fun questionHistoryDao(): QuestionHistoryDao
     abstract fun questionQualityReportDao(): QuestionQualityReportDao
+    abstract fun recruitmentDao(): RecruitmentDao
     abstract fun pendingSyncDao(): com.example.data.persistence.PendingSyncDao
 
     companion object {

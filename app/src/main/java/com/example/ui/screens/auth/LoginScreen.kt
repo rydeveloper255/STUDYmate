@@ -45,6 +45,7 @@ fun LoginScreen(
     onEmailSignIn: (email: String, pass: String) -> Unit,
     onEmailSignUp: (email: String, pass: String, name: String, examName: String) -> Unit = { _, _, _, _ -> },
     onGuestSignIn: () -> Unit,
+    onForgotPassword: (email: String) -> Unit = {},
     onDismissError: () -> Unit = {}
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -457,6 +458,29 @@ fun LoginScreen(
                             ),
                             shape = RoundedCornerShape(14.dp)
                         )
+
+                        if (!isSignUpMode) {
+                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                                TextButton(
+                                    onClick = {
+                                        if (emailInput.isNotBlank()) {
+                                            onForgotPassword(emailInput)
+                                            showEmailDialog = false
+                                        } else {
+                                            Toast.makeText(context, "Please enter your email address to reset password", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Text(
+                                        text = "Forgot Password?",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = NeonCyan,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
 
                         if (isSignUpMode) {
                             Column {

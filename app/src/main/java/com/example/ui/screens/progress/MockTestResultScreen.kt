@@ -999,6 +999,77 @@ fun MockTestResultScreen(
                                 }
                             }
                         }
+
+                        if (!isCorrect) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        onStartPractice?.invoke(
+                                            com.example.service.intelligence.SmartPracticeRecommendation(
+                                                id = "rec_revise_${q.id}",
+                                                title = "Revise: ${q.topic.ifBlank { q.subject }}",
+                                                subtitle = "Targeted practice on missed question topic",
+                                                priority = 1,
+                                                targetExam = q.subject,
+                                                targetSubject = q.subject,
+                                                targetChapter = q.chapter,
+                                                targetTopic = q.topic.ifBlank { q.subject },
+                                                recommendedQuestionCount = 5,
+                                                recommendedDifficulty = "Medium",
+                                                recommendedType = com.example.data.model.MockTestType.TOPIC_TEST
+                                            )
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, GoldenSpark.copy(alpha = 0.5f)),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(34.dp)
+                                        .testTag("revise_topic_${idx}_btn")
+                                ) {
+                                    Icon(Icons.Filled.School, null, modifier = Modifier.size(13.dp), tint = GoldenSpark)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Revise Topic", fontSize = 11.sp, color = GoldenSpark, fontWeight = FontWeight.Bold)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        onStartPractice?.invoke(
+                                            com.example.service.intelligence.SmartPracticeRecommendation(
+                                                id = "rec_similar_${q.id}",
+                                                title = "Practice Similar: ${q.topic.ifBlank { q.subject }}",
+                                                subtitle = "Solve high-yield similar exam pattern questions",
+                                                priority = 1,
+                                                targetExam = q.subject,
+                                                targetSubject = q.subject,
+                                                targetChapter = q.chapter,
+                                                targetTopic = q.topic.ifBlank { q.subject },
+                                                recommendedQuestionCount = 5,
+                                                recommendedDifficulty = "Medium",
+                                                recommendedType = com.example.data.model.MockTestType.TOPIC_TEST
+                                            )
+                                        )
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan.copy(alpha = 0.2f), contentColor = NeonCyan),
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.5f)),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(34.dp)
+                                        .testTag("practice_similar_${idx}_btn")
+                                ) {
+                                    Icon(Icons.Filled.AutoAwesome, null, modifier = Modifier.size(13.dp), tint = NeonCyan)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Practice Similar", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                     }
                 }
             }

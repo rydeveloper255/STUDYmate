@@ -365,6 +365,11 @@ class SupabaseSyncService(
         try {
             val pendingItems = database.pendingSyncDao().getAllPendingOnce()
             for (item in pendingItems) {
+                if (item.retryCount > 4) {
+                    Log.w(TAG, "Sync item ${item.tableName}/${item.recordId} exceeded retry limit. Keeping in dead-letter log.")
+                    continue
+                }
+
                 val res = client.from(item.tableName).upsert(
                     jsonBody = item.jsonPayload,
                     onConflict = if (item.tableName == "profiles") "id" else "user_id,local_id",
@@ -439,6 +444,63 @@ class SupabaseSyncService(
                 PersistenceMonitor.log("TEST_RESULT_INSERT", "test_attempts", attempt.id.toString(), userId, "OFFLINE_QUEUED", details = e.message)
                 PersistenceMonitor.updateStatus(PersistenceStatus.Offline(message = "⚠ Offline — test result saved on device"))
             }
+        }
+    }
+
+    suspend fun submitTestAttemptAtomic(
+        attempt: MockTestAttempt,
+        sessionId: String? = null,
+        answersJson: String = "[]"
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val attemptJson = JSONObject().apply {
+                put("local_id", attempt.id)
+                put("title", attempt.title)
+                put("subject", attempt.subject)
+                put("exam_name", attempt.examName)
+                put("topic", attempt.topic)
+                put("difficulty", attempt.difficulty)
+                put("score", attempt.score)
+                put("total_questions", attempt.totalQuestions)
+                put("correct_count", attempt.correctCount)
+                put("incorrect_count", attempt.incorrectCount)
+                put("skipped_count", attempt.skippedCount)
+                put("accuracy_percent", attempt.accuracyPercent.toDouble())
+                put("time_spent_seconds", attempt.timeSpentSeconds)
+                put("weak_topics", JSONArray(attempt.weakTopics))
+                put("strong_topics", JSONArray(attempt.strongTopics))
+                put("ai_recommendation", attempt.aiRecommendation)
+                put("marking_scheme", attempt.markingScheme)
+                put("timestamp", attempt.timestamp)
+            }
+
+            if (!client.isReady() || sessionId.isNullOrBlank()) {
+                // Fallback to local sync & queue
+                syncMockTestAttempt(attempt)
+                return@withContext true
+            }
+
+            val rpcParams = JSONObject().apply {
+                put("p_session_id", sessionId)
+                put("p_attempt_json", attemptJson)
+                put("p_answers_json", JSONArray(answersJson))
+            }
+
+            val res = client.rpc("submit_test_atomic", rpcParams.toString(), accessToken = token)
+            if (res.isSuccess) {
+                PersistenceMonitor.log("SUBMIT_TEST_ATOMIC", "test_attempts", attempt.id.toString(), userId, "SUCCESS")
+                PersistenceMonitor.updateStatus(PersistenceStatus.Saved(message = "✓ Test finalized and saved"))
+                true
+            } else {
+                val errorMsg = (res as? SupabaseResult.Error)?.message
+                syncMockTestAttempt(attempt)
+                PersistenceMonitor.log("SUBMIT_TEST_ATOMIC", "test_attempts", attempt.id.toString(), userId, "OFFLINE_FALLBACK", details = errorMsg)
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in submitTestAttemptAtomic: ${e.message}")
+            syncMockTestAttempt(attempt)
+            false
         }
     }
 
