@@ -23,11 +23,19 @@ jobs:
           GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY || 'dummy_api_key_for_build' }}
           SUPABASE_URL=${{ secrets.SUPABASE_URL || 'https://dummy.supabase.co' }}
           SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY || 'dummy_anon_key_for_build' }}
+          SERPER_API_KEY=${{ secrets.SERPER_API_KEY || 'dummy_serper_key' }}
+          ELEVENLABS_API_KEY=${{ secrets.ELEVENLABS_API_KEY || 'dummy_elevenlabs_key' }}
+          ELEVENLABS_VOICE_ID=${{ secrets.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM' }}
+          ELEVENLABS_MODEL_ID=${{ secrets.ELEVENLABS_MODEL_ID || 'eleven_multilingual_v2' }}
           EOF
           cat << 'EOF' > .env.example
           GEMINI_API_KEY=dummy_api_key_for_build
           SUPABASE_URL=https://dummy.supabase.co
           SUPABASE_ANON_KEY=dummy_anon_key_for_build
+          SERPER_API_KEY=dummy_serper_key
+          ELEVENLABS_API_KEY=dummy_elevenlabs_key
+          ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
+          ELEVENLABS_MODEL_ID=eleven_multilingual_v2
           EOF
 
       - name: Setup JDK 17

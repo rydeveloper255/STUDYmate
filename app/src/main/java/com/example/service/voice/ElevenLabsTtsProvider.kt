@@ -85,15 +85,24 @@ class ElevenLabsTtsProvider(
         .retryOnConnectionFailure(true)
         .build()
 
+    private fun getBuildConfigField(fieldName: String): String {
+        return try {
+            val field = BuildConfig::class.java.getField(fieldName)
+            (field.get(null) as? String)?.trim() ?: ""
+        } catch (e: Throwable) {
+            ""
+        }
+    }
+
     private fun getResolvedApiKey(): String {
         return try {
-            val key = BuildConfig.ELEVENLABS_API_KEY
+            val key = getBuildConfigField("ELEVENLABS_API_KEY")
             if (key.isBlank() || key.contains("dummy_elevenlabs_key", ignoreCase = true)) {
                 ""
             } else {
                 key.trim()
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             ""
         }
     }
@@ -101,13 +110,13 @@ class ElevenLabsTtsProvider(
     private fun getResolvedVoiceId(): String {
         customVoiceId?.takeIf { it.isNotBlank() }?.let { return it }
         return try {
-            val voiceId = BuildConfig.ELEVENLABS_VOICE_ID
+            val voiceId = getBuildConfigField("ELEVENLABS_VOICE_ID")
             if (voiceId.isNotBlank() && !voiceId.contains("dummy", ignoreCase = true)) {
                 voiceId.trim()
             } else {
                 DEFAULT_VOICE_ID
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             DEFAULT_VOICE_ID
         }
     }
@@ -115,13 +124,13 @@ class ElevenLabsTtsProvider(
     private fun getResolvedModelId(): String {
         customModelId?.takeIf { it.isNotBlank() }?.let { return it }
         return try {
-            val modelId = BuildConfig.ELEVENLABS_MODEL_ID
+            val modelId = getBuildConfigField("ELEVENLABS_MODEL_ID")
             if (modelId.isNotBlank() && !modelId.contains("dummy", ignoreCase = true)) {
                 modelId.trim()
             } else {
                 DEFAULT_MODEL_ID
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             DEFAULT_MODEL_ID
         }
     }
