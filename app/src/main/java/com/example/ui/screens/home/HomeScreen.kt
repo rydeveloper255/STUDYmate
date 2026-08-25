@@ -117,6 +117,7 @@ fun HomeScreen(
     val currentTheme = currentThemeMode()
 
     // Modals state
+    var showThemeSelectionDialog by remember { mutableStateOf(false) }
     var showExamSwitcherDialog by remember { mutableStateOf(false) }
     var showQuickSearchDialog by remember { mutableStateOf(false) }
     var showNotificationSummaryDialog by remember { mutableStateOf(false) }
@@ -351,11 +352,16 @@ fun HomeScreen(
                         }
                     }
 
-                    // Right: Notifications & Profile
+                    // Right: Theme Switcher, Notifications & Profile
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        // Quick Theme Switcher (1-tap toggle for light / dark / night study mode)
+                        GlassThemeToggle(
+                            testTag = "home_theme_toggle_button"
+                        )
+
                         // Notification Icon with Badge
                         Box {
                             IconButton(
@@ -810,6 +816,18 @@ fun HomeScreen(
     // =========================================================================
     // MODAL DIALOGS
     // =========================================================================
+
+    // 0. THEME & NIGHT-TIME STUDY MODE DIALOG
+    if (showThemeSelectionDialog) {
+        val themeCtrl = LocalThemeController.current
+        ThemeSelectionDialog(
+            currentTheme = themeCtrl.themeMode,
+            onSelectTheme = { newTheme ->
+                themeCtrl.setThemeMode(newTheme)
+            },
+            onDismiss = { showThemeSelectionDialog = false }
+        )
+    }
 
     // 1. EXAM SWITCHER MODAL DIALOG
     if (showExamSwitcherDialog) {

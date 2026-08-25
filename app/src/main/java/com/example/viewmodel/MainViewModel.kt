@@ -610,6 +610,7 @@ class MainViewModel(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     init {
+        loadInitialThemeSettings()
         initTts()
         loadInitialNotificationSettings()
         loadAppNotificationsFromDisk()
@@ -2820,14 +2821,38 @@ class MainViewModel(
         _flashcardMessage.value = null
     }
 
+    private fun loadInitialThemeSettings() {
+        try {
+            val prefs = getApplication<Application>().getSharedPreferences("studymate_theme_prefs", android.content.Context.MODE_PRIVATE)
+            val savedMode = prefs.getString("selected_theme_mode", AppThemeMode.NOVA_DARK.name)
+            val mode = try {
+                AppThemeMode.valueOf(savedMode ?: AppThemeMode.NOVA_DARK.name)
+            } catch (e: Exception) {
+                AppThemeMode.NOVA_DARK
+            }
+            _themeMode.value = mode
+            _isDarkTheme.value = (mode != AppThemeMode.GLASS_LIGHT)
+        } catch (_: Exception) {}
+    }
+
     fun updateTheme(isDark: Boolean) {
         _isDarkTheme.value = isDark
-        _themeMode.value = if (isDark) AppThemeMode.NOVA_DARK else AppThemeMode.GLASS_LIGHT
+        val mode = if (isDark) AppThemeMode.NOVA_DARK else AppThemeMode.GLASS_LIGHT
+        _themeMode.value = mode
+        saveThemeModeToDisk(mode)
     }
 
     fun updateThemeMode(mode: AppThemeMode) {
         _themeMode.value = mode
         _isDarkTheme.value = (mode != AppThemeMode.GLASS_LIGHT)
+        saveThemeModeToDisk(mode)
+    }
+
+    private fun saveThemeModeToDisk(mode: AppThemeMode) {
+        try {
+            val prefs = getApplication<Application>().getSharedPreferences("studymate_theme_prefs", android.content.Context.MODE_PRIVATE)
+            prefs.edit().putString("selected_theme_mode", mode.name).apply()
+        } catch (_: Exception) {}
     }
 
     fun updateNotificationPrefs(prefs: NotificationPreference) {

@@ -1402,25 +1402,10 @@ fun ThemeToggleButton(
     modifier: Modifier = Modifier,
     testTag: String = "theme_toggle_button"
 ) {
-    val themeController = LocalThemeController.current
-    val isDark = themeController.isDarkTheme
-
-    IconButton(
-        onClick = { themeController.toggleTheme() },
-        modifier = modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(if (isDark) Color(0x3038BDF8) else Color(0x256366F1))
-            .border(1.dp, if (isDark) Color(0x5038BDF8) else Color(0x406366F1), CircleShape)
-            .testTag(testTag)
-    ) {
-        Icon(
-            imageVector = if (isDark) Icons.Filled.DarkMode else Icons.Filled.LightMode,
-            contentDescription = if (isDark) "Switch to Light Mode" else "Switch to Dark Mode",
-            tint = if (isDark) GoldenSpark else Color(0xFFF59E0B),
-            modifier = Modifier.size(20.dp)
-        )
-    }
+    GlassThemeToggle(
+        modifier = modifier,
+        testTag = testTag
+    )
 }
 
 // =========================================================================
@@ -1938,6 +1923,341 @@ fun GlassToast(
                     )
                 }
             }
+        }
+    }
+}
+
+// =========================================================================
+// GLASS THEME SWITCHER & NIGHT STUDY MODE CONTROLLER
+// =========================================================================
+
+/**
+ * 1-Tap Quick Theme Toggle Button
+ * Displays Sun for Light Mode, Moon for Nova Dark, and Night Sky for AMOLED Black.
+ * Tap switches Light <-> Dark, Long-press or click on theme picker opens the full selector dialog.
+ */
+@Composable
+fun GlassThemeToggle(
+    modifier: Modifier = Modifier,
+    onOpenFullPicker: (() -> Unit)? = null,
+    testTag: String = "header_theme_toggle_btn"
+) {
+    val themeController = LocalThemeController.current
+    val currentMode = themeController.themeMode
+    val isDark = themeController.isDarkTheme
+
+    val icon = when (currentMode) {
+        AppThemeMode.GLASS_LIGHT -> Icons.Filled.WbSunny
+        AppThemeMode.NOVA_DARK -> Icons.Filled.DarkMode
+        AppThemeMode.AMOLED_BLACK -> Icons.Filled.NightsStay
+    }
+
+    val iconTint = when (currentMode) {
+        AppThemeMode.GLASS_LIGHT -> Color(0xFFD97706) // Warm Amber
+        AppThemeMode.NOVA_DARK -> NeonCyan
+        AppThemeMode.AMOLED_BLACK -> ElectricViolet
+    }
+
+    val glowColor = when (currentMode) {
+        AppThemeMode.GLASS_LIGHT -> Color(0xFFFEF3C7)
+        AppThemeMode.NOVA_DARK -> NeonCyan.copy(alpha = 0.2f)
+        AppThemeMode.AMOLED_BLACK -> ElectricViolet.copy(alpha = 0.25f)
+    }
+
+    IconButton(
+        onClick = {
+            themeController.toggleTheme()
+        },
+        modifier = modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(if (isDark) Color(0x1CFFFFFF) else Color(0x10000000))
+            .border(
+                0.5.dp,
+                if (isDark) Color(0x33FFFFFF) else Color(0x2064748B),
+                CircleShape
+            )
+            .testTag(testTag)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = "Theme: ${currentMode.displayName}. Tap to switch mode.",
+            tint = iconTint,
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
+
+/**
+ * Complete Theme & Night-Time Study Session Customization Dialog
+ */
+@Composable
+fun ThemeSelectionDialog(
+    currentTheme: AppThemeMode,
+    onSelectTheme: (AppThemeMode) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val isDark = currentTheme != AppThemeMode.GLASS_LIGHT
+    val primaryText = if (isDark) Color.White else Color(0xFF0F172A)
+    val secondaryText = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .border(
+                    1.dp,
+                    if (isDark) Color(0x33FFFFFF) else Color(0x20000000),
+                    RoundedCornerShape(24.dp)
+                )
+                .testTag("theme_selection_dialog"),
+            color = if (currentTheme == AppThemeMode.AMOLED_BLACK) Color(0xFF0A0A0A)
+                    else if (isDark) Color(0xFF0F172A).copy(alpha = 0.96f)
+                    else Color(0xFFFFFFFF).copy(alpha = 0.98f),
+            tonalElevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Dialog Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = NeonCyan.copy(alpha = 0.15f),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Filled.Palette,
+                                    contentDescription = null,
+                                    tint = NeonCyan,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Column {
+                            Text(
+                                text = "Study Theme & Canvas",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = primaryText
+                            )
+                            Text(
+                                text = "Optimize for day or night sessions",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = secondaryText
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = "Close",
+                            tint = secondaryText,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                HorizontalDivider(
+                    color = if (isDark) Color(0x1FFFFFFF) else Color(0x10000000),
+                    thickness = 0.5.dp
+                )
+
+                // Theme Option Cards
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    ThemeOptionCard(
+                        title = "Glass Light (Daytime)",
+                        subtitle = "Crisp, airy liquid glass with high-contrast text for daylight study.",
+                        icon = Icons.Filled.WbSunny,
+                        iconTint = Color(0xFFD97706),
+                        themeMode = AppThemeMode.GLASS_LIGHT,
+                        isSelected = currentTheme == AppThemeMode.GLASS_LIGHT,
+                        previewBgColor = Color(0xFFF8FAFC),
+                        onSelect = {
+                            onSelectTheme(AppThemeMode.GLASS_LIGHT)
+                            onDismiss()
+                        }
+                    )
+
+                    ThemeOptionCard(
+                        title = "Nova Dark (Evening Focus)",
+                        subtitle = "Deep cosmic indigo gradient designed for focus and reduced blue light.",
+                        icon = Icons.Filled.DarkMode,
+                        iconTint = NeonCyan,
+                        themeMode = AppThemeMode.NOVA_DARK,
+                        isSelected = currentTheme == AppThemeMode.NOVA_DARK,
+                        previewBgColor = Color(0xFF0F172A),
+                        onSelect = {
+                            onSelectTheme(AppThemeMode.NOVA_DARK)
+                            onDismiss()
+                        }
+                    )
+
+                    ThemeOptionCard(
+                        title = "AMOLED Black (Night Study)",
+                        subtitle = "True 0-backlight pure black for zero eye strain & battery efficiency in late night sessions.",
+                        icon = Icons.Filled.NightsStay,
+                        iconTint = ElectricViolet,
+                        themeMode = AppThemeMode.AMOLED_BLACK,
+                        isSelected = currentTheme == AppThemeMode.AMOLED_BLACK,
+                        previewBgColor = Color(0xFF000000),
+                        onSelect = {
+                            onSelectTheme(AppThemeMode.AMOLED_BLACK)
+                            onDismiss()
+                        }
+                    )
+                }
+
+                // Night Study Tip Pill
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isDark) Color(0x1538BDF8) else Color(0x1038BDF8),
+                    border = androidx.compose.foundation.BorderStroke(
+                        0.5.dp,
+                        NeonCyan.copy(alpha = 0.3f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("💡", fontSize = 14.sp)
+                        Text(
+                            text = "Tip: Tap the theme icon in the top header at any time for quick 1-tap switching during study sessions.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                            lineHeight = 15.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeOptionCard(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    iconTint: Color,
+    themeMode: AppThemeMode,
+    isSelected: Boolean,
+    previewBgColor: Color,
+    onSelect: () -> Unit
+) {
+    val isAppDark = isAppInDarkTheme()
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onSelect)
+            .testTag("theme_option_${themeMode.name}"),
+        shape = RoundedCornerShape(14.dp),
+        color = if (isSelected) {
+            if (isAppDark) Color(0x2238BDF8) else Color(0x1538BDF8)
+        } else {
+            if (isAppDark) Color(0x12FFFFFF) else Color(0x06000000)
+        },
+        border = androidx.compose.foundation.BorderStroke(
+            width = if (isSelected) 1.5.dp else 0.5.dp,
+            color = if (isSelected) NeonCyan else if (isAppDark) Color(0x20FFFFFF) else Color(0x15000000)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Preview Circle
+            Surface(
+                modifier = Modifier.size(36.dp),
+                shape = CircleShape,
+                color = previewBgColor,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isSelected) NeonCyan else Color(0x33888888)
+                )
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = iconTint,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isAppDark) Color.White else Color(0xFF0F172A)
+                    )
+                    if (isSelected) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = NeonCyan.copy(alpha = 0.2f)
+                        ) {
+                            Text(
+                                text = "ACTIVE",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = NeonCyan,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isAppDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp
+                )
+            }
+
+            RadioButton(
+                selected = isSelected,
+                onClick = onSelect,
+                colors = RadioButtonDefaults.colors(
+                    selectedColor = NeonCyan,
+                    unselectedColor = if (isAppDark) Color(0xFF64748B) else Color(0xFF94A3B8)
+                )
+            )
         }
     }
 }
