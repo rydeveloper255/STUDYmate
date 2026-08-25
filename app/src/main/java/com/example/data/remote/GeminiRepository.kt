@@ -840,7 +840,7 @@ class GeminiRepository(
             val clean = rawJson.replace("```json", "").replace("```", "").trim()
             val startIdx = clean.indexOf('[')
             val endIdx = clean.lastIndexOf(']')
-            if (startIdx != -1 && endIdx != -1) {
+            if (startIdx != -1 && endIdx != -1 && endIdx >= startIdx) {
                 val jsonArray = JSONArray(clean.substring(startIdx, endIdx + 1))
                 val items = mutableListOf<StudyPlanItem>()
                 for (i in 0 until jsonArray.length()) {
@@ -872,7 +872,7 @@ class GeminiRepository(
             val clean = rawJson.replace("```json", "").replace("```", "").trim()
             val startIdx = clean.indexOf('[')
             val endIdx = clean.lastIndexOf(']')
-            if (startIdx != -1 && endIdx != -1) {
+            if (startIdx != -1 && endIdx != -1 && endIdx >= startIdx) {
                 val jsonArray = JSONArray(clean.substring(startIdx, endIdx + 1))
                 val list = mutableListOf<Question>()
                 for (i in 0 until jsonArray.length()) {
@@ -1124,7 +1124,7 @@ class GeminiRepository(
             val clean = rawJson.replace("```json", "").replace("```", "").trim()
             val startIdx = clean.indexOf('[')
             val endIdx = clean.lastIndexOf(']')
-            if (startIdx != -1 && endIdx != -1) {
+            if (startIdx != -1 && endIdx != -1 && endIdx >= startIdx) {
                 val jsonArray = JSONArray(clean.substring(startIdx, endIdx + 1))
                 val list = mutableListOf<com.example.data.model.FlashcardItem>()
                 val now = System.currentTimeMillis()
@@ -1860,7 +1860,7 @@ class GeminiRepository(
             val clean = rawJson.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
             val startIdx = clean.indexOf('{')
             val endIdx = clean.lastIndexOf('}')
-            if (startIdx != -1 && endIdx != -1) {
+            if (startIdx != -1 && endIdx != -1 && endIdx >= startIdx) {
                 val json = JSONObject(clean.substring(startIdx, endIdx + 1))
                 val summaryList = mutableListOf<String>()
                 val summaryArr = json.optJSONArray("summaryBullets")
@@ -2013,7 +2013,7 @@ class GeminiRepository(
             val clean = rawJson.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
             val startIdx = clean.indexOf('{')
             val endIdx = clean.lastIndexOf('}')
-            if (startIdx != -1 && endIdx != -1) {
+            if (startIdx != -1 && endIdx != -1 && endIdx >= startIdx) {
                 val json = JSONObject(clean.substring(startIdx, endIdx + 1))
                 com.example.data.model.AiCoachRecommendation(
                     title = "AI Study Coach",
@@ -2096,7 +2096,7 @@ class GeminiRepository(
             val clean = rawJson.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
             val startIdx = clean.indexOf('{')
             val endIdx = clean.lastIndexOf('}')
-            if (startIdx != -1 && endIdx != -1) {
+            if (startIdx != -1 && endIdx != -1 && endIdx >= startIdx) {
                 val json = JSONObject(clean.substring(startIdx, endIdx + 1))
                 com.example.data.model.StudyNowRecommendation(
                     subject = json.optString("subject", defaultSubject),
@@ -2182,7 +2182,7 @@ class GeminiRepository(
             val clean = rawJson.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
             val startIdx = clean.indexOf('{')
             val endIdx = clean.lastIndexOf('}')
-            if (startIdx != -1 && endIdx != -1) {
+            if (startIdx != -1 && endIdx != -1 && endIdx >= startIdx) {
                 val json = JSONObject(clean.substring(startIdx, endIdx + 1))
 
                 val summary = json.optString("sourceSummary", "Comprehensive academic study kit generated directly from $sourceTitle.")
@@ -2476,7 +2476,7 @@ class GeminiRepository(
             val clean = rawJson.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
             val startIdx = clean.indexOf('[')
             val endIdx = clean.lastIndexOf(']')
-            if (startIdx != -1 && endIdx != -1) {
+            if (startIdx != -1 && endIdx != -1 && endIdx >= startIdx) {
                 val jsonArr = JSONArray(clean.substring(startIdx, endIdx + 1))
                 val list = mutableListOf<com.example.data.model.MistakePatternInsight>()
                 for (i in 0 until jsonArr.length()) {

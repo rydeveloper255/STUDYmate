@@ -7,11 +7,15 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import com.example.data.model.NovaVoiceState
-import com.example.service.voice.AndroidAcousticTtsProvider
+import com.example.service.voice.ElevenLabsTtsProvider
 import com.example.service.voice.NovaVoiceEmotion
+import com.example.service.voice.NovaVoiceProviderType
 import com.example.service.voice.NovaVoiceService
+import com.example.service.voice.NovaVoiceServiceFactory
+import com.example.service.voice.NovaVoiceSessionState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,18 +24,21 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
- * High-level Coordinator managing Speech-to-Text, Voice synthesis via modular NovaVoiceService,
- * Audio Level (RMS) metering for visual animations, and playback controls.
+ * Unified Voice Coordinator managing Speech-to-Text, ElevenLabs Primary TTS Engine,
+ * On-Device Acoustic fallback, audio RMS metering, and playback controls.
  */
 class NovaVoiceManager(
     private val context: Context,
-    private var voiceService: NovaVoiceService = AndroidAcousticTtsProvider(context)
+    private var voiceService: NovaVoiceService = ElevenLabsTtsProvider(context)
 ) : RecognitionListener {
 
     private var speechRecognizer: SpeechRecognizer? = null
 
     private val _voiceState = MutableStateFlow(NovaVoiceState.IDLE)
     val voiceState: StateFlow<NovaVoiceState> = _voiceState.asStateFlow()
+
+    private val _sessionState = MutableStateFlow(NovaVoiceSessionState.IDLE)
+    val sessionState: StateFlow<NovaVoiceSessionState> = _sessionState.asStateFlow()
 
     private val _audioLevelRms = MutableStateFlow(0f)
     val audioLevelRms: StateFlow<Float> = _audioLevelRms.asStateFlow()
@@ -41,13 +48,15 @@ class NovaVoiceManager(
 
     private var onSpeechResultCallback: ((String) -> Unit)? = null
     private val scope = CoroutineScope(Dispatchers.Main)
-    private var voiceStateJob: kotlinx.coroutines.Job? = null
+    private var voiceStateJob: Job? = null
+    private var audioRmsJob: Job? = null
+    private var sessionStateJob: Job? = null
 
     init {
-        observeVoiceState()
+        observeVoiceService()
     }
 
-    private fun observeVoiceState() {
+    private fun observeVoiceService() {
         voiceStateJob?.cancel()
         voiceStateJob = scope.launch {
             voiceService.isSpeakingFlow.collectLatest { isSpeaking ->
@@ -55,6 +64,22 @@ class NovaVoiceManager(
                     _voiceState.value = NovaVoiceState.SPEAKING
                 } else if (_voiceState.value == NovaVoiceState.SPEAKING) {
                     _voiceState.value = NovaVoiceState.IDLE
+                }
+            }
+        }
+
+        sessionStateJob?.cancel()
+        sessionStateJob = scope.launch {
+            voiceService.sessionStateFlow.collectLatest { state ->
+                _sessionState.value = state
+            }
+        }
+
+        audioRmsJob?.cancel()
+        audioRmsJob = scope.launch {
+            voiceService.audioLevelRmsFlow.collectLatest { rms ->
+                if (_voiceState.value == NovaVoiceState.SPEAKING) {
+                    _audioLevelRms.value = rms
                 }
             }
         }
@@ -121,6 +146,7 @@ class NovaVoiceManager(
             onStart = { _voiceState.value = NovaVoiceState.SPEAKING },
             onDone = {
                 _voiceState.value = NovaVoiceState.IDLE
+                _audioLevelRms.value = 0f
                 onDone?.invoke()
             }
         )
@@ -131,6 +157,23 @@ class NovaVoiceManager(
         if (_voiceState.value == NovaVoiceState.SPEAKING) {
             _voiceState.value = NovaVoiceState.IDLE
         }
+        _audioLevelRms.value = 0f
+    }
+
+    fun pause() {
+        voiceService.pause()
+    }
+
+    fun resume() {
+        voiceService.resume()
+    }
+
+    fun replay() {
+        voiceService.replay()
+    }
+
+    fun isSpeaking(): Boolean {
+        return voiceService.isSpeaking()
     }
 
     fun setSpeechSpeed(speed: Float) {
@@ -145,17 +188,22 @@ class NovaVoiceManager(
         voiceService.setVolume(volume)
     }
 
-    fun switchProvider(providerType: com.example.service.voice.NovaVoiceProviderType) {
+    fun switchProvider(providerType: NovaVoiceProviderType) {
         voiceService.release()
-        voiceService = com.example.service.voice.NovaVoiceServiceFactory.create(context, providerType)
-        observeVoiceState()
+        voiceService = NovaVoiceServiceFactory.create(context, providerType)
+        observeVoiceService()
     }
 
     fun previewVoice(
-        text: String = "Boss, main tumhari AI assistant NOVA hoon. Aaj ka study session start karein?",
+        language: String = "HINGLISH",
         emotion: NovaVoiceEmotion = NovaVoiceEmotion.CALM
     ) {
-        speak(text, emotion)
+        val sampleText = when (language.uppercase()) {
+            "HI", "HINDI" -> "नमस्ते! मैं नोवा हूँ, आपकी स्मार्ट स्टडी और रिक्रूटमेंट साथी। आज क्या पढ़ना चाहते हैं?"
+            "EN", "ENGLISH" -> "Hello! I'm Nova, your AI study mentor. Let's make today's preparation super productive."
+            else -> "Boss, main tumhari AI assistant NOVA hoon. Aaj ka study session start karein?"
+        }
+        speak(sampleText, emotion)
     }
 
     fun destroy() {
@@ -178,7 +226,9 @@ class NovaVoiceManager(
     }
 
     override fun onRmsChanged(rmsdB: Float) {
-        _audioLevelRms.value = (rmsdB.coerceIn(0f, 10f) / 10f)
+        if (_voiceState.value == NovaVoiceState.LISTENING) {
+            _audioLevelRms.value = (rmsdB.coerceIn(0f, 10f) / 10f)
+        }
     }
 
     override fun onBufferReceived(buffer: ByteArray?) {}

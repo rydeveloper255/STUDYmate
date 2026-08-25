@@ -875,7 +875,10 @@ data class NovaSettings(
     val speechSpeed: Float = 1.0f,
     val voiceVolume: Float = 1.0f,
     val voicePitch: Float = 1.12f,
-    val selectedVoicePersona: String = "NOVA Original Female AI (Warm & Intelligent)",
+    val voiceLanguage: String = "Auto (Context-Aware)", // "Auto (Context-Aware)", "Hinglish", "Hindi", "English"
+    val selectedVoicePersona: String = "NOVA Neural Voice (Warm & Intelligent)",
+    val elevenLabsVoiceId: String = "21m00Tcm4TlvDq8ikWAM",
+    val elevenLabsModelId: String = "eleven_multilingual_v2",
     
     // Smart Coach Controls
     val memoryEnabled: Boolean = true,

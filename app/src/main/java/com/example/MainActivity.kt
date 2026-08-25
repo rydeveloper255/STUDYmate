@@ -33,6 +33,9 @@ import com.example.ui.theme.*
 import com.example.ui.components.AppNavTab
 import com.example.ui.components.FloatingGlassNavBar
 import com.example.ui.screens.learning.*
+import com.example.ui.screens.study.StudyHubScreen
+import com.example.ui.screens.practice.PracticeHubScreen
+import com.example.ui.screens.updates.UpdatesHubScreen
 import com.example.ui.screens.auth.LoginScreen
 
 import com.example.ui.screens.auth.OnboardingScreen
@@ -370,11 +373,52 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
 
     LaunchedEffect(Unit) {
         novaViewModel.navigationEvent.collect { (event, data) ->
-            if (event == "NAVIGATE_TO_LIVE_EXAM_INTELLIGENCE") {
-                viewModel.setShowLiveExamIntelligenceScreen(true)
-            } else if (event == "NAVIGATE_TO_SMART_VACANCIES") {
-                val tab = data["tab"] as? String
-                viewModel.setShowSmartVacancyScreen(true, initialTab = tab)
+            when (event) {
+                "NAVIGATE_TO_LIVE_EXAM_INTELLIGENCE" -> {
+                    viewModel.setShowLiveExamIntelligenceScreen(true)
+                }
+                "NAVIGATE_TO_SMART_VACANCIES" -> {
+                    val tab = data["tab"] as? String
+                    val itemId = data["item_id"] as? String
+                    viewModel.setShowSmartVacancyScreen(true, initialTab = tab)
+                    if (!itemId.isNullOrBlank()) {
+                        val item = recruitmentFeedState.allActiveVacancies.find { it.id == itemId }
+                            ?: recruitmentFeedState.latestForYouVacancies.find { it.id == itemId }
+                            ?: recruitmentFeedState.resultsList.find { it.id == itemId }
+                            ?: recruitmentFeedState.admitCardsList.find { it.id == itemId }
+                        if (item != null) {
+                            viewModel.selectRecruitmentDetail(item)
+                        }
+                    }
+                }
+                "NAVIGATE_TO_FOCUS" -> {
+                    val subject = data["subject"] as? String ?: userProfile?.subjects?.firstOrNull() ?: "General Science"
+                    val topic = data["topic"] as? String ?: "Core Revision"
+                    val duration = (data["duration"] as? Int) ?: 25
+                    viewModel.startFocusSession(subject, topic, duration)
+                    onSelectTab(AppNavTab.FOCUS)
+                }
+                "NAVIGATE_TO_PLANNER" -> {
+                    onSelectTab(AppNavTab.STUDY)
+                }
+                "NAVIGATE_TO_MOCK_TEST" -> {
+                    onSelectTab(AppNavTab.PROGRESS)
+                }
+                "NAVIGATE_TO_SUBJECT", "NAVIGATE_TO_TOPIC" -> {
+                    onSelectTab(AppNavTab.STUDY)
+                }
+                "NAVIGATE_TO_SUMMARIZER" -> {
+                    showDocumentSummarizer = true
+                }
+                "NAVIGATE_TO_READINESS" -> {
+                    showExamReadinessCenter = true
+                }
+                "NAVIGATE_TO_NOTIFICATIONS" -> {
+                    showNotificationCenter = true
+                }
+                "NAVIGATE_TO_PROFILE" -> {
+                    showProfileSettings = true
+                }
             }
         }
     }
@@ -772,7 +816,11 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onStartPracticeWithConfig = { config ->
                                 viewModel.startMockTestWithConfig(config)
                                 onSelectTab(AppNavTab.STUDY)
-                            }
+                            },
+                            focusTimerState = focusState,
+                            onPauseFocusSession = { viewModel.toggleFocusPause() },
+                            onResumeFocusSession = { viewModel.toggleFocusPause() },
+                            onStopFocusSession = { viewModel.endFocusSession() }
                         )
 
                         AppNavTab.AI_TUTOR -> {
@@ -787,212 +835,80 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             )
                         }
 
-                        AppNavTab.STUDY -> {
-                            if (activeStudySession != null) {
-                                StudySessionTimerView(
-                                    activeSession = activeStudySession!!,
-                                    remainingSeconds = sessionRemainingSeconds,
-                                    isTimerRunning = isSessionTimerRunning,
-                                    isPaused = isSessionPaused,
-                                    actualMinutesSpent = activeSessionActualMinutes,
-                                    onPauseTimer = { viewModel.pauseStudySession() },
-                                    onResumeTimer = { viewModel.resumeStudySession() },
-                                    onFinishSession = { notes: String -> viewModel.finishStudySession(notes) },
-                                    onCancelSession = { viewModel.cancelStudySession() }
-                                )
-                            } else {
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    // Segmented Toggle Header
-                                    Surface(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = androidx.compose.ui.graphics.Color(0xFF0F172A).copy(alpha = 0.9f)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 16.dp, vertical = 6.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            FilterChip(
-                                                selected = studySubTab == 0,
-                                                onClick = { studySubTab = 0 },
-                                                label = { Text("📅 Daily Plan & Cards", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
-                                                colors = FilterChipDefaults.filterChipColors(
-                                                    selectedContainerColor = com.example.ui.theme.NeonCyan,
-                                                    selectedLabelColor = androidx.compose.ui.graphics.Color(0xFF070B19),
-                                                    containerColor = androidx.compose.ui.graphics.Color(0x20FFFFFF),
-                                                    labelColor = androidx.compose.ui.graphics.Color.White
-                                                ),
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            FilterChip(
-                                                selected = studySubTab == 1,
-                                                onClick = { studySubTab = 1 },
-                                                label = { Text("📖 Smart Content Engine", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
-                                                colors = FilterChipDefaults.filterChipColors(
-                                                    selectedContainerColor = com.example.ui.theme.ElectricViolet,
-                                                    selectedLabelColor = androidx.compose.ui.graphics.Color.White,
-                                                    containerColor = androidx.compose.ui.graphics.Color(0x20FFFFFF),
-                                                    labelColor = androidx.compose.ui.graphics.Color.White
-                                                ),
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                        }
-                                    }
-
-                                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                                        if (studySubTab == 0) {
-                                            StudyPlannerScreen(
-                                                planItems = studyPlan,
-                                                flashcards = flashcards,
-                                                user = userProfile,
-                                                isGenerating = isPlanGenerating,
-                                                onGenerateAiPlan = { viewModel.generateAdaptiveDailyPlan() },
-                                                onTogglePlanItem = { id, done -> viewModel.togglePlanItem(id, done) },
-                                                onAddPlanItem = { sub, chap, top, mins, prio -> viewModel.addManualPlanItem(sub, chap, top, mins, prio) },
-                                                onUpdatePlanItem = { item -> viewModel.updatePlanItem(item) },
-                                                onDeletePlanItem = { viewModel.deletePlanItem(it) },
-                                                onStartFocusSession = { sub, top ->
-                                                    viewModel.startFocusSession(sub, top, 25)
-                                                    onSelectTab(AppNavTab.FOCUS)
-                                                },
-                                                onRecoverMissedSessions = { mode -> viewModel.recoverMissedSessions(mode) },
-                                                onUpdateDailyAvailableTime = { mins -> viewModel.generateAdaptiveDailyPlan(overrideAvailableMinutes = mins) },
-                                                onStartSessionTimer = { item -> viewModel.startStudySession(item) },
-                                                deadlineWarning = deadlineWarning,
-                                                userPreferences = userStudyPreferences,
-                                                onSavePreferences = { prefs -> viewModel.saveUserPreferences(prefs) },
-                                                activeExamContext = activeExamContext ?: ExamContext(),
-                                                topicMasteries = allTopicMasteries,
-                                                focusSessions = allFocusSessions,
-                                                onApplySubjectAllocations = { subMinutes, totalMins, startHr, breakMins ->
-                                                    viewModel.applySubjectTimeAllocations(subMinutes, totalMins, startHr, 0, breakMins)
-                                                },
-                                                onOpenExamSelector = { onSelectTab(AppNavTab.HOME) },
-                                                activeStudySession = activeStudySession,
-                                                sessionRemainingSeconds = sessionRemainingSeconds,
-                                                isSessionTimerRunning = isSessionTimerRunning,
-                                                isSessionPaused = isSessionPaused,
-                                                activeSessionActualMinutes = activeSessionActualMinutes,
-                                                onPauseTimer = { viewModel.pauseStudySession() },
-                                                onResumeTimer = { viewModel.resumeStudySession() },
-                                                onFinishSession = { notes -> viewModel.finishStudySession(notes) },
-                                                onCancelSession = { viewModel.cancelStudySession() },
-                                                onAddFlashcard = { subject, topic, front, back, hint, difficulty, sourceDoc ->
-                                                    viewModel.addFlashcard(subject, topic, front, back, hint, difficulty, sourceDoc)
-                                                },
-                                                onUpdateFlashcard = { viewModel.updateFlashcard(it) },
-                                                onDeleteFlashcard = { viewModel.deleteFlashcard(it) },
-                                                onReviewFlashcard = { id, status, conf ->
-                                                    viewModel.reviewFlashcard(id, status, conf)
-                                                },
-                                                onReviewSpaced = { id, quality ->
-                                                    viewModel.recordSpacedFlashcardReview(id, quality)
-                                                },
-                                                onGenerateAiCards = { subject, topic ->
-                                                    viewModel.generateAiFlashcards(subject, topic)
-                                                },
-                                                onGenerateFromNotes = { title, notesText, subject, count ->
-                                                    viewModel.generateFlashcardsFromNotes(title, notesText, subject, count)
-                                                },
-                                                onGenerateFromDocumentUri = { uri, subject, count ->
-                                                    viewModel.generateFlashcardsFromDocumentUri(uri, subject, count)
-                                                },
-                                                flashcardStatusMessage = flashcardMessage,
-                                                onClearFlashcardStatusMessage = { viewModel.clearFlashcardMessage() },
-                                                isFlashcardGenerating = isFlashcardGenerating
-                                            )
-                                        } else {
-                                            when {
-                                                selectedLearningTopic != null -> {
-                                                    val sub = selectedLearningSubject ?: "General"
-                                                    val chap = selectedLearningChapter ?: "General Chapter"
-                                                    val top = selectedLearningTopic!!
-
-                                                    LaunchedEffect(sub, chap, top) {
-                                                        viewModel.loadLearningTopicContent(sub, chap, top)
-                                                    }
-
-                                                    TopicDetailScreen(
-                                                        examContext = activeExamContext ?: ExamContext(),
-                                                        subject = sub,
-                                                        chapter = chap,
-                                                        topic = top,
-                                                        topicMastery = allTopicMasteries.firstOrNull { it.topic.equals(top, ignoreCase = true) },
-                                                        learningContent = activeLearningContent,
-                                                        isLoading = isLearningContentLoading,
-                                                        userNotes = smartNotes.firstOrNull { it.topic.equals(top, ignoreCase = true) }?.contentMarkdown ?: "",
-                                                        userMistakes = mistakes.filter { it.topic.equals(top, ignoreCase = true) },
-                                                        onBack = { selectedLearningTopic = null },
-                                                        onRefreshContent = { viewModel.loadLearningTopicContent(sub, chap, top, forceRefresh = true) },
-                                                        onSaveNote = { noteText -> viewModel.saveTopicNote(sub, top, noteText) },
-                                                        onToggleBookmark = { title, snippet, type -> viewModel.toggleLearningBookmark(sub, top, title, snippet, type) },
-                                                        onCompleteQuickTest = { score, total -> viewModel.completeQuickTest(sub, top, score, total) },
-                                                        onAskNovaDoubt = { prompt -> viewModel.askNovaTopicDoubt(sub, chap, top, prompt) },
-                                                        novaDoubtResponse = novaDoubtResponse,
-                                                        isNovaThinking = isNovaDoubtThinking,
-                                                        onSpeakTts = { text -> viewModel.speakText(text) }
-                                                    )
-                                                }
-                                                selectedLearningSubject != null -> {
-                                                    val sub = selectedLearningSubject!!
-                                                    SubjectDetailScreen(
-                                                        examContext = activeExamContext ?: ExamContext(),
-                                                        subjectName = sub,
-                                                        subjectSummary = subjectProgressSummaries.firstOrNull { it.subjectName.equals(sub, ignoreCase = true) },
-                                                        topicMasteries = allTopicMasteries.filter { it.subject.equals(sub, ignoreCase = true) },
-                                                        onBack = { selectedLearningSubject = null },
-                                                        onSelectTopic = { chapName, topName ->
-                                                            selectedLearningChapter = chapName
-                                                            selectedLearningTopic = topName
-                                                        }
-                                                    )
-                                                }
-                                                showSavedLearning -> {
-                                                     com.example.ui.screens.learning.SavedLearningScreen(
-                                                         bookmarks = allLearningBookmarks,
-                                                         smartNotes = smartNotes,
-                                                         onOpenTopic = { sub, top ->
-                                                             showSavedLearning = false
-                                                             selectedLearningSubject = sub
-                                                             selectedLearningChapter = "General Chapter"
-                                                             selectedLearningTopic = top
-                                                         },
-                                                         onDeleteBookmark = { viewModel.deleteLearningBookmark(it) },
-                                                         onDeleteNote = { viewModel.deleteTopicNote(it) },
-                                                         onBack = { showSavedLearning = false }
-                                                     )
-                                                 }
-                                                 else -> {
-                                                    LearningDashboardScreen(
-                                                        user = userProfile,
-                                                        examContext = activeExamContext ?: ExamContext(),
-                                                        subjectSummaries = subjectProgressSummaries,
-                                                        allMasteries = allTopicMasteries,
-                                                        bookmarks = allLearningBookmarks,
-                                                        smartNotes = smartNotes,
-                                                        onSelectSubject = { selectedLearningSubject = it },
-                                                        onSelectTopic = { sub, chap, top ->
-                                                            selectedLearningSubject = sub
-                                                            selectedLearningChapter = chap
-                                                            selectedLearningTopic = top
-                                                        },
-                                                        onOpenSearch = { query ->
-                                                            viewModel.performSmartSearch(query)
-                                                            onSelectTab(AppNavTab.AI_TUTOR)
-                                                        },
-                                                        onChangeExam = { showProfileSettings = true },
-                                                        onOpenSavedLearning = { showSavedLearning = true },
-                                                        onAskNova = { onSelectTab(AppNavTab.AI_TUTOR) }
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
+                        AppNavTab.STUDY -> StudyHubScreen(
+                            user = userProfile,
+                            examContext = activeExamContext ?: ExamContext(),
+                            subjectSummaries = subjectProgressSummaries,
+                            allMasteries = allTopicMasteries,
+                            bookmarks = allLearningBookmarks,
+                            smartNotes = smartNotes,
+                            studyPlan = studyPlan,
+                            flashcards = flashcards,
+                            isPlanGenerating = isPlanGenerating,
+                            activeLearningContent = activeLearningContent,
+                            isLearningContentLoading = isLearningContentLoading,
+                            novaDoubtResponse = novaDoubtResponse,
+                            isNovaDoubtThinking = isNovaDoubtThinking,
+                            userPreferences = userStudyPreferences,
+                            activeStudySession = activeStudySession,
+                            sessionRemainingSeconds = sessionRemainingSeconds,
+                            isSessionTimerRunning = isSessionTimerRunning,
+                            isSessionPaused = isSessionPaused,
+                            activeSessionActualMinutes = activeSessionActualMinutes,
+                            isFlashcardGenerating = isFlashcardGenerating,
+                            flashcardMessage = flashcardMessage,
+                            allFocusSessions = allFocusSessions,
+                            mistakes = mistakes,
+                            onSelectTopicLearning = { sub, chap, top -> viewModel.loadLearningTopicContent(sub, chap, top) },
+                            onGenerateAiPlan = { viewModel.generateAdaptiveDailyPlan() },
+                            onTogglePlanItem = { id, done -> viewModel.togglePlanItem(id, done) },
+                            onAddPlanItem = { sub, chap, top, mins, prio -> viewModel.addManualPlanItem(sub, chap, top, mins, prio) },
+                            onUpdatePlanItem = { item -> viewModel.updatePlanItem(item) },
+                            onDeletePlanItem = { viewModel.deletePlanItem(it) },
+                            onStartFocusSession = { sub, top ->
+                                viewModel.startFocusSession(sub, top, 25)
+                                onSelectTab(AppNavTab.FOCUS)
+                            },
+                            onStartSessionTimer = { item -> viewModel.startStudySession(item) },
+                            onPauseSessionTimer = { viewModel.pauseStudySession() },
+                            onResumeSessionTimer = { viewModel.resumeStudySession() },
+                            onFinishSessionTimer = { notes -> viewModel.finishStudySession(notes) },
+                            onCancelSessionTimer = { viewModel.cancelStudySession() },
+                            onAddFlashcard = { subject, topic, front, back, hint, diff, src ->
+                                viewModel.addFlashcard(subject, topic, front, back, hint, diff, src)
+                            },
+                            onUpdateFlashcard = { viewModel.updateFlashcard(it) },
+                            onDeleteFlashcard = { viewModel.deleteFlashcard(it) },
+                            onReviewFlashcard = { id, status, conf -> viewModel.reviewFlashcard(id, status, conf) },
+                            onReviewSpaced = { id, quality -> viewModel.recordSpacedFlashcardReview(id, quality) },
+                            onGenerateAiCards = { sub, top -> viewModel.generateAiFlashcards(sub, top) },
+                            onGenerateFromNotes = { title, nText, sub, c -> viewModel.generateFlashcardsFromNotes(title, nText, sub, c) },
+                            onGenerateFromDocumentUri = { uri, sub, c -> viewModel.generateFlashcardsFromDocumentUri(uri, sub, c) },
+                            onClearFlashcardMessage = { viewModel.clearFlashcardMessage() },
+                            onSaveTopicNote = { sub, top, noteText -> viewModel.saveTopicNote(sub, top, noteText) },
+                            onToggleLearningBookmark = { sub, top, title, snippet, type -> viewModel.toggleLearningBookmark(sub, top, title, snippet, type) },
+                            onCompleteQuickTest = { sub, top, score, total -> viewModel.completeQuickTest(sub, top, score, total) },
+                            onAskNovaDoubt = { sub, chap, top, prompt -> viewModel.askNovaTopicDoubt(sub, chap, top, prompt) },
+                            onSpeakTts = { text -> viewModel.speakText(text) },
+                            onDeleteBookmark = { viewModel.deleteLearningBookmark(it) },
+                            onDeleteNote = { viewModel.deleteTopicNote(it) },
+                            onOpenDocumentSummarizer = { showDocumentSummarizer = true },
+                            onOpenSearch = { query ->
+                                viewModel.performSmartSearch(query)
+                                onSelectTab(AppNavTab.AI_TUTOR)
+                            },
+                            onAskNovaGlobal = { prompt ->
+                                viewModel.performSmartSearch(prompt)
+                                onSelectTab(AppNavTab.AI_TUTOR)
+                            },
+                            onChangeExam = { onSelectTab(AppNavTab.PROFILE) },
+                            onRecoverMissedSessions = { mode -> viewModel.recoverMissedSessions(mode) },
+                            onUpdateDailyAvailableTime = { mins -> viewModel.generateAdaptiveDailyPlan(overrideAvailableMinutes = mins) },
+                            onSavePreferences = { prefs -> viewModel.saveUserPreferences(prefs) },
+                            onApplySubjectAllocations = { subMinutes, totalMins, startHr, breakMins ->
+                                viewModel.applySubjectTimeAllocations(subMinutes, totalMins, startHr, 0, breakMins)
                             }
-                        }
+                        )
 
                         AppNavTab.FOCUS -> FocusModeScreen(
                             focusState = focusState,
@@ -1017,7 +933,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             isNovaDoubtThinking = isNovaDoubtThinking
                         )
 
-                        AppNavTab.PROGRESS -> ProgressDashboardScreen(
+                        AppNavTab.PRACTICE, AppNavTab.PROGRESS -> PracticeHubScreen(
                             user = userProfile,
                             attempts = mockAttempts,
                             mistakes = mistakes,
@@ -1081,13 +997,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onUpdatePersonalizationSettings = { settings -> viewModel.updatePersonalizationSettings(settings) },
                             onResetPersonalizationSignals = { viewModel.resetPersonalizationSignals() },
                             onRecordSpacedRevisionFeedback = { sub, top, fb -> viewModel.recordSpacedRevisionFeedback(sub, top, fb) },
-                            onBack = {
-                                if (tabNames.size > 1) {
-                                    tabNames = tabNames.dropLast(1)
-                                } else {
-                                    onSelectTab(AppNavTab.HOME)
-                                }
-                            },
+                            onBack = { onSelectTab(AppNavTab.HOME) },
                             onNavigateToStudy = { onSelectTab(AppNavTab.STUDY) },
                             activeExamContext = activeExamContext,
                             novaProgressAnalysis = novaProgressAnalysis,
@@ -1095,6 +1005,101 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onGenerateNovaProgressAnalysis = { exam, summary, lang ->
                                 viewModel.generateNovaProgressAnalysis(exam, summary, lang)
                             }
+                        )
+
+                        AppNavTab.UPDATES -> UpdatesHubScreen(
+                            recruitmentFeedState = recruitmentFeedState,
+                            isRefreshingRecruitment = isRefreshingRecruitment,
+                            onRefreshRecruitment = { viewModel.refreshRecruitmentCatalog(force = true) },
+                            onCategorySelected = { viewModel.setRecruitmentCategory(it) },
+                            onStateSelected = { viewModel.setRecruitmentState(it) },
+                            onTabSelected = { viewModel.setRecruitmentTab(it) },
+                            onSearchQueryChanged = { viewModel.setRecruitmentSearch(it) },
+                            onSortOptionSelected = { viewModel.setRecruitmentSort(it) },
+                            onToggleSaveRecruitment = { id, saved -> viewModel.toggleSaveRecruitment(id, saved) },
+                            onSetReminder = { id, set, hours -> viewModel.setDeadlineReminder(id, set, hours) },
+                            selectedDetailItem = selectedRecruitmentDetail,
+                            onSelectDetailItem = { viewModel.selectRecruitmentDetail(it) },
+                            onUpdateProfile = { viewModel.updateRecruitmentProfile(it) },
+                            onUpdateApplicationStatus = { id, st, appNo, rollNo, post, notes ->
+                                viewModel.updateUserApplicationStatus(id, st, appNo, rollNo, post, notes)
+                            },
+                            onUpdateDocumentsReady = { id, docs -> viewModel.updateDocumentReadyStatus(id, docs) },
+                            onUpdateChecklistChecked = { id, items -> viewModel.updateChecklistChecked(id, items) },
+                            onFindJobsForMe = { qual, cat, st, age -> viewModel.findJobsForMe(qual ?: "", cat ?: "", st ?: "", age ?: 0) },
+                            recruitmentNotificationSettings = recruitmentNotificationSettings,
+                            onUpdateNotificationSettings = { viewModel.updateRecruitmentNotificationSettings(it) },
+                            recruitmentOutbox = recruitmentOutbox,
+                            recruitmentDailyDigest = recruitmentDailyDigest,
+                            recruitmentDiagnostics = recruitmentDiagnostics,
+                            onMuteRecruitment = { viewModel.muteRecruitment(it) },
+                            onUnmuteRecruitment = { viewModel.unmuteRecruitment(it) },
+                            onMuteCategory = { viewModel.muteRecruitmentCategory(it) },
+                            onUnmuteCategory = { viewModel.unmuteRecruitmentCategory(it) },
+                            onMarkOutboxRead = { viewModel.markRecruitmentOutboxItemRead(it) },
+                            onMarkAllOutboxRead = { viewModel.markAllRecruitmentOutboxItemsRead() },
+                            onDeleteOutboxItem = { viewModel.deleteRecruitmentOutboxItem(it) },
+                            onClearAllOutbox = { viewModel.clearAllRecruitmentOutbox() },
+                            onNovaQuery = { q ->
+                                viewModel.performSmartSearch(q)
+                                onSelectTab(AppNavTab.AI_TUTOR)
+                            },
+                            liveExamFeedState = liveExamFeedState,
+                            isRefreshingLiveExam = isRefreshingLiveExam,
+                            onRefreshLiveExam = { viewModel.refreshLiveExamIntelligence(force = true) },
+                            onToggleSaveLiveUpdate = { id, s -> viewModel.toggleSaveLiveExamUpdate(id, s) },
+                            onToggleSaveTrending = { id, s -> viewModel.toggleSaveTrendingTopic(id, s) },
+                            onStartQuizForTopic = { cat, top ->
+                                viewModel.startInteractiveStudyQuiz(cat, top)
+                                onSelectTab(AppNavTab.AI_TUTOR)
+                            },
+                            onAskNovaAboutUpdate = { q ->
+                                viewModel.performSmartSearch(q)
+                                onSelectTab(AppNavTab.AI_TUTOR)
+                            },
+                            notifications = appNotifications,
+                            onMarkNotificationAsRead = { viewModel.markNotificationAsRead(it) },
+                            onMarkAllNotificationsAsRead = { viewModel.markAllNotificationsAsRead() },
+                            onDeleteNotification = { viewModel.deleteNotification(it) },
+                            onClearAllNotifications = { viewModel.clearAllNotifications() },
+                            onNavigateDeepLink = { link, payload -> handleDeepLink(link, payload ?: "") },
+                            onOpenNotificationSettings = { onSelectTab(AppNavTab.PROFILE) }
+                        )
+
+                        AppNavTab.PROFILE -> ProfileSettingsScreen(
+                            user = userProfile,
+                            themeMode = themeMode,
+                            isDarkTheme = isDarkTheme,
+                            notificationPrefs = notifPrefs,
+                            onSetThemeMode = { viewModel.updateThemeMode(it) },
+                            onToggleDarkTheme = { viewModel.updateTheme(it) },
+                            onUpdateNotificationPrefs = { viewModel.updateNotificationPrefs(it) },
+                            onUpdateProfile = { updatedProfile -> viewModel.updateUserProfile(updatedProfile, refreshStudyPlan = true) },
+                            onSignOut = { viewModel.signOut(context) },
+                            onDeleteAccount = { viewModel.deleteAccount() },
+                            onBack = { onSelectTab(AppNavTab.HOME) },
+                            onTestStudyReminder = { viewModel.testStudySessionReminder() },
+                            onTestExamCountdown = { viewModel.testExamCountdownReminder() },
+                            onTestDailyGoal = { viewModel.testDailyGoalReminder() },
+                            onTestMissedStudy = { viewModel.testMissedStudyReminder() },
+                            onTestBreakReminder = { viewModel.testBreakReminder() },
+                            onTestFocusStarted = { viewModel.testFocusStartedNotification() },
+                            onTestFocusCompleted = { viewModel.testFocusCompletedNotification() },
+                            onTestDailyMotivation = { viewModel.testDailyMotivationalNotification() },
+                            catalogExams = allCatalogExams,
+                            onChangeExam = { examId -> viewModel.changeSelectedExam(examId = examId, refreshStudyPlan = true) },
+                            onOpenStudyPlanner = { onSelectTab(AppNavTab.STUDY) },
+                            onResetActiveExamData = { viewModel.resetActiveExamPreparationData() },
+                            isAiThinkingMode = useThinkingMode,
+                            onSetAiThinkingMode = { thinking -> viewModel.setThinkingMode(thinking) },
+                            tutorPersona = tutorPersona,
+                            onSetTutorPersona = { persona -> viewModel.setTutorPersona(persona) },
+                            onChangePassword = { oldPass, callback -> viewModel.changePassword(oldPass, callback) },
+                            onRequestEmailChange = { newEmail, callback -> viewModel.requestEmailChange(newEmail, callback) },
+                            onTriggerSync = { callback -> viewModel.triggerManualSync(callback) },
+                            onExportData = { viewModel.exportUserDataJson() },
+                            onResetPersonalization = { viewModel.resetPersonalization {} },
+                            onClearCache = { viewModel.clearAllLocalStudyData {} }
                         )
                     }
                 }

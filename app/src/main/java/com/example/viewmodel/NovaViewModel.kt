@@ -596,6 +596,9 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
     fun sendMessage(userText: String) {
         if (userText.isBlank() && _attachedImageBitmap.value == null) return
 
+        // Immediately interrupt and stop any active voice playback when a new query begins
+        voiceManager.stopSpeaking()
+
         val userMessage = NovaChatMessage(
             sender = NovaSender.USER,
             text = userText,
@@ -2183,8 +2186,34 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         when (action.actionType) {
             NovaActionType.OPEN_CURRENT_AFFAIRS -> {
-                setTab(NovaScreenTab.CURRENT_AFFAIRS)
-                onNavigateToTab?.invoke(AppNavTab.AI_TUTOR)
+                viewModelScope.launch {
+                    _navigationEvent.emit("NAVIGATE_TO_LIVE_EXAM_INTELLIGENCE" to emptyMap())
+                }
+            }
+            NovaActionType.OPEN_LIVE_EXAM_INTELLIGENCE -> {
+                viewModelScope.launch {
+                    _navigationEvent.emit("NAVIGATE_TO_LIVE_EXAM_INTELLIGENCE" to emptyMap())
+                }
+            }
+            NovaActionType.OPEN_VACANCIES -> {
+                viewModelScope.launch {
+                    _navigationEvent.emit("NAVIGATE_TO_SMART_VACANCIES" to mapOf("tab" to "VACANCY"))
+                }
+            }
+            NovaActionType.OPEN_RESULTS_HUB -> {
+                viewModelScope.launch {
+                    _navigationEvent.emit("NAVIGATE_TO_SMART_VACANCIES" to mapOf("tab" to "RESULT"))
+                }
+            }
+            NovaActionType.OPEN_ADMIT_CARDS -> {
+                viewModelScope.launch {
+                    _navigationEvent.emit("NAVIGATE_TO_SMART_VACANCIES" to mapOf("tab" to "ADMIT_CARD"))
+                }
+            }
+            NovaActionType.OPEN_SAVED_JOBS -> {
+                viewModelScope.launch {
+                    _navigationEvent.emit("NAVIGATE_TO_SMART_VACANCIES" to mapOf("tab" to "SAVED"))
+                }
             }
             NovaActionType.START_QUIZ -> {
                 var subj = _studyContext.value.subjects.firstOrNull() ?: "General Studies"
@@ -2219,6 +2248,9 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                     _navigationEvent.emit("NAVIGATE_TO_FOCUS" to mapOf("subject" to subj, "topic" to top, "duration" to dur))
                 }
                 onNavigateToTab?.invoke(AppNavTab.FOCUS)
+            }
+            NovaActionType.START_SMART_REVISION -> {
+                onNavigateToTab?.invoke(AppNavTab.STUDY)
             }
             NovaActionType.EXPORT_CURRENT_AFFAIRS_PDF -> {
                 exportCurrentAffairsPdf(context)
@@ -2291,7 +2323,7 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            // 1. Direct Navigation intents
+            // 1. Direct Navigation & Action intents
             if (lower == "nova screen kholo" || lower == "open nova" || lower == "open nova screen" || lower.contains("open full nova")) {
                 setTab(NovaScreenTab.ASSISTANT_CHAT)
                 onNavigateToTab?.invoke(AppNavTab.AI_TUTOR)
@@ -2307,6 +2339,101 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                 setTab(NovaScreenTab.SMART_NOTES)
                 onNavigateToTab?.invoke(AppNavTab.AI_TUTOR)
                 _homeWidgetDisplayState.value = HomeWidgetDisplayState.COLLAPSED
+                return@launch
+            }
+
+            // 1.1 Intent: Smart Vacancies & Jobs ("Railway ki latest vacancy dikhao", "sarkari naukri", "govt jobs")
+            val isVacancyIntent = lower.contains("vacancy") || lower.contains("vacancies") || lower.contains("naukri") ||
+                    lower.contains("job notification") || lower.contains("recruitment") || lower.contains("bharti") ||
+                    lower.contains("sarkari job") || lower.contains("latest vacancy")
+            if (isVacancyIntent) {
+                val exam = _studyContext.value.targetExam.ifBlank { "Competitive" }
+                val actions = listOf(
+                    NovaContextualAction(
+                        label = "🚀 Open Vacancies Hub",
+                        iconName = "work",
+                        actionType = NovaActionType.OPEN_VACANCIES,
+                        isPrimary = true
+                    ),
+                    NovaContextualAction(
+                        label = "🔔 Set Deadline Alert",
+                        iconName = "alarm",
+                        actionType = NovaActionType.SET_DEADLINE_REMINDER
+                    ),
+                    NovaContextualAction(
+                        label = "Open NOVA →",
+                        iconName = "arrow",
+                        actionType = NovaActionType.OPEN_FULL_NOVA
+                    )
+                )
+                val replyText = "Live Vacancies Hub active hai. $exam aur other major central/state recruitments ke eligibility, vacancy count aur application dates yahan se direct access karein."
+                val msg = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = replyText,
+                    actionButtons = actions
+                )
+                _homeWidgetAnswer.value = msg
+                _homeWidgetDisplayState.value = HomeWidgetDisplayState.EXPANDED
+                _messages.update { it + NovaChatMessage(sender = NovaSender.USER, text = text) + msg }
+                return@launch
+            }
+
+            // 1.2 Intent: Results & Cutoff Hub ("Result aaya kya", "Result check karo", "Cutoff dikhao")
+            val isResultIntent = lower.contains("result") || lower.contains("results") || lower.contains("cutoff") ||
+                    lower.contains("cut off") || lower.contains("scorecard") || lower.contains("merit list") ||
+                    lower.contains("answer key")
+            if (isResultIntent) {
+                val actions = listOf(
+                    NovaContextualAction(
+                        label = "🏆 Open Results Hub",
+                        iconName = "emoji_events",
+                        actionType = NovaActionType.OPEN_RESULTS_HUB,
+                        isPrimary = true
+                    ),
+                    NovaContextualAction(
+                        label = "Open NOVA →",
+                        iconName = "arrow",
+                        actionType = NovaActionType.OPEN_FULL_NOVA
+                    )
+                )
+                val replyText = "Official Results & Cutoff updates live hain. Scorecards, official answer keys aur direct PDF downloads dekhne ke liye Results Hub open karein."
+                val msg = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = replyText,
+                    actionButtons = actions
+                )
+                _homeWidgetAnswer.value = msg
+                _homeWidgetDisplayState.value = HomeWidgetDisplayState.EXPANDED
+                _messages.update { it + NovaChatMessage(sender = NovaSender.USER, text = text) + msg }
+                return@launch
+            }
+
+            // 1.3 Intent: Admit Cards & Hall Tickets ("Admit card aaya kya", "Hall ticket download", "Admit card")
+            val isAdmitCardIntent = lower.contains("admit card") || lower.contains("hall ticket") ||
+                    lower.contains("city intimation") || lower.contains("exam center") || lower.contains("admit card dikhao")
+            if (isAdmitCardIntent) {
+                val actions = listOf(
+                    NovaContextualAction(
+                        label = "🎫 Open Admit Cards",
+                        iconName = "badge",
+                        actionType = NovaActionType.OPEN_ADMIT_CARDS,
+                        isPrimary = true
+                    ),
+                    NovaContextualAction(
+                        label = "Open NOVA →",
+                        iconName = "arrow",
+                        actionType = NovaActionType.OPEN_FULL_NOVA
+                    )
+                )
+                val replyText = "Upcoming exams ke Admit Cards aur City Intimation slips live hain. Apna direct download link yahan check karein."
+                val msg = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = replyText,
+                    actionButtons = actions
+                )
+                _homeWidgetAnswer.value = msg
+                _homeWidgetDisplayState.value = HomeWidgetDisplayState.EXPANDED
+                _messages.update { it + NovaChatMessage(sender = NovaSender.USER, text = text) + msg }
                 return@launch
             }
 
@@ -3443,9 +3570,14 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         voiceManager.setVolume(newSettings.voiceVolume)
     }
 
-    fun previewNovaVoice() {
+    fun previewNovaVoice(language: String = _settings.value.voiceLanguage) {
+        val langCode = when {
+            language.contains("Hindi", ignoreCase = true) -> "HI"
+            language.contains("English", ignoreCase = true) -> "EN"
+            else -> "HINGLISH"
+        }
         voiceManager.previewVoice(
-            text = "Boss 😄, 7 baj gaye hain. Aaj ka Physics session abhi pending hai. Chalo 25 minutes se start karte hain?",
+            language = langCode,
             emotion = NovaVoiceEmotion.GENTLE_MOTIVATION
         )
     }

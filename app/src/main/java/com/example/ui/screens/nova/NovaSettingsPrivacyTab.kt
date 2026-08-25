@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.NovaSettings
 import com.example.data.model.NovaVoiceState
 import com.example.ui.components.GlassCard
+import com.example.ui.components.NovaVoiceWaveform
 import com.example.ui.theme.*
 import com.example.viewmodel.NovaViewModel
 
@@ -67,7 +68,7 @@ fun NovaSettingsPrivacyTab(
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Original Young-Adult Female AI Voice • Indian English / Hinglish / Hindi Natural Inflection",
+                    text = "ElevenLabs Neural Voice Engine • Natural Hindi, Hinglish & English Conversational Speech",
                     fontSize = 11.sp,
                     color = NeonCyan
                 )
@@ -77,7 +78,7 @@ fun NovaSettingsPrivacyTab(
                 // Voice Enabled Switch
                 SettingToggleRow(
                     title = "Voice Speech Enabled",
-                    subtitle = "Allows NOVA to read out responses and explanations",
+                    subtitle = "Allows NOVA to speak answers and explanations aloud",
                     isChecked = settings.voiceEnabled,
                     onCheckedChange = { viewModel.updateSettings(settings.copy(voiceEnabled = it)) }
                 )
@@ -101,6 +102,32 @@ fun NovaSettingsPrivacyTab(
                     isChecked = settings.voiceNotifications,
                     onCheckedChange = { viewModel.updateSettings(settings.copy(voiceNotifications = it)) }
                 )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Language Selection Chips
+                Text("Voice Language Preference", fontSize = 12.sp, color = TextSecondary)
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val langOptions = listOf("Auto (Context-Aware)", "Hinglish", "Hindi", "English")
+                    langOptions.forEach { opt ->
+                        val isSelected = settings.voiceLanguage.equals(opt, ignoreCase = true)
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { viewModel.updateSettings(settings.copy(voiceLanguage = opt)) },
+                            label = { Text(opt, fontSize = 11.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = ElectricIndigo,
+                                selectedLabelColor = Color.White,
+                                containerColor = DarkSurfaceElevated,
+                                labelColor = TextSecondary
+                            )
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -128,20 +155,30 @@ fun NovaSettingsPrivacyTab(
                 // Voice Preview & Test Controls
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Button(
-                        onClick = { viewModel.previewNovaVoice() },
+                        onClick = { viewModel.previewNovaVoice(settings.voiceLanguage) },
                         colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.PlayArrow, contentDescription = null, tint = DarkCanvas, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Play Voice Preview", fontWeight = FontWeight.Bold, color = DarkCanvas, fontSize = 12.sp)
+                        Text("Preview Nova Voice", fontWeight = FontWeight.Bold, color = DarkCanvas, fontSize = 12.sp)
                     }
 
                     if (voiceState == NovaVoiceState.SPEAKING) {
+                        NovaVoiceWaveform(
+                            isActive = true,
+                            isProcessing = false,
+                            barCount = 4,
+                            minBarHeight = 4.dp,
+                            maxBarHeight = 16.dp,
+                            barWidth = 3.dp,
+                            barSpacing = 3.dp
+                        )
                         OutlinedButton(
                             onClick = { viewModel.voiceManager.stopSpeaking() },
                             shape = RoundedCornerShape(10.dp),
@@ -151,6 +188,7 @@ fun NovaSettingsPrivacyTab(
                         }
                     }
                 }
+
             }
         }
 

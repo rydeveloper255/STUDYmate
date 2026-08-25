@@ -1,14 +1,17 @@
 package com.example.service.voice
 
 import android.content.Context
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Supported TTS vendor/provider engines for NOVA voice synthesis.
  */
 enum class NovaVoiceProviderType(val displayName: String, val description: String) {
-    ANDROID_ACOUSTIC("On-Device Acoustic Voice", "Low-latency offline TTS with tuned young-adult female AI acoustic parameters"),
-    CLOUD_NEURAL("Cloud Neural Voice", "High-fidelity cloud-rendered voice synthesis with fallback to on-device engine")
+    ELEVENLABS("ElevenLabs Neural Voice", "Ultra-natural human conversational speech (Hindi, Hinglish & English) with low latency"),
+    ON_DEVICE_ACOUSTIC("On-Device Acoustic Voice", "Low-latency offline TTS with tuned young-adult female AI acoustic parameters"),
+    CLOUD_NEURAL("ElevenLabs Neural Voice", "Ultra-natural human conversational speech with on-device fallback")
 }
 
 /**
@@ -18,6 +21,8 @@ enum class NovaVoiceProviderType(val displayName: String, val description: Strin
 interface NovaVoiceService {
     val isSpeakingFlow: StateFlow<Boolean>
     val isReadyFlow: StateFlow<Boolean>
+    val sessionStateFlow: StateFlow<NovaVoiceSessionState> get() = MutableStateFlow(NovaVoiceSessionState.IDLE).asStateFlow()
+    val audioLevelRmsFlow: StateFlow<Float> get() = MutableStateFlow(0f).asStateFlow()
 
     /**
      * Synthesize and speak text using the configured voice profile and emotion inflection.
@@ -33,6 +38,21 @@ interface NovaVoiceService {
      * Immediately stop any in-progress voice playback and release audio focus.
      */
     fun stopSpeaking()
+
+    /**
+     * Pause active speech playback.
+     */
+    fun pause() {}
+
+    /**
+     * Resume paused speech playback.
+     */
+    fun resume() {}
+
+    /**
+     * Replay last spoken phrase.
+     */
+    fun replay() {}
 
     /**
      * Check whether speech synthesis is actively playing.
@@ -66,11 +86,13 @@ interface NovaVoiceService {
 object NovaVoiceServiceFactory {
     fun create(
         context: Context,
-        providerType: NovaVoiceProviderType = NovaVoiceProviderType.ANDROID_ACOUSTIC
+        providerType: NovaVoiceProviderType = NovaVoiceProviderType.ELEVENLABS
     ): NovaVoiceService {
         return when (providerType) {
-            NovaVoiceProviderType.ANDROID_ACOUSTIC -> AndroidAcousticTtsProvider(context)
-            NovaVoiceProviderType.CLOUD_NEURAL -> CloudTtsProvider(context)
+            NovaVoiceProviderType.ELEVENLABS,
+            NovaVoiceProviderType.CLOUD_NEURAL -> ElevenLabsTtsProvider(context)
+            NovaVoiceProviderType.ON_DEVICE_ACOUSTIC -> AndroidAcousticTtsProvider(context)
         }
     }
 }
+

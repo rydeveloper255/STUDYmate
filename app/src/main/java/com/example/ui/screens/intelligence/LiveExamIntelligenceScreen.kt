@@ -31,8 +31,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.*
-import com.example.ui.components.GlassCard
-import com.example.ui.components.springClickable
+import com.example.ui.components.*
 import com.example.ui.screens.home.openUrlInBrowser
 import com.example.ui.theme.*
 
@@ -348,7 +347,11 @@ fun LiveExamIntelligenceScreen(
             }
 
             // Live updates list
-            if (filteredUpdates.isEmpty() && filteredTrending.isEmpty()) {
+            if (isRefreshing && filteredUpdates.isEmpty() && filteredTrending.isEmpty()) {
+                item {
+                    GlassListSkeleton(itemCount = 4)
+                }
+            } else if (filteredUpdates.isEmpty() && filteredTrending.isEmpty()) {
                 item {
                     GlassCard(
                         modifier = Modifier.fillMaxWidth().padding(top = 32.dp),

@@ -287,12 +287,30 @@ fun NovaHomeUniversalWidget(
                         }
                     )
                     QuickChip(
+                        icon = "🚀",
+                        label = "Vacancies",
+                        onClick = {
+                            inputText = "Railway ki latest vacancy dikhao"
+                            isSavedLocally = false
+                            viewModel.submitHomeWidgetQuery("Railway ki latest vacancy dikhao", context, onNavigateToTab)
+                        }
+                    )
+                    QuickChip(
                         icon = "🎯",
                         label = "Weak Topics",
                         onClick = {
                             inputText = "Mera weak topic batao"
                             isSavedLocally = false
                             viewModel.submitHomeWidgetQuery("Mera weak topic batao", context, onNavigateToTab)
+                        }
+                    )
+                    QuickChip(
+                        icon = "🏆",
+                        label = "Results",
+                        onClick = {
+                            inputText = "Result check karo"
+                            isSavedLocally = false
+                            viewModel.submitHomeWidgetQuery("Result check karo", context, onNavigateToTab)
                         }
                     )
                     QuickChip(

@@ -313,9 +313,13 @@ class ExamIntelligenceService(
         fallbackCategory: String
     ): ParsedExamIntelligenceResponse {
         return try {
-            val jsonStart = rawText.indexOf("{").coerceAtLeast(0)
-            val jsonEnd = rawText.lastIndexOf("}").takeIf { it > jsonStart } ?: rawText.length
-            val cleanJson = rawText.substring(jsonStart, jsonEnd + 1)
+            val jsonStart = rawText.indexOf("{")
+            val jsonEnd = rawText.lastIndexOf("}")
+            val cleanJson = if (jsonStart >= 0 && jsonEnd > jsonStart) {
+                rawText.substring(jsonStart, jsonEnd + 1)
+            } else {
+                rawText.trim()
+            }
             val obj = JSONObject(cleanJson)
 
             val examName = obj.optString("examName", fallbackExamName)

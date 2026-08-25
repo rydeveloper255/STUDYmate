@@ -1241,10 +1241,18 @@ fun GlassLoadingState(
 
 enum class AppNavTab(val title: String, val icon: ImageVector, val selectedIcon: ImageVector) {
     HOME("Home", Icons.Outlined.Home, Icons.Filled.Home),
-    AI_TUTOR("NOVA", Icons.Outlined.AutoAwesome, Icons.Filled.AutoAwesome),
     STUDY("Study", Icons.AutoMirrored.Outlined.MenuBook, Icons.AutoMirrored.Filled.MenuBook),
+    PRACTICE("Practice", Icons.Outlined.Quiz, Icons.Filled.Quiz),
+    UPDATES("Updates", Icons.Outlined.Campaign, Icons.Filled.Campaign),
+    PROFILE("Profile", Icons.Outlined.Person, Icons.Filled.Person),
+    // Backward compatibility aliases
+    AI_TUTOR("Nova AI", Icons.Outlined.AutoAwesome, Icons.Filled.AutoAwesome),
     FOCUS("Focus", Icons.Outlined.TrackChanges, Icons.Filled.TrackChanges),
-    PROGRESS("Progress", Icons.Outlined.Assessment, Icons.Filled.Assessment)
+    PROGRESS("Practice", Icons.Outlined.Quiz, Icons.Filled.Quiz);
+
+    companion object {
+        val primaryTabs = listOf(HOME, STUDY, PRACTICE, UPDATES, PROFILE)
+    }
 }
 
 @Composable
@@ -1281,8 +1289,11 @@ fun FloatingGlassNavBar(
                 horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                AppNavTab.entries.forEach { tab ->
-                    val isSelected = currentTab == tab
+                AppNavTab.primaryTabs.forEach { tab ->
+                    val isSelected = currentTab == tab || 
+                        (tab == AppNavTab.PRACTICE && currentTab == AppNavTab.PROGRESS) ||
+                        (tab == AppNavTab.HOME && currentTab == AppNavTab.FOCUS) ||
+                        (tab == AppNavTab.HOME && currentTab == AppNavTab.AI_TUTOR)
                     val scale by animateFloatAsState(
                         targetValue = if (isSelected) 1.06f else 1f,
                         animationSpec = spring(dampingRatio = 0.65f, stiffness = 450f),
@@ -1301,7 +1312,7 @@ fun FloatingGlassNavBar(
                             .springClickable(testTag = "nav_tab_${tab.name.lowercase()}") {
                                 onTabSelected(tab)
                             }
-                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(
@@ -1589,36 +1600,282 @@ fun GlassErrorState(
 }
 
 /**
- * Standardized Glass Skeleton placeholder shimmer.
+ * Standardized Glass Skeleton placeholder shimmer with Liquid Glass gradient flow.
  */
+@Composable
+fun Modifier.liquidGlassShimmer(
+    shape: Shape = RoundedCornerShape(12.dp),
+    durationMillis: Int = 1200
+): Modifier {
+    val themeMode = currentThemeMode()
+    val isLight = themeMode == AppThemeMode.GLASS_LIGHT
+
+    val infiniteTransition = rememberInfiniteTransition(label = "liquid_glass_shimmer")
+    val shimmerTranslate by infiniteTransition.animateFloat(
+        initialValue = -300f,
+        targetValue = 1200f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shimmer_translate"
+    )
+
+    val baseGlassColor = if (isLight) Color(0x18CBD5E1) else Color(0x181E293B)
+    val highlightColor = if (isLight) Color(0x35FFFFFF) else Color(0x2838BDF8)
+    val borderColor = if (isLight) Color(0x30CBD5E1) else Color(0x2038BDF8)
+
+    val brush = Brush.linearGradient(
+        colors = listOf(
+            baseGlassColor,
+            highlightColor,
+            baseGlassColor
+        ),
+        start = androidx.compose.ui.geometry.Offset(shimmerTranslate - 200f, shimmerTranslate - 200f),
+        end = androidx.compose.ui.geometry.Offset(shimmerTranslate + 200f, shimmerTranslate + 200f)
+    )
+
+    return this
+        .clip(shape)
+        .background(brush)
+        .border(0.5.dp, borderColor, shape)
+}
+
 @Composable
 fun GlassSkeleton(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(12.dp)
 ) {
-    val themeMode = currentThemeMode()
-    val infiniteTransition = rememberInfiniteTransition(label = "skeleton_shimmer")
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.2f,
-        targetValue = 0.6f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(900, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "skeleton_alpha"
-    )
-
-    val color = if (themeMode == AppThemeMode.GLASS_LIGHT) {
-        Color(0xFFCBD5E1).copy(alpha = alpha)
-    } else {
-        Color(0xFF1E293B).copy(alpha = alpha)
-    }
-
     Box(
-        modifier = modifier
-            .clip(shape)
-            .background(color)
+        modifier = modifier.liquidGlassShimmer(shape = shape)
     )
+}
+
+/**
+ * Skeleton for feature cards (Home & Hubs)
+ */
+@Composable
+fun GlassCardSkeleton(
+    modifier: Modifier = Modifier,
+    height: Dp = 88.dp,
+    shape: Shape = RoundedCornerShape(18.dp)
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(height)
+            .liquidGlassShimmer(shape = shape),
+        shape = shape,
+        color = Color.Transparent
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            GlassSkeleton(modifier = Modifier.size(42.dp), shape = RoundedCornerShape(12.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                GlassSkeleton(modifier = Modifier.fillMaxWidth(0.6f).height(16.dp), shape = RoundedCornerShape(4.dp))
+                GlassSkeleton(modifier = Modifier.fillMaxWidth(0.85f).height(12.dp), shape = RoundedCornerShape(4.dp))
+            }
+        }
+    }
+}
+
+/**
+ * Skeleton for lists (Vacancies, Current Affairs, Results, PYQs)
+ */
+@Composable
+fun GlassListSkeleton(
+    modifier: Modifier = Modifier,
+    itemCount: Int = 3,
+    itemHeight: Dp = 92.dp
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        repeat(itemCount) {
+            GlassCardSkeleton(height = itemHeight)
+        }
+    }
+}
+
+/**
+ * Skeleton for Dashboard Statistics / Progress
+ */
+@Composable
+fun GlassProgressSkeleton(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(18.dp)
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(130.dp)
+            .liquidGlassShimmer(shape = shape),
+        shape = shape,
+        color = Color.Transparent
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                GlassSkeleton(modifier = Modifier.width(130.dp).height(14.dp))
+                GlassSkeleton(modifier = Modifier.width(60.dp).height(14.dp))
+            }
+            GlassSkeleton(modifier = Modifier.fillMaxWidth().height(8.dp), shape = RoundedCornerShape(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                GlassSkeleton(modifier = Modifier.width(70.dp).height(24.dp))
+                GlassSkeleton(modifier = Modifier.width(70.dp).height(24.dp))
+                GlassSkeleton(modifier = Modifier.width(70.dp).height(24.dp))
+            }
+        }
+    }
+}
+
+/**
+ * Skeleton for Profile header
+ */
+@Composable
+fun GlassProfileSkeleton(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(20.dp)
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(110.dp)
+            .liquidGlassShimmer(shape = shape),
+        shape = shape,
+        color = Color.Transparent
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            GlassSkeleton(modifier = Modifier.size(56.dp), shape = CircleShape)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                GlassSkeleton(modifier = Modifier.fillMaxWidth(0.5f).height(18.dp))
+                GlassSkeleton(modifier = Modifier.fillMaxWidth(0.75f).height(14.dp))
+            }
+        }
+    }
+}
+
+/**
+ * Skeleton for Article & Current Affairs Card
+ */
+@Composable
+fun GlassArticleSkeleton(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(18.dp)
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(140.dp)
+            .liquidGlassShimmer(shape = shape),
+        shape = shape,
+        color = Color.Transparent
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                GlassSkeleton(modifier = Modifier.width(90.dp).height(12.dp))
+                GlassSkeleton(modifier = Modifier.width(60.dp).height(12.dp))
+            }
+            GlassSkeleton(modifier = Modifier.fillMaxWidth(0.9f).height(18.dp))
+            GlassSkeleton(modifier = Modifier.fillMaxWidth().height(14.dp))
+            GlassSkeleton(modifier = Modifier.fillMaxWidth(0.7f).height(14.dp))
+        }
+    }
+}
+
+/**
+ * Skeleton for Mock Test Card
+ */
+@Composable
+fun GlassMockSkeleton(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(18.dp)
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(115.dp)
+            .liquidGlassShimmer(shape = shape),
+        shape = shape,
+        color = Color.Transparent
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                GlassSkeleton(modifier = Modifier.fillMaxWidth(0.6f).height(16.dp))
+                GlassSkeleton(modifier = Modifier.width(50.dp).height(18.dp), shape = RoundedCornerShape(6.dp))
+            }
+            GlassSkeleton(modifier = Modifier.fillMaxWidth(0.4f).height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                GlassSkeleton(modifier = Modifier.width(100.dp).height(12.dp))
+                GlassSkeleton(modifier = Modifier.width(80.dp).height(28.dp), shape = RoundedCornerShape(8.dp))
+            }
+        }
+    }
+}
+
+/**
+ * Skeleton for Vacancy / Result Details Page
+ */
+@Composable
+fun GlassDetailSkeleton(
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        GlassSkeleton(modifier = Modifier.fillMaxWidth(0.7f).height(24.dp))
+        GlassSkeleton(modifier = Modifier.fillMaxWidth(0.4f).height(14.dp))
+        GlassProgressSkeleton()
+        GlassCardSkeleton(height = 120.dp)
+        GlassListSkeleton(itemCount = 3, itemHeight = 70.dp)
+    }
 }
 
 /**

@@ -4,20 +4,21 @@ import android.content.Context
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Modular Cloud TTS Provider abstraction for external neural voice services.
- * Designed to connect to production secure endpoints without exposing private API keys in client code.
- * Falls back transparently to AndroidAcousticTtsProvider if cloud endpoint is not configured or offline.
+ * Modular Cloud TTS Provider integrating ElevenLabs Neural Voice synthesis with on-device acoustic fallback.
+ * Designed to connect securely to ElevenLabs without exposing API keys to client logs or UI.
  */
 class CloudTtsProvider(
     private val context: Context,
-    private val acousticFallback: AndroidAcousticTtsProvider = AndroidAcousticTtsProvider(context)
+    private val elevenLabsEngine: ElevenLabsTtsProvider = ElevenLabsTtsProvider(context)
 ) : NovaVoiceService, com.example.nova.NovaVoiceService {
 
-    override val isSpeakingFlow: StateFlow<Boolean> = acousticFallback.isSpeakingFlow
-    override val isReadyFlow: StateFlow<Boolean> = acousticFallback.isReadyFlow
+    override val isSpeakingFlow: StateFlow<Boolean> = elevenLabsEngine.isSpeakingFlow
+    override val isReadyFlow: StateFlow<Boolean> = elevenLabsEngine.isReadyFlow
+    override val sessionStateFlow: StateFlow<NovaVoiceSessionState> = elevenLabsEngine.sessionState
+    override val audioLevelRmsFlow: StateFlow<Float> = elevenLabsEngine.audioLevelRms
 
     override fun speak(text: String) {
-        acousticFallback.speak(text)
+        elevenLabsEngine.speak(text)
     }
 
     override fun speak(
@@ -26,40 +27,50 @@ class CloudTtsProvider(
         onStart: (() -> Unit)?,
         onDone: (() -> Unit)?
     ) {
-        // Modular hook: If cloud endpoint or custom neural audio synthesizer is provided, play streamed PCM/MP3.
-        // Otherwise seamlessly route to tuned Acoustic Voice Engine.
-        acousticFallback.speak(text, emotion, onStart, onDone)
+        elevenLabsEngine.speak(text, emotion, onStart, onDone)
     }
 
     override fun stopSpeaking() {
-        acousticFallback.stopSpeaking()
+        elevenLabsEngine.stopSpeaking()
+    }
+
+    override fun pause() {
+        elevenLabsEngine.pause()
+    }
+
+    override fun resume() {
+        elevenLabsEngine.resume()
+    }
+
+    override fun replay() {
+        elevenLabsEngine.replay()
     }
 
     override fun stop() {
-        acousticFallback.stop()
+        elevenLabsEngine.stop()
     }
 
     override fun isSpeaking(): Boolean {
-        return acousticFallback.isSpeaking()
+        return elevenLabsEngine.isSpeaking()
     }
 
     override fun setSpeechSpeed(speed: Float) {
-        acousticFallback.setSpeechSpeed(speed)
+        elevenLabsEngine.setSpeechSpeed(speed)
     }
 
     override fun setSpeed(speed: Float) {
-        acousticFallback.setSpeed(speed)
+        elevenLabsEngine.setSpeed(speed)
     }
 
     override fun setPitch(pitch: Float) {
-        acousticFallback.setPitch(pitch)
+        elevenLabsEngine.setPitch(pitch)
     }
 
     override fun setVolume(volume: Float) {
-        acousticFallback.setVolume(volume)
+        elevenLabsEngine.setVolume(volume)
     }
 
     override fun release() {
-        acousticFallback.release()
+        elevenLabsEngine.release()
     }
 }
