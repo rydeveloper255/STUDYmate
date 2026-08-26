@@ -42,6 +42,16 @@ import com.example.viewmodel.NovaViewModel
 import com.example.viewmodel.ActiveTestState
 import com.example.viewmodel.FocusTimerState
 import com.example.service.intelligence.*
+import com.example.service.FocusShieldManager
+import com.example.ui.screens.focus.FocusShieldSettingsScreen
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.platform.LocalContext
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.content.Context
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import org.json.JSONArray
 import java.text.SimpleDateFormat
 import java.util.*
@@ -111,6 +121,10 @@ fun HomeScreen(
     onPauseFocusSession: () -> Unit = {},
     onResumeFocusSession: () -> Unit = {},
     onStopFocusSession: () -> Unit = {},
+    dailyMissionTasks: List<com.example.data.model.DailyMissionTask> = emptyList(),
+    weakTopicInsights: List<com.example.data.model.WeakTopicInsight> = emptyList(),
+    onToggleDailyMissionTask: (String, Boolean) -> Unit = { _, _ -> },
+    onOpenSmartPlanner: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isDark = isAppInDarkTheme()
@@ -124,6 +138,7 @@ fun HomeScreen(
     var showAllToolsDialog by remember { mutableStateOf(false) }
     var showQuickStudyDialog by remember { mutableStateOf(false) }
     var showTransparencyDialog by remember { mutableStateOf(false) }
+    var showShieldSettingsDialog by remember { mutableStateOf(false) }
     var selectedPlanTimeOption by remember { mutableStateOf(userStudyPreferences.studyTimeAvailableOption.ifBlank { "30 min" }) }
 
     // Step 36 Personalization Engine Calculations
@@ -152,6 +167,9 @@ fun HomeScreen(
     val showRevisionDialog = novaViewModel?.showRevisionDialog?.collectAsState()?.value ?: false
     val activeRevisionTopic = novaViewModel?.activeRevisionTopic?.collectAsState()?.value
 
+    // Connectivity State
+    val isOnline = rememberIsOnline()
+
     // Time-based dynamic greeting
     val currentHour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
     val greetingTime = when (currentHour) {
@@ -160,9 +178,20 @@ fun HomeScreen(
         in 17..21 -> "Good evening"
         else -> "Good night"
     }
-    val studentDisplayName = remember(user?.name) {
-        cleanDisplayName(user?.name)
+
+    val rawUserName = user?.name?.trim()
+    val hasValidName = !rawUserName.isNullOrBlank() &&
+            !rawUserName.equals("Student", ignoreCase = true) &&
+            !rawUserName.equals("Scholar", ignoreCase = true) &&
+            !rawUserName.equals("User", ignoreCase = true)
+    
+    val firstName = remember(rawUserName, hasValidName) {
+        if (hasValidName) {
+            cleanDisplayName(rawUserName).split(" ").firstOrNull() ?: ""
+        } else ""
     }
+
+    val greetingHeader = if (firstName.isNotBlank()) "$greetingTime, $firstName 👋" else "$greetingTime 👋"
 
     // Exam Context & Dynamic Countdown
     val selectedExamName = user?.examName?.ifBlank { "RRB Group D (Railway)" } ?: "RRB Group D (Railway)"
@@ -252,14 +281,19 @@ fun HomeScreen(
         modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.TopCenter
     ) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .widthIn(max = 720.dp)
-                .padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(top = 12.dp, bottom = 108.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+        PullToRefreshBox(
+            isRefreshing = isRefreshingLiveExam,
+            onRefresh = onRefreshLiveExam,
+            modifier = Modifier.fillMaxSize()
         ) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .widthIn(max = 720.dp)
+                    .padding(horizontal = 16.dp),
+                contentPadding = PaddingValues(top = 12.dp, bottom = 108.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
             // =========================================================================
             // 1. MINIMAL HEADER (Logo, Greeting, Exam Switcher, Notifications, Profile)
             // =========================================================================
@@ -278,7 +312,7 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = "$greetingTime, $studentDisplayName 👋",
+                                text = greetingHeader,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Black,
                                 color = if (isDark) Color.White else Color(0xFF0F172A),
@@ -310,9 +344,47 @@ fun HomeScreen(
                                     )
                                 }
                             }
+
+                            if (!isOnline) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0x22EF4444),
+                                    border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0x66EF4444))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.WifiOff,
+                                            contentDescription = "Offline",
+                                            tint = Color(0xFFEF4444),
+                                            modifier = Modifier.size(11.dp)
+                                        )
+                                        Text(
+                                            text = "You're offline",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFFFCA5A5),
+                                            fontSize = 10.sp
+                                        )
+                                    }
+                                }
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(2.dp))
+
+                        Text(
+                            text = "Ready for today's preparation?",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
 
                         // Target Exam Switcher Pill
                         Surface(
@@ -421,7 +493,7 @@ fun HomeScreen(
                                 )
                             } else {
                                 Text(
-                                    text = studentDisplayName.take(1).uppercase(),
+                                    text = (firstName.ifBlank { "S" }).take(1).uppercase(),
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = if (isDark) NeonCyan else DeepIndigo
@@ -585,7 +657,26 @@ fun HomeScreen(
             }
 
             // =========================================================================
-            // 3. FOCUS MODE — HERO SECTION (Commanding visual weight, primary action)
+            // 3. TODAY'S PROGRESS & DAILY STUDY GOAL ("45 / 60 min")
+            // =========================================================================
+            item {
+                TodaysProgressCompactSection(
+                    formattedStudyTime = formattedStudyTime,
+                    formattedTargetTime = formattedTargetTime,
+                    progressFraction = progressFraction,
+                    progressPercentage = progressPercentage,
+                    streakDays = streakDays,
+                    mockAttemptsCount = mockAttempts.size,
+                    userLevel = userLevel,
+                    userXp = userXp,
+                    onClick = onOpenExamReadinessCenter,
+                    isDark = isDark,
+                    currentTheme = currentTheme
+                )
+            }
+
+            // =========================================================================
+            // 4. FOCUS MODE — HERO SECTION (Timer display & duration selection)
             // =========================================================================
             item {
                 FocusModeHeroSection(
@@ -608,7 +699,50 @@ fun HomeScreen(
             }
 
             // =========================================================================
-            // 4. CONTINUE LEARNING
+            // STEP 50: TODAY'S MISSION & NOVA SMART INSIGHTS WIDGETS
+            // =========================================================================
+            item {
+                TodayMissionHomeWidget(
+                    missions = dailyMissionTasks,
+                    completedCount = dailyMissionTasks.count { it.isCompleted },
+                    totalCount = dailyMissionTasks.size,
+                    onToggleMission = onToggleDailyMissionTask,
+                    onStartAction = { actionType, subject, topic, minutes ->
+                        when (actionType) {
+                            "FOCUS" -> onStartFocusSession(subject, topic)
+                            "PRACTICE" -> onNavigateToTab(AppNavTab.PRACTICE)
+                            "CURRENT_AFFAIRS" -> onNavigateToTab(AppNavTab.UPDATES)
+                            else -> onStartFocusSession(subject, topic)
+                        }
+                    },
+                    onOpenPlan = onOpenSmartPlanner
+                )
+            }
+
+            if (weakTopicInsights.isNotEmpty()) {
+                item {
+                    WeakTopicInsightHomeWidget(
+                        insight = weakTopicInsights.first(),
+                        onStartPractice = { subject, topic, minutes ->
+                            onNavigateToTab(AppNavTab.PRACTICE)
+                        }
+                    )
+                }
+            }
+
+            // =========================================================================
+            // 5. BLOCK APPS CARD (Focus Shield app blocking manager)
+            // =========================================================================
+            item {
+                BlockAppsCardSection(
+                    onOpenShieldSettings = { showShieldSettingsDialog = true },
+                    isDark = isDark,
+                    currentTheme = currentTheme
+                )
+            }
+
+            // =========================================================================
+            // 6. CONTINUE LEARNING (Where you left off)
             // =========================================================================
             item {
                 ContinueLearningSection(
@@ -626,56 +760,22 @@ fun HomeScreen(
             }
 
             // =========================================================================
-            // 5. CONTINUE PRACTICE & MOCK TESTS
+            // 7. SMART IMPORTANT UPDATES (Vacancies, Results, Admit Cards with NEW badges)
             // =========================================================================
             item {
-                ContinuePracticeSection(
+                LatestImportantUpdateSection(
+                    recruitmentFeedState = recruitmentFeedState,
+                    liveExamFeedState = liveExamFeedState,
                     selectedExamName = selectedExamName,
-                    mockAttemptsCount = mockAttempts.size,
-                    latestMock = mockAttempts.lastOrNull(),
-                    onStartMock = { onNavigateToTab(AppNavTab.PRACTICE) },
-                    onStartPyq = { onNavigateToTab(AppNavTab.PRACTICE) },
+                    onOpenSmartVacancy = onOpenSmartVacancy,
+                    onOpenLiveExamUpdateDetail = onOpenLiveExamUpdateDetail,
+                    onOpenFullUpdates = onOpenFullLiveExamIntelligence,
+                    onRefreshUpdates = { onRefreshLiveExam() },
                     isDark = isDark,
                     currentTheme = currentTheme
                 )
             }
 
-            // =========================================================================
-            // 6. TODAY'S PROGRESS & DAILY STUDY GOAL
-            // =========================================================================
-            item {
-                TodaysProgressCompactSection(
-                    formattedStudyTime = formattedStudyTime,
-                    formattedTargetTime = formattedTargetTime,
-                    progressFraction = progressFraction,
-                    progressPercentage = progressPercentage,
-                    streakDays = streakDays,
-                    mockAttemptsCount = mockAttempts.size,
-                    userLevel = userLevel,
-                    userXp = userXp,
-                    onClick = onOpenExamReadinessCenter,
-                    isDark = isDark,
-                    currentTheme = currentTheme
-                )
-            }
-
-            // =========================================================================
-            // 7. SMART DAILY PLAN (Structured Schedule)
-            // =========================================================================
-            item {
-                SmartDailyPlanSection(
-                    missionSubject = missionSubject,
-                    missionTopic = missionTopic,
-                    onStartSession = { onStartFocusSession(missionSubject, missionTopic) },
-                    onOpenPlan = { onNavigateToTab(AppNavTab.STUDY) },
-                    isDark = isDark,
-                    currentTheme = currentTheme
-                )
-            }
-
-            // =========================================================================
-            // 8. NEEDS PRACTICE (WEAK TOPICS) & YOUR STRENGTHS
-            // =========================================================================
             item {
                 NeedsPracticeAndStrengthsSection(
                     topicPerformances = topicPerformances,
@@ -698,124 +798,43 @@ fun HomeScreen(
             }
 
             // =========================================================================
-            // 9. LATEST IMPORTANT UPDATE (Personalized for Target Exam)
+            // 8. ALL FEATURES (5 Categorized Sections: Learn, Practice, Updates, AI & Tools, Account)
             // =========================================================================
             item {
-                LatestImportantUpdateSection(
-                    recruitmentFeedState = recruitmentFeedState,
-                    liveExamFeedState = liveExamFeedState,
-                    selectedExamName = selectedExamName,
+                AllFeaturesGridSection(
+                    onNavigateToTab = onNavigateToTab,
                     onOpenSmartVacancy = onOpenSmartVacancy,
-                    onOpenLiveExamUpdateDetail = onOpenLiveExamUpdateDetail,
-                    onOpenFullUpdates = onOpenFullLiveExamIntelligence,
+                    onOpenExamReadinessCenter = onOpenExamReadinessCenter,
+                    onOpenProfileSettings = onOpenProfileSettings,
+                    onOpenNotificationCenter = onOpenNotificationCenter,
+                    onOpenDocumentSummarizer = onOpenDocumentSummarizer,
+                    onOpenShieldSettings = { showShieldSettingsDialog = true },
+                    onOpenSearch = { showQuickSearchDialog = true },
                     isDark = isDark,
                     currentTheme = currentTheme
                 )
             }
-
-            // =========================================================================
-            // 10. EXPLORE FEATURES (Clean 2-Column Responsive Navigation Grid)
-            // =========================================================================
-            item {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "EXPLORE FEATURES",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
-                        letterSpacing = 0.8.sp,
-                        modifier = Modifier.padding(start = 2.dp, bottom = 8.dp)
-                    )
-
-                    // Row 1: Study & Practice
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        FeatureCardItem(
-                            title = "Study",
-                            subtitle = "Learn subjects & chapters",
-                            icon = Icons.AutoMirrored.Filled.MenuBook,
-                            accentColor = DeepIndigo,
-                            modifier = Modifier.weight(1f),
-                            testTag = "feature_card_study",
-                            onClick = { onNavigateToTab(AppNavTab.STUDY) }
-                        )
-
-                        FeatureCardItem(
-                            title = "Practice",
-                            subtitle = "Mock tests, PYQ & quizzes",
-                            icon = Icons.Filled.Quiz,
-                            accentColor = EmeraldSuccess,
-                            modifier = Modifier.weight(1f),
-                            testTag = "feature_card_practice",
-                            onClick = { onNavigateToTab(AppNavTab.PRACTICE) }
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Row 2: Nova AI & Current Affairs
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        FeatureCardItem(
-                            title = "Nova AI",
-                            subtitle = "Ask, learn & get instant help",
-                            icon = Icons.Filled.AutoAwesome,
-                            accentColor = NeonCyan,
-                            modifier = Modifier.weight(1f),
-                            testTag = "feature_card_nova",
-                            onClick = { onNavigateToTab(AppNavTab.AI_TUTOR) }
-                        )
-
-                        FeatureCardItem(
-                            title = "Current Affairs",
-                            subtitle = "Daily CA, news & quizzes",
-                            icon = Icons.Filled.Article,
-                            accentColor = GoldenSpark,
-                            modifier = Modifier.weight(1f),
-                            testTag = "feature_card_current_affairs",
-                            onClick = { onNavigateToTab(AppNavTab.UPDATES) }
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Row 3: Recruitment & Progress
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        FeatureCardItem(
-                            title = "Recruitment",
-                            subtitle = "Vacancies, results & admit cards",
-                            icon = Icons.Filled.WorkOutline,
-                            accentColor = Color(0xFF3B82F6),
-                            modifier = Modifier.weight(1f),
-                            testTag = "feature_card_recruitment",
-                            onClick = { onNavigateToTab(AppNavTab.UPDATES) }
-                        )
-
-                        FeatureCardItem(
-                            title = "Progress",
-                            subtitle = "Track your readiness & analytics",
-                            icon = Icons.Outlined.Speed,
-                            accentColor = NebulaPurple,
-                            modifier = Modifier.weight(1f),
-                            testTag = "feature_card_progress",
-                            onClick = { onNavigateToTab(AppNavTab.PRACTICE) }
-                        )
-                    }
-                }
-            }
         }
     }
+}
 
     // =========================================================================
     // MODAL DIALOGS
     // =========================================================================
+
+    // 0. SHIELD SETTINGS MODAL DIALOG
+    if (showShieldSettingsDialog) {
+        Dialog(
+            onDismissRequest = { showShieldSettingsDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(modifier = Modifier.fillMaxSize()) {
+                FocusShieldSettingsScreen(
+                    onBack = { showShieldSettingsDialog = false }
+                )
+            }
+        }
+    }
 
     // 0. THEME & NIGHT-TIME STUDY MODE DIALOG
     if (showThemeSelectionDialog) {
@@ -913,6 +932,23 @@ fun HomeScreen(
     // 2. QUICK SEARCH MODAL DIALOG
     if (showQuickSearchDialog) {
         var searchQuery by remember { mutableStateOf("") }
+        var recentSearches by remember { mutableStateOf(listOf("Railway Vacancies", "Physics Formulas", "Mock Test 1", "Current Affairs")) }
+
+        val allSearchableFeatures = remember {
+            listOf(
+                Triple("Focus Mode", "Start focus session & block apps", AppNavTab.FOCUS),
+                Triple("Mock Tests", "Full length & subject practice", AppNavTab.PRACTICE),
+                Triple("Study Notes", "Chapter wise revision material", AppNavTab.STUDY),
+                Triple("Current Affairs", "Daily news & quiz updates", AppNavTab.STUDY),
+                Triple("Latest Vacancies", "Recruitment alerts & admit cards", AppNavTab.STUDY),
+                Triple("Nova AI", "Voice & document AI companion", AppNavTab.AI_TUTOR)
+            )
+        }
+
+        val filteredFeatures = remember(searchQuery) {
+            if (searchQuery.isBlank()) emptyList()
+            else allSearchableFeatures.filter { it.first.contains(searchQuery, true) || it.second.contains(searchQuery, true) }
+        }
 
         AlertDialog(
             onDismissRequest = { showQuickSearchDialog = false },
@@ -923,7 +959,7 @@ fun HomeScreen(
                     Icon(Icons.Filled.Search, null, tint = NeonCyan, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Smart Study Search",
+                        text = "Global Search",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = if (isDark) Color.White else Color(0xFF0F172A)
@@ -935,19 +971,13 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = "Search questions, chapters, formulas, or past year topics for $selectedExamName.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-                    )
-
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("quick_search_input"),
-                        placeholder = { Text("e.g. Thermodynamics formulas, Railway GK...") },
+                        placeholder = { Text("Search features, topics, vacancies...") },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         trailingIcon = {
@@ -959,24 +989,114 @@ fun HomeScreen(
                         }
                     )
 
-                    // Popular topic chips
-                    Text(
-                        text = "Quick Topics:",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf("Formulas", "Mock Test", "Weak Areas").forEach { chip ->
-                            SuggestionChip(
-                                onClick = {
-                                    searchQuery = chip
-                                    onPerformSmartSearch(chip)
-                                    showQuickSearchDialog = false
-                                },
-                                label = { Text(chip, fontSize = 11.sp) }
+                    if (searchQuery.isBlank()) {
+                        // Recent Searches
+                        if (recentSearches.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Recent Searches",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                    fontWeight = FontWeight.Bold
+                                )
+                                TextButton(onClick = { recentSearches = emptyList() }, contentPadding = PaddingValues(0.dp)) {
+                                    Text("Clear", fontSize = 10.sp, color = NeonCyan)
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                recentSearches.take(3).forEach { recent ->
+                                    SuggestionChip(
+                                        onClick = {
+                                            searchQuery = recent
+                                            onPerformSmartSearch(recent)
+                                            showQuickSearchDialog = false
+                                        },
+                                        label = { Text(recent, fontSize = 11.sp) }
+                                    )
+                                }
+                            }
+                        }
+
+                        // Suggested Features
+                        Text(
+                            text = "Suggested Features:",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                            fontWeight = FontWeight.Bold
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf("Focus Mode", "Mock Test", "Vacancies", "Current Affairs").forEach { chip ->
+                                SuggestionChip(
+                                    onClick = {
+                                        searchQuery = chip
+                                        onPerformSmartSearch(chip)
+                                        showQuickSearchDialog = false
+                                    },
+                                    label = { Text(chip, fontSize = 11.sp) }
+                                )
+                            }
+                        }
+                    } else {
+                        // Search Results Grouped
+                        Text(
+                            text = "Matching Features:",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        if (filteredFeatures.isNotEmpty()) {
+                            filteredFeatures.forEach { (title, subtitle, tab) ->
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            if (!recentSearches.contains(searchQuery)) {
+                                                recentSearches = (listOf(searchQuery) + recentSearches).take(5)
+                                            }
+                                            onNavigateToTab(tab)
+                                            showQuickSearchDialog = false
+                                        },
+                                    color = if (isDark) Color(0x1AFFFFFF) else Color(0x0A000000)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Filled.AutoAwesome, null, tint = NeonCyan, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            Text(title, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = if (isDark) Color.White else Color(0xFF0F172A))
+                                            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B), fontSize = 10.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = "Ask Nova AI about '$searchQuery'",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = NeonCyan,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        onPerformSmartSearch(searchQuery)
+                                        showQuickSearchDialog = false
+                                    }
+                                    .padding(8.dp)
                             )
                         }
                     }
@@ -986,6 +1106,9 @@ fun HomeScreen(
                 Button(
                     onClick = {
                         if (searchQuery.isNotBlank()) {
+                            if (!recentSearches.contains(searchQuery)) {
+                                recentSearches = (listOf(searchQuery) + recentSearches).take(5)
+                            }
                             onPerformSmartSearch(searchQuery)
                             showQuickSearchDialog = false
                         }
@@ -2333,12 +2456,18 @@ private fun LatestImportantUpdateSection(
     onOpenSmartVacancy: (String?) -> Unit,
     onOpenLiveExamUpdateDetail: (LiveExamUpdateEntity) -> Unit,
     onOpenFullUpdates: () -> Unit,
+    onRefreshUpdates: () -> Unit,
     isDark: Boolean,
     currentTheme: AppThemeMode
 ) {
+    var seenUpdateIds by remember { mutableStateOf(setOf<String>()) }
+
     val topVacancy = recruitmentFeedState.latestForYouVacancies.firstOrNull()
+        ?: recruitmentFeedState.allActiveVacancies.firstOrNull { it.examCategory.contains(selectedExamName, true) || selectedExamName.contains("Railway", true) }
         ?: recruitmentFeedState.allActiveVacancies.firstOrNull()
-    val topLiveUpdate = liveExamFeedState.whatsNewList.firstOrNull()
+
+    val topLiveUpdate = liveExamFeedState.whatsNewList.firstOrNull { it.examName.contains(selectedExamName, true) }
+        ?: liveExamFeedState.whatsNewList.firstOrNull()
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -2346,14 +2475,35 @@ private fun LatestImportantUpdateSection(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(
-                text = "LATEST UPDATE",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.ExtraBold,
-                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
-                letterSpacing = 0.8.sp,
-                modifier = Modifier.padding(start = 2.dp)
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "SMART IMPORTANT UPDATES",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                    letterSpacing = 0.8.sp,
+                    modifier = Modifier.padding(start = 2.dp)
+                )
+
+                if (topVacancy != null && !seenUpdateIds.contains(topVacancy.id)) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = Color(0xFFEF4444)
+                    ) {
+                        Text(
+                            text = "NEW",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
+                }
+            }
 
             TextButton(
                 onClick = onOpenFullUpdates,
@@ -2379,7 +2529,28 @@ private fun LatestImportantUpdateSection(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        if (topVacancy != null) {
+        if (!recruitmentFeedState.isLoading && topVacancy == null && topLiveUpdate == null) {
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                elevation = 1.dp
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Couldn't load updates right now.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                    )
+                    TextButton(onClick = onRefreshUpdates) {
+                        Text("Retry", color = NeonCyan, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        } else if (topVacancy != null) {
             // Vacancy update banner
             GlassCard(
                 modifier = Modifier
@@ -2387,7 +2558,10 @@ private fun LatestImportantUpdateSection(
                     .testTag("latest_vacancy_banner"),
                 shape = RoundedCornerShape(16.dp),
                 elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 1.dp else 4.dp,
-                onClick = { onOpenSmartVacancy("VACANCY") }
+                onClick = {
+                    seenUpdateIds = seenUpdateIds + topVacancy.id
+                    onOpenSmartVacancy("VACANCIES")
+                }
             ) {
                 Row(
                     modifier = Modifier
@@ -2412,14 +2586,32 @@ private fun LatestImportantUpdateSection(
                         }
 
                         Column {
-                            Text(
-                                text = topVacancy.title,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isDark) Color.White else Color(0xFF0F172A),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = topVacancy.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDark) Color.White else Color(0xFF0F172A),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                if (!seenUpdateIds.contains(topVacancy.id)) {
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = Color(0xFFEF4444)
+                                    ) {
+                                        Text(
+                                            text = "NEW",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                            }
                             Spacer(Modifier.height(2.dp))
                             Text(
                                 text = "${topVacancy.organization} • ${if (topVacancy.totalVacancies != null && topVacancy.totalVacancies > 0) "${topVacancy.totalVacancies} Posts • " else ""}Last Date: ${topVacancy.applicationLastDate ?: "Soon"}",
@@ -2457,7 +2649,10 @@ private fun LatestImportantUpdateSection(
                     .testTag("latest_live_update_banner"),
                 shape = RoundedCornerShape(16.dp),
                 elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 1.dp else 4.dp,
-                onClick = { onOpenLiveExamUpdateDetail(topLiveUpdate) }
+                onClick = {
+                    seenUpdateIds = seenUpdateIds + topLiveUpdate.id
+                    onOpenLiveExamUpdateDetail(topLiveUpdate)
+                }
             ) {
                 Row(
                     modifier = Modifier
@@ -2482,14 +2677,32 @@ private fun LatestImportantUpdateSection(
                         }
 
                         Column {
-                            Text(
-                                text = topLiveUpdate.title,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isDark) Color.White else Color(0xFF0F172A),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = topLiveUpdate.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDark) Color.White else Color(0xFF0F172A),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                if (!seenUpdateIds.contains(topLiveUpdate.id)) {
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = Color(0xFFEF4444)
+                                    ) {
+                                        Text(
+                                            text = "NEW",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                            }
                             Spacer(Modifier.height(2.dp))
                             Text(
                                 text = "${topLiveUpdate.category.replace("_", " ")} • ${topLiveUpdate.examName}",
@@ -2637,4 +2850,358 @@ private fun parseCustomStudyBlocks(json: String?): List<StudyTimeBlock> {
     } catch (e: Exception) {
         emptyList()
     }
+}
+
+// =========================================================================
+// BLOCK APPS CARD COMPONENT (Focus Shield Integration)
+// =========================================================================
+
+@Composable
+private fun BlockAppsCardSection(
+    onOpenShieldSettings: () -> Unit,
+    isDark: Boolean,
+    currentTheme: AppThemeMode
+) {
+    val restrictedCount = remember { FocusShieldManager.getRestrictedPackages().size }
+    val isShieldEnabled = remember { FocusShieldManager.isShieldEnabled() }
+
+    GlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("home_block_apps_card"),
+        shape = RoundedCornerShape(18.dp),
+        elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 1.dp else 4.dp,
+        onClick = onOpenShieldSettings
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            Brush.linearGradient(
+                                listOf(Color(0xFFEF4444).copy(alpha = 0.2f), Color(0xFFF59E0B).copy(alpha = 0.2f))
+                            )
+                        )
+                        .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Shield,
+                        contentDescription = "Block Apps",
+                        tint = Color(0xFFEF4444),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Block Distracting Apps",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isDark) Color.White else Color(0xFF0F172A)
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (isShieldEnabled) EmeraldSuccess.copy(alpha = 0.15f) else Color(0x2094A3B8)
+                        ) {
+                            Text(
+                                text = if (isShieldEnabled) "SHIELD ON" else "SHIELD OFF",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isShieldEnabled) EmeraldSuccess else Color(0xFF94A3B8),
+                                fontSize = 10.sp,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (restrictedCount > 0) "$restrictedCount apps blocked during study" else "Block social apps, games & YouTube Shorts",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                    )
+                }
+            }
+
+            Button(
+                onClick = onOpenShieldSettings,
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isDark) Color(0x28EF4444) else Color(0x18EF4444),
+                    contentColor = Color(0xFFEF4444)
+                ),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFFEF4444).copy(alpha = 0.4f))
+            ) {
+                Text("Manage", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+// =========================================================================
+// ALL FEATURES CATEGORIZED SECTION (5 Categories: Learn, Practice, Updates, AI & Tools, Account)
+// =========================================================================
+
+@Composable
+private fun AllFeaturesGridSection(
+    onNavigateToTab: (AppNavTab) -> Unit,
+    onOpenSmartVacancy: (String?) -> Unit,
+    onOpenExamReadinessCenter: () -> Unit,
+    onOpenProfileSettings: () -> Unit,
+    onOpenNotificationCenter: () -> Unit,
+    onOpenDocumentSummarizer: () -> Unit,
+    onOpenShieldSettings: () -> Unit,
+    onOpenSearch: () -> Unit,
+    isDark: Boolean,
+    currentTheme: AppThemeMode
+) {
+    val categories = remember {
+        listOf(
+            FeatureCategory(
+                categoryTitle = "📚 LEARN",
+                items = listOf(
+                    FeatureGridItem("Study", "Learn subjects & chapters", Icons.AutoMirrored.Filled.MenuBook, DeepIndigo) { onNavigateToTab(AppNavTab.STUDY) },
+                    FeatureGridItem("Notes", "Smart AI notes & summaries", Icons.Filled.Description, Color(0xFF8B5CF6)) { onNavigateToTab(AppNavTab.AI_TUTOR) },
+                    FeatureGridItem("Current Affairs", "Daily news, CA & quizzes", Icons.Filled.Article, GoldenSpark) { onNavigateToTab(AppNavTab.UPDATES) },
+                    FeatureGridItem("Study Materials", "PDF vault & formula sheets", Icons.Filled.PictureAsPdf, Color(0xFFEF4444)) { onOpenDocumentSummarizer() },
+                    FeatureGridItem("Chapters", "Syllabus & topic breakdown", Icons.Filled.AutoStories, Color(0xFF3B82F6)) { onNavigateToTab(AppNavTab.STUDY) }
+                )
+            ),
+            FeatureCategory(
+                categoryTitle = "📝 PRACTICE",
+                items = listOf(
+                    FeatureGridItem("Practice", "Subject & topic practice", Icons.Filled.Quiz, EmeraldSuccess) { onNavigateToTab(AppNavTab.PRACTICE) },
+                    FeatureGridItem("Mock Tests", "Full length test series", Icons.Filled.TaskAlt, ElectricViolet) { onNavigateToTab(AppNavTab.PRACTICE) },
+                    FeatureGridItem("PYQ", "Previous year papers", Icons.Filled.HistoryEdu, Color(0xFFF59E0B)) { onNavigateToTab(AppNavTab.PRACTICE) },
+                    FeatureGridItem("Quiz", "Daily speed quizzes", Icons.Filled.Timer, NeonCyan) { onNavigateToTab(AppNavTab.PRACTICE) },
+                    FeatureGridItem("Weak Topics", "Targeted mistake bank", Icons.Filled.Spellcheck, Color(0xFFEC4899)) { onNavigateToTab(AppNavTab.PRACTICE) }
+                )
+            ),
+            FeatureCategory(
+                categoryTitle = "📰 UPDATES",
+                items = listOf(
+                    FeatureGridItem("Latest Vacancies", "Railway & sarkari jobs", Icons.Filled.Train, Color(0xFF3B82F6)) { onOpenSmartVacancy("VACANCIES") },
+                    FeatureGridItem("Results", "Exam outcomes & cutoffs", Icons.Filled.Assignment, Color(0xFF8B5CF6)) { onOpenSmartVacancy("RESULTS") },
+                    FeatureGridItem("Admit Cards", "Hall tickets & dates", Icons.Filled.ConfirmationNumber, Color(0xFFEC4899)) { onOpenSmartVacancy("ADMIT_CARDS") },
+                    FeatureGridItem("Notifications", "Exam alerts & reminders", Icons.Outlined.Notifications, GoldenSpark) { onOpenNotificationCenter() },
+                    FeatureGridItem("Govt Updates", "Official circulars", Icons.Filled.Campaign, Color(0xFF10B981)) { onNavigateToTab(AppNavTab.UPDATES) }
+                )
+            ),
+            FeatureCategory(
+                categoryTitle = "🤖 AI & TOOLS",
+                items = listOf(
+                    FeatureGridItem("Nova AI", "AI tutor & doubt solver", Icons.Filled.AutoAwesome, NeonCyan) { onNavigateToTab(AppNavTab.AI_TUTOR) },
+                    FeatureGridItem("Voice Assistant", "Ask Nova via Voice", Icons.Filled.Mic, ElectricViolet) { onNavigateToTab(AppNavTab.AI_TUTOR) },
+                    FeatureGridItem("PDF Vault", "Summarize & read PDFs", Icons.Filled.FolderZip, Color(0xFFF97316)) { onOpenDocumentSummarizer() },
+                    FeatureGridItem("Progress", "Analytics & readiness", Icons.Outlined.Speed, NebulaPurple) { onOpenExamReadinessCenter() },
+                    FeatureGridItem("Focus Shield", "Block distracting apps", Icons.Filled.Shield, Color(0xFFEF4444)) { onOpenShieldSettings() },
+                    FeatureGridItem("Smart Search", "Syllabus & formula finder", Icons.Filled.Search, Color(0xFF06B6D4)) { onOpenSearch() }
+                )
+            ),
+            FeatureCategory(
+                categoryTitle = "👤 ACCOUNT",
+                items = listOf(
+                    FeatureGridItem("Saved", "Bookmarks & saved items", Icons.Filled.Bookmark, Color(0xFF06B6D4)) { onNavigateToTab(AppNavTab.PRACTICE) },
+                    FeatureGridItem("Profile", "Student profile & target", Icons.Filled.Person, Color(0xFF3B82F6)) { onOpenProfileSettings() },
+                    FeatureGridItem("Settings", "App theme & preferences", Icons.Filled.Settings, Color(0xFF64748B)) { onOpenProfileSettings() },
+                    FeatureGridItem("Language", "UI & content language", Icons.Filled.Translate, GoldenSpark) { onOpenProfileSettings() },
+                    FeatureGridItem("Personalization", "Study goals & targets", Icons.Filled.Tune, EmeraldSuccess) { onOpenProfileSettings() }
+                )
+            )
+        )
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "ALL FEATURES",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Black,
+                color = if (isDark) Color(0xFFE2E8F0) else Color(0xFF334155),
+                letterSpacing = 1.sp
+            )
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = if (isDark) Color(0x1A38BDF8) else Color(0x100284C7)
+            ) {
+                Text(
+                    text = "COMPLETE ACCESS",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = NeonCyan,
+                    fontSize = 9.sp,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
+
+        categories.forEach { category ->
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = category.categoryTitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF475569),
+                    letterSpacing = 0.5.sp
+                )
+
+                val chunked = category.items.chunked(2)
+                chunked.forEach { rowItems ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        rowItems.forEach { item ->
+                            CompactFeatureCardItem(
+                                title = item.title,
+                                subtitle = item.subtitle,
+                                icon = item.icon,
+                                accentColor = item.accentColor,
+                                modifier = Modifier.weight(1f),
+                                testTag = "feature_card_${item.title.lowercase().replace(" ", "_").replace(Regex("[^a-z0-9_]"), "")}",
+                                isDark = isDark,
+                                currentTheme = currentTheme,
+                                onClick = item.onClick
+                            )
+                        }
+                        if (rowItems.size < 2) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactFeatureCardItem(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    accentColor: Color,
+    modifier: Modifier = Modifier,
+    testTag: String,
+    isDark: Boolean,
+    currentTheme: AppThemeMode,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .testTag(testTag),
+        shape = RoundedCornerShape(12.dp),
+        color = if (isDark) Color(0x16FFFFFF) else Color(0x0A000000),
+        border = androidx.compose.foundation.BorderStroke(
+            0.5.dp,
+            if (isDark) Color(0x1FFFFFFF) else Color(0x12000000)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(accentColor.copy(alpha = if (isDark) 0.2f else 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = accentColor,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDark) Color.White else Color(0xFF0F172A),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+private data class FeatureCategory(
+    val categoryTitle: String,
+    val items: List<FeatureGridItem>
+)
+
+private data class FeatureGridItem(
+    val title: String,
+    val subtitle: String,
+    val icon: ImageVector,
+    val accentColor: Color,
+    val onClick: () -> Unit
+)
+
+@Composable
+private fun rememberIsOnline(): Boolean {
+    val context = LocalContext.current
+    var isOnline by remember { mutableStateOf(true) }
+    DisposableEffect(context) {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) { isOnline = true }
+            override fun onLost(network: Network) { isOnline = false }
+        }
+        if (cm != null) {
+            try {
+                val activeNet = cm.activeNetwork
+                val caps = cm.getNetworkCapabilities(activeNet)
+                isOnline = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                cm.registerDefaultNetworkCallback(callback)
+            } catch (e: Exception) {
+                isOnline = true
+            }
+        }
+        onDispose {
+            try { cm?.unregisterNetworkCallback(callback) } catch (e: Exception) {}
+        }
+    }
+    return isOnline
 }

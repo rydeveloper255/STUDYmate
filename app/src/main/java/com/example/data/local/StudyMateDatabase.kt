@@ -38,9 +38,14 @@ import com.example.data.model.*
         LiveExamUpdateEntity::class,
         TrendingExamTopicEntity::class,
         com.example.data.model.RecruitmentEntity::class,
-        com.example.data.persistence.PendingSyncEntity::class
+        com.example.data.persistence.PendingSyncEntity::class,
+        com.example.data.model.StudyScheduleItem::class,
+        com.example.data.model.StudyScheduleLog::class,
+        com.example.data.model.DailyMissionTask::class,
+        com.example.data.model.UserWeeklyGoalEntity::class,
+        com.example.data.model.MotivationHistoryEntity::class
     ],
-    version = 14,
+    version = 16,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -72,6 +77,8 @@ abstract class StudyMateDatabase : RoomDatabase() {
     abstract fun questionQualityReportDao(): QuestionQualityReportDao
     abstract fun recruitmentDao(): RecruitmentDao
     abstract fun pendingSyncDao(): com.example.data.persistence.PendingSyncDao
+    abstract fun studyScheduleDao(): StudyScheduleDao
+    abstract fun novaIntelligenceDao(): NovaIntelligenceDao
 
     companion object {
         @Volatile

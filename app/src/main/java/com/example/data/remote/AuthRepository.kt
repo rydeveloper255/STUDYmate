@@ -396,9 +396,9 @@ class AuthRepository(
                 uid = uidToUse,
                 name = nameToUse,
                 email = normalizedEmail,
-                examName = examName,
+                examName = if (examName.isNotBlank()) examName else "RRB Group D",
                 isGuest = false,
-                isOnboardingCompleted = false
+                isOnboardingCompleted = true
             )
 
             val localSaved = try {
@@ -462,21 +462,38 @@ class AuthRepository(
             }
 
             val uidToUse = if (supabaseUid.isNotBlank()) supabaseUid else "usr_${Math.abs(normalizedEmail.hashCode())}"
+            supabaseAuthManager?.associateFirebaseOrLocalUser(uidToUse, normalizedEmail)
+
+            // Restore remote profile first if available
+            try {
+                supabaseSyncService?.fullCloudRestore()
+            } catch (ignored: Exception) {
+                Log.w(TAG, "Initial cloud restore skipped or failed during sign-in", ignored)
+            }
+
             val existing = userDao.getUserProfileOnce()
-            val profile = UserProfile(
-                id = "current_user",
-                uid = uidToUse,
-                name = existing?.name ?: normalizedEmail.substringBefore("@").replaceFirstChar { it.uppercase() },
-                email = normalizedEmail,
-                isGuest = false,
-                isOnboardingCompleted = existing?.isOnboardingCompleted ?: false,
-                examName = existing?.examName ?: "RRB Group D"
-            )
+            val profile = if (existing != null) {
+                existing.copy(
+                    id = "current_user",
+                    uid = uidToUse,
+                    email = normalizedEmail,
+                    isGuest = false,
+                    isOnboardingCompleted = true
+                )
+            } else {
+                UserProfile(
+                    id = "current_user",
+                    uid = uidToUse,
+                    name = normalizedEmail.substringBefore("@").replaceFirstChar { it.uppercase() },
+                    email = normalizedEmail,
+                    isGuest = false,
+                    isOnboardingCompleted = true,
+                    examName = "RRB Group D"
+                )
+            }
 
             userDao.insertOrUpdateUserProfile(profile)
-            supabaseAuthManager?.associateFirebaseOrLocalUser(profile.uid, profile.email)
             supabaseSyncService?.syncUserProfile(profile)
-            supabaseSyncService?.fullCloudRestore()
 
             PersistenceMonitor.log("AUTH_SIGNIN", "profiles", uidToUse, uidToUse, "SUCCESS")
             Result.success(profile)

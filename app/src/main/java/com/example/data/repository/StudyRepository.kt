@@ -38,6 +38,28 @@ class StudyRepository(
     val savedCurrentAffairs: Flow<List<CurrentAffairsItem>> = database.currentAffairsDao().getSavedForRevision()
     val allExamUpdates: Flow<List<ExamUpdateItem>> = database.examUpdateDao().getAllExamUpdates()
     val allLearningBookmarks: Flow<List<UserLearningBookmark>> = database.userLearningBookmarkDao().getAllBookmarks()
+    val allScheduleItems: Flow<List<StudyScheduleItem>> = database.studyScheduleDao().getAllScheduleItemsFlow()
+    val allScheduleLogs: Flow<List<StudyScheduleLog>> = database.studyScheduleDao().getAllScheduleLogsFlow()
+
+    suspend fun studyScheduleListOnce(): List<StudyScheduleItem> = withContext(Dispatchers.IO) {
+        database.studyScheduleDao().getAllScheduleItems()
+    }
+
+    suspend fun saveScheduleItem(item: StudyScheduleItem) = withContext(Dispatchers.IO) {
+        database.studyScheduleDao().insertOrUpdateScheduleItem(item)
+    }
+
+    suspend fun deleteScheduleItem(id: String) = withContext(Dispatchers.IO) {
+        database.studyScheduleDao().deleteScheduleItemById(id)
+    }
+
+    suspend fun saveScheduleLog(log: StudyScheduleLog) = withContext(Dispatchers.IO) {
+        database.studyScheduleDao().insertOrUpdateScheduleLog(log)
+    }
+
+    suspend fun updateScheduleLogStatus(id: String, status: String) = withContext(Dispatchers.IO) {
+        database.studyScheduleDao().updateScheduleLogStatus(id, status)
+    }
 
 
     // Intelligence flows

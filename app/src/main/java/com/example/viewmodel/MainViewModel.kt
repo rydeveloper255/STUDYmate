@@ -74,7 +74,11 @@ data class FocusTimerState(
     val isBreakActive: Boolean = false,
     val breakDurationMinutes: Int = 5,
     val breakRemainingSeconds: Int = 5 * 60,
-    val isFocusShieldActive: Boolean = true
+    val isFocusShieldActive: Boolean = true,
+    val isStrictModeEnabled: Boolean = false,
+    val isStrictModeActive: Boolean = false,
+    val isAutoStarted: Boolean = false,
+    val isInterrupted: Boolean = false
 )
 
 data class ActiveTestState(
@@ -144,6 +148,8 @@ class MainViewModel(
         syncService = (application as StudyMateApplication).supabaseSyncService,
         scope = viewModelScope
     )
+
+    private val sessionPersistence = com.example.service.intelligence.TestSessionPersistence(getApplication())
 
     val activeExamContext: StateFlow<ExamContext> = examContextRepository.activeExamContext
     val examDiscoveryState: StateFlow<ExamDiscoveryState> = examContextRepository.discoveryState
@@ -291,6 +297,271 @@ class MainViewModel(
     val focusState: StateFlow<FocusTimerState> = _focusState.asStateFlow()
     private var timerJob: Job? = null
 
+    // --- Study Schedule & Smart Discipline ---
+    val studyScheduleList: StateFlow<List<com.example.data.model.StudyScheduleItem>> = studyRepository.allScheduleItems
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val studyScheduleLogs: StateFlow<List<com.example.data.model.StudyScheduleLog>> = studyRepository.allScheduleLogs
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _isSchedulePaused = MutableStateFlow(false)
+    val isSchedulePaused: StateFlow<Boolean> = _isSchedulePaused.asStateFlow()
+
+    private var scheduleTickerJob: Job? = null
+
+    init {
+        checkAndRestoreActiveSession()
+        seedDefaultSchedulesIfEmpty()
+        startScheduleTickerLoop()
+        refreshNovaSmartPlannerData()
+    }
+
+    private fun seedDefaultSchedulesIfEmpty() {
+        viewModelScope.launch {
+            val existing = studyRepository.studyScheduleListOnce()
+            if (existing.isEmpty()) {
+                val defaultItems = listOf(
+                    com.example.data.model.StudyScheduleItem(
+                        dayOfWeek = "MON",
+                        startTime = "07:00 PM",
+                        endTime = "08:00 PM",
+                        durationMinutes = 60,
+                        subject = "Mathematics",
+                        topic = "Percentage & Profit",
+                        isAutoFocus = true,
+                        isStrictMode = true,
+                        repeatType = "WEEKLY",
+                        repeatDaysJson = "[\"MON\",\"WED\",\"FRI\"]"
+                    ),
+                    com.example.data.model.StudyScheduleItem(
+                        dayOfWeek = "MON",
+                        startTime = "08:15 PM",
+                        endTime = "09:00 PM",
+                        durationMinutes = 45,
+                        subject = "General Science",
+                        topic = "Physics Laws",
+                        isAutoFocus = false,
+                        isStrictMode = false,
+                        repeatType = "WEEKLY",
+                        repeatDaysJson = "[\"MON\",\"TUE\",\"THU\"]"
+                    ),
+                    com.example.data.model.StudyScheduleItem(
+                        dayOfWeek = "TUE",
+                        startTime = "06:30 PM",
+                        endTime = "07:30 PM",
+                        durationMinutes = 60,
+                        subject = "English",
+                        topic = "Grammar & Comprehension",
+                        isAutoFocus = true,
+                        isStrictMode = false,
+                        repeatType = "WEEKLY",
+                        repeatDaysJson = "[\"TUE\",\"THU\",\"SAT\"]"
+                    )
+                )
+                defaultItems.forEach { studyRepository.saveScheduleItem(it) }
+            }
+        }
+    }
+
+    private fun startScheduleTickerLoop() {
+        scheduleTickerJob?.cancel()
+        scheduleTickerJob = viewModelScope.launch {
+            while (scheduleTickerJob?.isActive == true) {
+                delay(30000L) // Check every 30 seconds
+                try {
+                    checkAndTriggerScheduledSessions()
+                } catch (e: Exception) {
+                    // Ignore transient errors
+                }
+            }
+        }
+    }
+
+    private suspend fun checkAndTriggerScheduledSessions() {
+        if (_isSchedulePaused.value) return
+        val items = studyScheduleList.value
+        if (items.isEmpty()) return
+
+        val cal = java.util.Calendar.getInstance()
+        val dayNames = arrayOf("SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT")
+        val currentDay = dayNames[cal.get(java.util.Calendar.DAY_OF_WEEK) - 1]
+        val sdf = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.US)
+        val currentTimeStr = sdf.format(cal.time)
+
+        items.filter { !it.isPaused }.forEach { item ->
+            val dayMatches = item.dayOfWeek.equals(currentDay, ignoreCase = true) || item.repeatDaysJson.contains(currentDay, ignoreCase = true) || item.repeatType == "DAILY"
+            if (dayMatches && item.startTime.equals(currentTimeStr, ignoreCase = true)) {
+                if (item.isAutoFocus && !_focusState.value.isRunning) {
+                    startFocusSession(
+                        subject = item.subject,
+                        topic = item.topic.ifBlank { "Scheduled Session" },
+                        durationMinutes = item.durationMinutes,
+                        isStrictMode = item.isStrictMode,
+                        isAutoStarted = true
+                    )
+                }
+            }
+        }
+    }
+
+    fun saveScheduleItem(item: com.example.data.model.StudyScheduleItem) {
+        viewModelScope.launch {
+            studyRepository.saveScheduleItem(item)
+        }
+    }
+
+    fun deleteScheduleItem(id: String) {
+        viewModelScope.launch {
+            studyRepository.deleteScheduleItem(id)
+        }
+    }
+
+    fun toggleSchedulePause() {
+        _isSchedulePaused.value = !_isSchedulePaused.value
+    }
+
+    fun rescheduleMissedSession(logId: String, newDateMillis: Long, newTime: String) {
+        viewModelScope.launch {
+            studyRepository.updateScheduleLogStatus(logId, "RESCHEDULED")
+        }
+    }
+
+    fun skipMissedSession(logId: String) {
+        viewModelScope.launch {
+            studyRepository.updateScheduleLogStatus(logId, "SKIPPED")
+        }
+    }
+
+    // --- Step 50: Nova Smart Intelligence & Communication Engine ---
+    private val novaIntelligenceEngine = com.example.service.intelligence.NovaStudyIntelligenceEngine()
+    private val hinglishMotivationEngine by lazy { com.example.notification.NovaHinglishMotivationEngine(getApplication()) }
+
+    private val _dailyMissionTasks = MutableStateFlow<List<com.example.data.model.DailyMissionTask>>(emptyList())
+    val dailyMissionTasks: StateFlow<List<com.example.data.model.DailyMissionTask>> = _dailyMissionTasks.asStateFlow()
+
+    private val _weakTopicInsights = MutableStateFlow<List<com.example.data.model.WeakTopicInsight>>(emptyList())
+    val weakTopicInsights: StateFlow<List<com.example.data.model.WeakTopicInsight>> = _weakTopicInsights.asStateFlow()
+
+    private val _adaptiveScheduleShift = MutableStateFlow<com.example.data.model.AdaptiveScheduleShiftSuggestion?>(null)
+    val adaptiveScheduleShift: StateFlow<com.example.data.model.AdaptiveScheduleShiftSuggestion?> = _adaptiveScheduleShift.asStateFlow()
+
+    private val _weeklyReviewStats = MutableStateFlow(com.example.data.model.WeeklyReviewStats())
+    val weeklyReviewStats: StateFlow<com.example.data.model.WeeklyReviewStats> = _weeklyReviewStats.asStateFlow()
+
+    private val _weeklyStudyGoalHours = MutableStateFlow(10.0f)
+    val weeklyStudyGoalHours: StateFlow<Float> = _weeklyStudyGoalHours.asStateFlow()
+
+    private val _studyStreakDays = MutableStateFlow(7)
+    val studyStreakDays: StateFlow<Int> = _studyStreakDays.asStateFlow()
+
+    fun refreshNovaSmartPlannerData() {
+        viewModelScope.launch {
+            try {
+                val todayStr = novaIntelligenceEngine.getTodayFormatted()
+                val db = (getApplication() as StudyMateApplication).database
+                val existingMissions = db.novaIntelligenceDao().getDailyMissionsForDateOnce(todayStr)
+                val scheduleItems = studyScheduleList.value
+                val user = userProfile.value
+
+                val missions = novaIntelligenceEngine.buildDailyMissionsForToday(existingMissions, scheduleItems, user)
+                if (existingMissions.isEmpty() && missions.isNotEmpty()) {
+                    db.novaIntelligenceDao().insertDailyMissionTasks(missions)
+                }
+                _dailyMissionTasks.value = missions
+
+                // Weak Topics
+                val questionAttempts = db.questionHistoryDao().getAllHistoryOnce()
+                val mistakeItems = mistakes.value
+                _weakTopicInsights.value = novaIntelligenceEngine.detectWeakTopics(questionAttempts, mistakeItems)
+
+                // Adaptive Schedule Shifts
+                val logs = studyScheduleLogs.value
+                _adaptiveScheduleShift.value = novaIntelligenceEngine.analyzeAdaptiveScheduleShifts(scheduleItems, logs)
+
+                // Weekly Review
+                val focusSess = allFocusSessions.value
+                val mockAtt = mockTestAttempts.value
+                _weeklyReviewStats.value = novaIntelligenceEngine.calculateWeeklyReviewStats(
+                    focusSessions = focusSess,
+                    scheduleItems = scheduleItems,
+                    scheduleLogs = logs,
+                    mockAttempts = mockAtt,
+                    questionAttempts = questionAttempts
+                )
+
+                // Goal
+                val goalEntity = db.novaIntelligenceDao().getWeeklyGoalOnce()
+                if (goalEntity != null) {
+                    _weeklyStudyGoalHours.value = goalEntity.targetHoursPerWeek
+                }
+
+                // Streak
+                val userStreak = user?.streakDays ?: 7
+                _studyStreakDays.value = userStreak
+            } catch (e: Exception) {
+                // Ignore transient errors
+            }
+        }
+    }
+
+    fun toggleDailyMissionTask(taskId: String, isCompleted: Boolean) {
+        viewModelScope.launch {
+            val db = (getApplication() as StudyMateApplication).database
+            db.novaIntelligenceDao().updateMissionCompletion(taskId, isCompleted, System.currentTimeMillis())
+            _dailyMissionTasks.value = _dailyMissionTasks.value.map { task ->
+                if (task.id == taskId) task.copy(isCompleted = isCompleted) else task
+            }
+
+            if (isCompleted) {
+                // Reward XP & trigger motivation
+                val current = userProfile.value ?: UserProfile()
+                updateUserProfile(current.copy(xp = current.xp + 25))
+                triggerNovaMotivation(com.example.data.model.MotivationCategory.DAILY_GOAL_COMPLETED)
+            }
+        }
+    }
+
+    fun dismissDailyMissionTask(taskId: String) {
+        viewModelScope.launch {
+            val db = (getApplication() as StudyMateApplication).database
+            db.novaIntelligenceDao().dismissMissionTask(taskId)
+            _dailyMissionTasks.value = _dailyMissionTasks.value.filter { it.id != taskId }
+        }
+    }
+
+    fun acceptAdaptiveScheduleShift(suggestion: com.example.data.model.AdaptiveScheduleShiftSuggestion) {
+        viewModelScope.launch {
+            val items = studyScheduleList.value
+            val target = items.find { it.id == suggestion.scheduleId }
+            if (target != null) {
+                val updated = target.copy(startTime = suggestion.suggestedTime)
+                studyRepository.saveScheduleItem(updated)
+            }
+            _adaptiveScheduleShift.value = null
+        }
+    }
+
+    fun dismissAdaptiveScheduleShift() {
+        _adaptiveScheduleShift.value = null
+    }
+
+    fun updateWeeklyStudyGoal(hours: Float) {
+        viewModelScope.launch {
+            val db = (getApplication() as StudyMateApplication).database
+            db.novaIntelligenceDao().setWeeklyGoal(com.example.data.model.UserWeeklyGoalEntity(targetHoursPerWeek = hours))
+            _weeklyStudyGoalHours.value = hours
+        }
+    }
+
+    fun triggerNovaMotivation(category: com.example.data.model.MotivationCategory, customMinutes: Int? = null) {
+        val userNotifEnabled = userProfile.value?.notificationsEnabled ?: true
+        hinglishMotivationEngine.triggerNotificationIfAllowed(
+            category = category,
+            customMinutes = customMinutes,
+            notificationsEnabled = userNotifEnabled
+        )
+    }
+
     // --- Mock Test & Practice ---
     val mockTestAttempts: StateFlow<List<MockTestAttempt>> = studyRepository.allMockTestAttempts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -310,17 +581,11 @@ class MainViewModel(
     private val _flashcardMessage = MutableStateFlow<String?>(null)
     val flashcardMessage: StateFlow<String?> = _flashcardMessage.asStateFlow()
 
-    private val sessionPersistence by lazy { com.example.service.intelligence.TestSessionPersistence(getApplication()) }
-
     private val _pendingResumeSession = MutableStateFlow<ActiveTestState?>(null)
     val pendingResumeSession: StateFlow<ActiveTestState?> = _pendingResumeSession.asStateFlow()
 
     private val _activeTestState = MutableStateFlow(ActiveTestState())
     val activeTestState: StateFlow<ActiveTestState> = _activeTestState.asStateFlow()
-
-    init {
-        checkAndRestoreActiveSession()
-    }
 
     fun checkAndRestoreActiveSession() {
         viewModelScope.launch {
@@ -1459,13 +1724,19 @@ class MainViewModel(
 
     // --- Focus Mode Actions ---
 
+    fun setStrictModeEnabled(enabled: Boolean) {
+        _focusState.value = _focusState.value.copy(isStrictModeEnabled = enabled)
+    }
+
     fun startFocusSession(
         subject: String,
         topic: String,
         durationMinutes: Int = 25,
         examName: String = "",
         sessionGoal: String = "",
-        planItemId: Long? = null
+        planItemId: Long? = null,
+        isStrictMode: Boolean = _focusState.value.isStrictModeEnabled,
+        isAutoStarted: Boolean = false
     ) {
         timerJob?.cancel()
         val appContext = getApplication<Application>()
@@ -1489,7 +1760,10 @@ class MainViewModel(
             sessionStartTimestamp = startTs,
             pausedAccumulatedSeconds = 0L,
             pauseStartTimestamp = 0L,
-            isBreakActive = false
+            isBreakActive = false,
+            isStrictModeActive = isStrictMode,
+            isAutoStarted = isAutoStarted,
+            isInterrupted = false
         )
 
         com.example.service.FocusShieldManager.startFocusSession(appContext, subject, topic, durationMinutes)
@@ -1607,7 +1881,9 @@ class MainViewModel(
                 showCelebration = true,
                 lastSessionXp = session.xpEarned,
                 lastCompletedSession = summary,
-                actualMinutesSpent = actualMinutes
+                actualMinutesSpent = actualMinutes,
+                isStrictModeEnabled = false,
+                isStrictModeActive = false
             )
 
             val userName = userProfile.value?.name ?: "Rahul"
@@ -1627,6 +1903,45 @@ class MainViewModel(
                     breakMinutes = breakMins
                 )
             }
+        }
+    }
+
+    fun emergencyExitFocusSession() {
+        timerJob?.cancel()
+        val appContext = getApplication<Application>()
+        com.example.service.FocusShieldManager.endFocusSession()
+        val state = _focusState.value
+        val initialMins = state.initialMinutes
+
+        val now = System.currentTimeMillis()
+        val totalPaused = state.pausedAccumulatedSeconds + (if (state.isPaused && state.pauseStartTimestamp > 0L) (now - state.pauseStartTimestamp) / 1000L else 0L)
+        val elapsedSeconds = if (state.sessionStartTimestamp > 0L) {
+            ((now - state.sessionStartTimestamp) / 1000L - totalPaused).coerceAtLeast(0L).toInt()
+        } else {
+            (initialMins * 60) - state.remainingSeconds
+        }
+
+        val actualMinutes = (elapsedSeconds / 60).coerceAtLeast(0)
+
+        viewModelScope.launch {
+            if (actualMinutes > 0) {
+                studyRepository.recordFocusSession(
+                    subject = state.subject,
+                    topic = state.topic,
+                    durationMinutes = initialMins,
+                    actualMinutesSpent = actualMinutes
+                )
+            }
+
+            _focusState.value = state.copy(
+                isRunning = false,
+                isPaused = false,
+                showCelebration = false,
+                actualMinutesSpent = actualMinutes,
+                isStrictModeEnabled = false,
+                isStrictModeActive = false,
+                isInterrupted = true
+            )
         }
     }
 

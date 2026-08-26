@@ -76,13 +76,17 @@ fun FocusModeScreen(
     onEndBreak: (() -> Unit)? = null,
     novaDoubtResponse: String = "",
     isNovaDoubtThinking: Boolean = false,
-    onDismissNovaDoubt: (() -> Unit)? = null
+    onDismissNovaDoubt: (() -> Unit)? = null,
+    onToggleStrictModeEnabled: ((Boolean) -> Unit)? = null,
+    onEmergencyExit: (() -> Unit)? = null,
+    onOpenSchedule: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val isDark = isAppInDarkTheme()
     val isHindi = userProfile?.languagePreference?.equals("Hindi", ignoreCase = true) == true
 
     var showShieldSettings by remember { mutableStateOf(false) }
+    var showEmergencyConfirmDialog by remember { mutableStateOf(false) }
 
     if (showShieldSettings) {
         FocusShieldSettingsScreen(
@@ -427,37 +431,77 @@ fun FocusModeScreen(
                     // 3. ACTION CONTROLS (RUNNING vs IDLE)
                     // -------------------------------------------------------------
                     if (focusState.isRunning) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Pause / Resume
-                            GlassButton(
-                                text = if (focusState.isPaused) "Resume" else "Pause",
-                                onClick = onTogglePause,
-                                icon = if (focusState.isPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("pause_resume_button")
-                            )
-
-                            // End Focus
-                            Button(
-                                onClick = { showEndConfirmDialog = true },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = CoralRose,
-                                    contentColor = Color.White
-                                ),
-                                shape = RoundedCornerShape(16.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                                    .testTag("end_focus_button")
+                        if (focusState.isStrictModeActive) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Icon(Icons.Filled.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("End Focus", fontWeight = FontWeight.Bold)
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = CoralRose.copy(alpha = 0.2f),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, CoralRose)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Filled.Lock, contentDescription = null, tint = CoralRose, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "🔒 Strict Mode Active — Manual End Blocked",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = CoralRose
+                                        )
+                                    }
+                                }
+
+                                TextButton(
+                                    onClick = { showEmergencyConfirmDialog = true },
+                                    modifier = Modifier.testTag("emergency_exit_button")
+                                ) {
+                                    Text(
+                                        text = "⚠️ Emergency Exit Session",
+                                        fontSize = 12.sp,
+                                        color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF64748B),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Pause / Resume
+                                GlassButton(
+                                    text = if (focusState.isPaused) "Resume" else "Pause",
+                                    onClick = onTogglePause,
+                                    icon = if (focusState.isPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("pause_resume_button")
+                                )
+
+                                // End Focus
+                                Button(
+                                    onClick = { showEndConfirmDialog = true },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = CoralRose,
+                                        contentColor = Color.White
+                                    ),
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                        .testTag("end_focus_button")
+                                ) {
+                                    Icon(Icons.Filled.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("End Focus", fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
 
@@ -795,6 +839,40 @@ fun FocusModeScreen(
                     singleLine = true
                 )
 
+                // Strict Mode Toggle (Defaults strictly to OFF for every session)
+                GlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    fillAlpha = 0.5f
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Filled.Lock, contentDescription = null, tint = CoralRose, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text("Strict Mode", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = if (isDark) Color.White else Color(0xFF0F172A))
+                                Text("Prevents early stopping & unblocking during session", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                            }
+                        }
+
+                        Switch(
+                            checked = focusState.isStrictModeEnabled,
+                            onCheckedChange = { onToggleStrictModeEnabled?.invoke(it) },
+                            colors = SwitchDefaults.colors(checkedThumbColor = CoralRose),
+                            modifier = Modifier.testTag("strict_mode_setup_switch")
+                        )
+                    }
+                }
+
                 // Policy Protection Summary
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
@@ -869,6 +947,50 @@ fun FocusModeScreen(
             dismissButton = {
                 TextButton(onClick = { showEndConfirmDialog = false }) {
                     Text("Keep Focusing", color = NeonCyan, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = if (isDark) Color(0xFF1E293B) else Color.White,
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
+
+    // -------------------------------------------------------------
+    // EMERGENCY EXIT CONFIRMATION DIALOG FOR STRICT MODE
+    // -------------------------------------------------------------
+    if (showEmergencyConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showEmergencyConfirmDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Warning, contentDescription = null, tint = CoralRose)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Confirm Emergency Exit",
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDark) Color.White else Color(0xFF0F172A)
+                    )
+                }
+            },
+            text = {
+                Text(
+                    text = "Strict Mode is currently active. Are you sure you want to interrupt this focus session? The session will be recorded as interrupted and full planned study time will NOT be awarded.",
+                    color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showEmergencyConfirmDialog = false
+                        onEmergencyExit?.invoke()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CoralRose, contentColor = Color.White)
+                ) {
+                    Text("Confirm Emergency Exit", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEmergencyConfirmDialog = false }) {
+                    Text("Resume Strict Study", color = NeonCyan, fontWeight = FontWeight.Bold)
                 }
             },
             containerColor = if (isDark) Color(0xFF1E293B) else Color.White,

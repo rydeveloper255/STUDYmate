@@ -283,6 +283,21 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     var showNotificationCenter by remember { mutableStateOf(false) }
     var showDailyBriefingScreen by remember { mutableStateOf(false) }
 
+    // Step 49 Smart Focus & Study Schedule State
+    val studyScheduleItems by viewModel.studyScheduleList.collectAsStateWithLifecycle()
+    val studyScheduleLogs by viewModel.studyScheduleLogs.collectAsStateWithLifecycle()
+    val isSchedulePaused by viewModel.isSchedulePaused.collectAsStateWithLifecycle()
+    var showStudyScheduleScreen by remember { mutableStateOf(false) }
+
+    // Step 50 Nova Smart Study Intelligence State
+    val dailyMissionTasks by viewModel.dailyMissionTasks.collectAsStateWithLifecycle()
+    val weakTopicInsights by viewModel.weakTopicInsights.collectAsStateWithLifecycle()
+    val adaptiveScheduleShift by viewModel.adaptiveScheduleShift.collectAsStateWithLifecycle()
+    val weeklyReviewStats by viewModel.weeklyReviewStats.collectAsStateWithLifecycle()
+    val weeklyStudyGoalHours by viewModel.weeklyStudyGoalHours.collectAsStateWithLifecycle()
+    val studyStreakDays by viewModel.studyStreakDays.collectAsStateWithLifecycle()
+    var showSmartPlannerScreen by remember { mutableStateOf(false) }
+
     val handleDeepLink: (String, String) -> Unit = { link, payload ->
         showNotificationCenter = false
         showDailyBriefingScreen = false
@@ -728,6 +743,53 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     },
                     onBack = { showExamReadinessCenter = false }
                 )
+            } else if (showStudyScheduleScreen) {
+                com.example.ui.screens.planner.StudyScheduleScreen(
+                    scheduleItems = studyScheduleItems,
+                    scheduleLogs = studyScheduleLogs,
+                    isSchedulePaused = isSchedulePaused,
+                    onSaveScheduleItem = { item -> viewModel.saveScheduleItem(item) },
+                    onDeleteScheduleItem = { id -> viewModel.deleteScheduleItem(id) },
+                    onToggleGlobalPause = { viewModel.toggleSchedulePause() },
+                    onRescheduleMissed = { logId, dateMs, timeStr -> viewModel.rescheduleMissedSession(logId, dateMs, timeStr) },
+                    onSkipMissed = { logId -> viewModel.skipMissedSession(logId) },
+                    onStartFocusSession = { sub, top, mins, strict ->
+                        viewModel.startFocusSession(sub, top, mins, isStrictMode = strict)
+                        showStudyScheduleScreen = false
+                        onSelectTab(AppNavTab.FOCUS)
+                    },
+                    onBack = { showStudyScheduleScreen = false }
+                )
+            } else if (showSmartPlannerScreen) {
+                com.example.ui.screens.planner.SmartStudyPlannerScreen(
+                    dailyMissions = dailyMissionTasks,
+                    weakTopicInsights = weakTopicInsights,
+                    adaptiveScheduleShift = adaptiveScheduleShift,
+                    weeklyReviewStats = weeklyReviewStats,
+                    weeklyGoalHours = weeklyStudyGoalHours,
+                    studyStreakDays = studyStreakDays,
+                    onToggleMission = { id, done -> viewModel.toggleDailyMissionTask(id, done) },
+                    onDismissMission = { id -> viewModel.dismissDailyMissionTask(id) },
+                    onAcceptScheduleShift = { shift -> viewModel.acceptAdaptiveScheduleShift(shift) },
+                    onDismissScheduleShift = { viewModel.dismissAdaptiveScheduleShift() },
+                    onUpdateWeeklyGoal = { goal -> viewModel.updateWeeklyStudyGoal(goal) },
+                    onStartAction = { actionType, subject, topic, minutes ->
+                        showSmartPlannerScreen = false
+                        when (actionType) {
+                            "FOCUS" -> {
+                                viewModel.startFocusSession(subject, topic, minutes)
+                                onSelectTab(AppNavTab.FOCUS)
+                            }
+                            "PRACTICE" -> onSelectTab(AppNavTab.PRACTICE)
+                            "CURRENT_AFFAIRS" -> onSelectTab(AppNavTab.UPDATES)
+                            else -> {
+                                viewModel.startFocusSession(subject, topic, minutes)
+                                onSelectTab(AppNavTab.FOCUS)
+                            }
+                        }
+                    },
+                    onBack = { showSmartPlannerScreen = false }
+                )
             } else if (showDocumentSummarizer) {
                 DocumentSummarizerScreen(
                     analysisResult = documentAnalysis,
@@ -765,8 +827,52 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onLoadStudyNow = { viewModel.loadStudyNowRecommendation() },
                             onSelectTimeAvailable = { mins -> viewModel.setSelectedAvailableTime(mins) },
                             onPerformSmartSearch = { q ->
-                                viewModel.performSmartSearch(q)
-                                onSelectTab(AppNavTab.AI_TUTOR)
+                                val lower = q.trim().lowercase()
+                                when {
+                                    lower.contains("mock test") || lower.contains("test series") || lower.contains("speed test") || lower.contains("full test") -> {
+                                        onSelectTab(AppNavTab.PRACTICE)
+                                    }
+                                    lower.contains("practice") || lower.contains("pyq") || lower.contains("quiz") || lower.contains("previous year") || lower.contains("question") -> {
+                                        onSelectTab(AppNavTab.PRACTICE)
+                                    }
+                                    lower.contains("current affairs") || lower.contains("daily ca") || lower.contains("news") || lower.contains("samayiki") -> {
+                                        onSelectTab(AppNavTab.UPDATES)
+                                    }
+                                    lower.contains("vacancy") || lower.contains("vacancies") || lower.contains("job") || lower.contains("recruitment") || lower.contains("bharti") -> {
+                                        viewModel.setShowSmartVacancyScreen(true, initialTab = "VACANCIES")
+                                    }
+                                    lower.contains("result") || lower.contains("cutoff") || lower.contains("scorecard") -> {
+                                        viewModel.setShowSmartVacancyScreen(true, initialTab = "RESULTS")
+                                    }
+                                    lower.contains("admit card") || lower.contains("hall ticket") || lower.contains("city intimation") -> {
+                                        viewModel.setShowSmartVacancyScreen(true, initialTab = "ADMIT_CARDS")
+                                    }
+                                    lower.contains("setting") || lower.contains("profile") || lower.contains("account") || lower.contains("language") || lower.contains("preference") -> {
+                                        showProfileSettings = true
+                                    }
+                                    lower.contains("pdf") || lower.contains("summariz") || lower.contains("document") || lower.contains("material") -> {
+                                        showDocumentSummarizer = true
+                                    }
+                                    lower.contains("progress") || lower.contains("readiness") || lower.contains("analytics") -> {
+                                        showExamReadinessCenter = true
+                                    }
+                                    lower.contains("shield") || lower.contains("block") -> {
+                                        onSelectTab(AppNavTab.FOCUS)
+                                    }
+                                    lower.contains("note") || lower.contains("revision") -> {
+                                        onSelectTab(AppNavTab.AI_TUTOR)
+                                    }
+                                    lower.contains("notification") || lower.contains("alert") -> {
+                                        showNotificationCenter = true
+                                    }
+                                    lower.contains("saved") || lower.contains("bookmark") -> {
+                                        onSelectTab(AppNavTab.PRACTICE)
+                                    }
+                                    else -> {
+                                        viewModel.performSmartSearch(q)
+                                        onSelectTab(AppNavTab.AI_TUTOR)
+                                    }
+                                }
                             },
                             onTogglePlanItem = { id, done -> viewModel.togglePlanItem(id, done) },
                             onStartFocusSession = { sub, top ->
@@ -820,7 +926,11 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             focusTimerState = focusState,
                             onPauseFocusSession = { viewModel.toggleFocusPause() },
                             onResumeFocusSession = { viewModel.toggleFocusPause() },
-                            onStopFocusSession = { viewModel.endFocusSession() }
+                            onStopFocusSession = { viewModel.endFocusSession() },
+                            dailyMissionTasks = dailyMissionTasks,
+                            weakTopicInsights = weakTopicInsights,
+                            onToggleDailyMissionTask = { id, done -> viewModel.toggleDailyMissionTask(id, done) },
+                            onOpenSmartPlanner = { showSmartPlannerScreen = true }
                         )
 
                         AppNavTab.AI_TUTOR -> {
@@ -930,7 +1040,10 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onStartBreak = { mins -> viewModel.startBreakTimer(mins) },
                             onEndBreak = { viewModel.endBreakTimer() },
                             novaDoubtResponse = novaDoubtResponse,
-                            isNovaDoubtThinking = isNovaDoubtThinking
+                            isNovaDoubtThinking = isNovaDoubtThinking,
+                            onToggleStrictModeEnabled = { viewModel.setStrictModeEnabled(it) },
+                            onEmergencyExit = { viewModel.emergencyExitFocusSession() },
+                            onOpenSchedule = { showStudyScheduleScreen = true }
                         )
 
                         AppNavTab.PRACTICE, AppNavTab.PROGRESS -> PracticeHubScreen(

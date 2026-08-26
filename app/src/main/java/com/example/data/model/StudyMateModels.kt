@@ -13,6 +13,8 @@ data class UserProfile(
     val grade: String = "Class 12",
     val educationLevel: String = "Senior Secondary (11th-12th)",
     val languagePreference: String = "English",
+    val appLanguage: String = "English",
+    val contentLanguage: String = "Hindi",
     
     // Step 2 - Exam Selection & Goals
     val examCategory: String = "Competitive / Entrance",
