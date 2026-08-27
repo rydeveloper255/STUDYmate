@@ -28,6 +28,15 @@ import java.util.UUID
 import java.text.SimpleDateFormat
 import android.content.Context
 
+enum class AuthScreenState {
+    LOGIN,
+    SIGNUP,
+    OTP_VERIFICATION,
+    FORGOT_PASSWORD,
+    FORGOT_PASSWORD_OTP,
+    RESET_PASSWORD
+}
+
 data class ChatMessage(
     val id: String = java.util.UUID.randomUUID().toString(),
     val sender: String, // "user" or "model"
@@ -235,6 +244,27 @@ class MainViewModel(
 
     private val _authErrorMessage = MutableStateFlow<String?>(null)
     val authErrorMessage: StateFlow<String?> = _authErrorMessage.asStateFlow()
+
+    private val _authSuccessMessage = MutableStateFlow<String?>(null)
+    val authSuccessMessage: StateFlow<String?> = _authSuccessMessage.asStateFlow()
+
+    private val _authNavState = MutableStateFlow(AuthScreenState.LOGIN)
+    val authNavState: StateFlow<AuthScreenState> = _authNavState.asStateFlow()
+
+    private val _pendingAuthEmail = MutableStateFlow("")
+    val pendingAuthEmail: StateFlow<String> = _pendingAuthEmail.asStateFlow()
+
+    private val _pendingAuthName = MutableStateFlow("")
+    val pendingAuthName: StateFlow<String> = _pendingAuthName.asStateFlow()
+
+    private val _pendingAuthPhone = MutableStateFlow("")
+    val pendingAuthPhone: StateFlow<String> = _pendingAuthPhone.asStateFlow()
+
+    private val _recoveryAccessToken = MutableStateFlow<String?>(null)
+    val recoveryAccessToken: StateFlow<String?> = _recoveryAccessToken.asStateFlow()
+
+    private val _otpCooldownSeconds = MutableStateFlow(0)
+    val otpCooldownSeconds: StateFlow<Int> = _otpCooldownSeconds.asStateFlow()
 
     // --- Study Plan Items ---
     val studyPlanItems: StateFlow<List<StudyPlanItem>> = studyRepository.allPlanItems
@@ -1182,6 +1212,248 @@ class MainViewModel(
 
     // --- Authentication Actions ---
 
+    private var otpTimerJob: Job? = null
+
+    fun startOtpCooldown(seconds: Int = 120) {
+        otpTimerJob?.cancel()
+        _otpCooldownSeconds.value = seconds
+        otpTimerJob = viewModelScope.launch {
+            while (_otpCooldownSeconds.value > 0) {
+                delay(1000L)
+                _otpCooldownSeconds.value = (_otpCooldownSeconds.value - 1).coerceAtLeast(0)
+            }
+        }
+    }
+
+    fun setAuthNavState(state: AuthScreenState) {
+        _authNavState.value = state
+        _authErrorMessage.value = null
+    }
+
+    fun clearAuthMessages() {
+        _authErrorMessage.value = null
+        _authSuccessMessage.value = null
+    }
+
+    fun updatePendingAuthEmail(email: String) {
+        _pendingAuthEmail.value = email.trim()
+    }
+
+    fun startSignUp(
+        fullName: String,
+        email: String,
+        phone: String,
+        pass: String,
+        confirmPass: String
+    ) {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            _authErrorMessage.value = null
+            _authSuccessMessage.value = null
+            com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saving)
+
+            val result = authRepository.signUpUser(
+                fullName = fullName,
+                email = email,
+                mobileNumber = phone,
+                pass = pass,
+                confirmPass = confirmPass
+            )
+
+            result.onSuccess { signUpResult ->
+                _pendingAuthEmail.value = signUpResult.email
+                _pendingAuthName.value = signUpResult.fullName
+                _pendingAuthPhone.value = signUpResult.mobileNumber
+                startOtpCooldown(120)
+                _authNavState.value = AuthScreenState.OTP_VERIFICATION
+                _authSuccessMessage.value = "OTP aapke email par bhej diya gaya hai."
+                com.example.data.persistence.PersistenceMonitor.updateStatus(
+                    com.example.data.persistence.PersistenceStatus.Saved(message = "✓ OTP Sent to email")
+                )
+            }
+
+            result.onFailure { error ->
+                val msg = error.message ?: "Sign-up failed"
+                _authErrorMessage.value = msg
+                com.example.data.persistence.PersistenceMonitor.updateStatus(
+                    com.example.data.persistence.PersistenceStatus.Failed(msg)
+                )
+            }
+            _isAuthLoading.value = false
+        }
+    }
+
+    fun verifyEmailOtp(otp: String) {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            _authErrorMessage.value = null
+            _authSuccessMessage.value = null
+            com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saving)
+
+            val result = authRepository.verifyEmailOtp(
+                email = _pendingAuthEmail.value,
+                otp = otp,
+                fullName = _pendingAuthName.value,
+                mobileNumber = _pendingAuthPhone.value
+            )
+
+            result.onSuccess { profile ->
+                otpTimerJob?.cancel()
+                _otpCooldownSeconds.value = 0
+                _authNavState.value = AuthScreenState.LOGIN
+                _authSuccessMessage.value = "Email verification safal raha! Welcome ${profile.name}."
+                com.example.data.persistence.PersistenceMonitor.updateStatus(
+                    com.example.data.persistence.PersistenceStatus.Saved(message = "✓ Email verified")
+                )
+            }
+
+            result.onFailure { error ->
+                val msg = error.message ?: "Verification failed"
+                _authErrorMessage.value = msg
+                com.example.data.persistence.PersistenceMonitor.updateStatus(
+                    com.example.data.persistence.PersistenceStatus.Failed(msg)
+                )
+            }
+            _isAuthLoading.value = false
+        }
+    }
+
+    fun resendEmailOtp(isRecovery: Boolean = false) {
+        if (_otpCooldownSeconds.value > 0) return
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            _authErrorMessage.value = null
+            _authSuccessMessage.value = null
+
+            val type = if (isRecovery) "recovery" else "signup"
+            val result = if (isRecovery) {
+                authRepository.sendPasswordRecoveryOtp(_pendingAuthEmail.value)
+            } else {
+                authRepository.resendEmailOtp(_pendingAuthEmail.value, type)
+            }
+
+            result.onSuccess {
+                startOtpCooldown(120)
+                _authSuccessMessage.value = "Naya OTP email par bhej diya gaya hai."
+            }
+
+            result.onFailure { error ->
+                _authErrorMessage.value = error.message ?: "OTP resend nahi ho paya."
+            }
+            _isAuthLoading.value = false
+        }
+    }
+
+    fun startForgotPassword(email: String) {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            _authErrorMessage.value = null
+            _authSuccessMessage.value = null
+
+            val normalizedEmail = email.trim().lowercase(Locale.ROOT)
+            if (normalizedEmail.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(normalizedEmail).matches()) {
+                _authErrorMessage.value = "Kripya ek valid email address enter karein."
+                _isAuthLoading.value = false
+                return@launch
+            }
+
+            _pendingAuthEmail.value = normalizedEmail
+            val result = authRepository.sendPasswordRecoveryOtp(normalizedEmail)
+
+            result.onSuccess {
+                startOtpCooldown(120)
+                _authNavState.value = AuthScreenState.FORGOT_PASSWORD_OTP
+                _authSuccessMessage.value = "Password reset OTP aapke email par bhej diya gaya hai."
+            }
+
+            result.onFailure { error ->
+                _authErrorMessage.value = error.message ?: "Reset OTP bhejne me samasya aayi."
+            }
+            _isAuthLoading.value = false
+        }
+    }
+
+    fun verifyForgotPasswordOtp(otp: String) {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            _authErrorMessage.value = null
+            _authSuccessMessage.value = null
+
+            val result = authRepository.verifyPasswordRecoveryOtp(
+                email = _pendingAuthEmail.value,
+                otp = otp
+            )
+
+            result.onSuccess { token ->
+                _recoveryAccessToken.value = token
+                _authNavState.value = AuthScreenState.RESET_PASSWORD
+                _authSuccessMessage.value = "OTP verify ho gaya. Kripya naya password set karein."
+            }
+
+            result.onFailure { error ->
+                _authErrorMessage.value = error.message ?: "Invalid OTP."
+            }
+            _isAuthLoading.value = false
+        }
+    }
+
+    fun completePasswordReset(newPassword: String, confirmPass: String) {
+        if (newPassword.length < 6) {
+            _authErrorMessage.value = "Password kam se kam 6 characters ka hona chahiye."
+            return
+        }
+        if (newPassword != confirmPass) {
+            _authErrorMessage.value = "Password aur Confirm Password match nahi kar rahe hain."
+            return
+        }
+
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            _authErrorMessage.value = null
+            _authSuccessMessage.value = null
+
+            val token = _recoveryAccessToken.value ?: ""
+            val result = authRepository.resetPasswordWithToken(token, newPassword)
+
+            result.onSuccess {
+                _recoveryAccessToken.value = null
+                _authNavState.value = AuthScreenState.LOGIN
+                _authSuccessMessage.value = "Password safaltapoorvak update ho gaya! Kripya log in karein."
+            }
+
+            result.onFailure { error ->
+                _authErrorMessage.value = error.message ?: "Password update nahi ho saka."
+            }
+            _isAuthLoading.value = false
+        }
+    }
+
+    fun signInWithEmailOrPhone(identifier: String, pass: String) {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            _authErrorMessage.value = null
+            _authSuccessMessage.value = null
+            com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saving)
+
+            val result = authRepository.signInWithEmailOrPhone(identifier, pass)
+
+            result.onSuccess {
+                com.example.data.persistence.PersistenceMonitor.updateStatus(
+                    com.example.data.persistence.PersistenceStatus.Saved(message = "✓ Logged in & synced")
+                )
+            }
+
+            result.onFailure { error ->
+                val msg = error.message ?: "Login failed"
+                _authErrorMessage.value = msg
+                com.example.data.persistence.PersistenceMonitor.updateStatus(
+                    com.example.data.persistence.PersistenceStatus.Failed(msg)
+                )
+            }
+            _isAuthLoading.value = false
+        }
+    }
+
     fun signInWithGoogle(activityContext: android.content.Context) {
         viewModelScope.launch {
             _isAuthLoading.value = true
@@ -1199,23 +1471,11 @@ class MainViewModel(
 
     fun clearAuthError() {
         _authErrorMessage.value = null
+        _authSuccessMessage.value = null
     }
 
     fun signInWithEmail(email: String, pass: String) {
-        viewModelScope.launch {
-            _isAuthLoading.value = true
-            _authErrorMessage.value = null
-            com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saving)
-            val result = authRepository.signInWithEmail(email, pass)
-            result.onSuccess {
-                com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saved(message = "✓ Authenticated & synced"))
-            }
-            result.onFailure {
-                _authErrorMessage.value = it.message ?: "Authentication failed"
-                com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Failed(it.message ?: "Auth failed"))
-            }
-            _isAuthLoading.value = false
-        }
+        signInWithEmailOrPhone(email, pass)
     }
 
     fun signUpWithEmail(email: String, pass: String, displayName: String = "", examName: String = "RRB Group D") {

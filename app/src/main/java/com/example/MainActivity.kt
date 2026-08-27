@@ -36,6 +36,7 @@ import com.example.ui.screens.learning.*
 import com.example.ui.screens.study.StudyHubScreen
 import com.example.ui.screens.practice.PracticeHubScreen
 import com.example.ui.screens.updates.UpdatesHubScreen
+import com.example.ui.screens.auth.AuthScreenHost
 import com.example.ui.screens.auth.LoginScreen
 
 import com.example.ui.screens.auth.OnboardingScreen
@@ -140,24 +141,12 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
         return
     }
 
-    // Unauthenticated -> Login Screen
+    // Unauthenticated -> Auth Screen Flow
     val context = androidx.compose.ui.platform.LocalContext.current
     if (userProfile == null) {
-        LoginScreen(
-            isLoading = isAuthLoading,
-            errorMessage = authErrorMessage,
-            onGoogleSignIn = { viewModel.signInWithGoogle(context) },
-            onEmailSignIn = { email, pass -> viewModel.signInWithEmail(email, pass) },
-            onEmailSignUp = { email, pass, name, exam -> viewModel.signUpWithEmail(email, pass, name, exam) },
-            onGuestSignIn = { viewModel.continueAsGuest() },
-            onForgotPassword = { email ->
-                viewModel.sendPasswordResetEmail(email) { _, msg ->
-                    if (!msg.isNullOrBlank()) {
-                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                    }
-                }
-            },
-            onDismissError = { viewModel.clearAuthError() }
+        AuthScreenHost(
+            viewModel = viewModel,
+            onGuestSignIn = { viewModel.continueAsGuest() }
         )
         return
     }

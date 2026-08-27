@@ -288,6 +288,87 @@ class SupabaseClient(
         }
     }
 
+    suspend fun verifyOtp(
+        email: String,
+        token: String,
+        type: String = "signup"
+    ): SupabaseResult<SupabaseAuthResponse> = withContext(Dispatchers.IO) {
+        if (!isReady()) return@withContext SupabaseResult.Error("Supabase is not configured yet.")
+
+        try {
+            val json = JSONObject().apply {
+                put("email", email)
+                put("token", token.trim())
+                put("type", type)
+            }
+
+            val request = Request.Builder()
+                .url("$baseUrl/auth/v1/verify")
+                .addHeader("apikey", anonKey)
+                .addHeader("Content-Type", "application/json")
+                .post(json.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+
+            val response = executeRequest(request)
+            when (response) {
+                is SupabaseResult.Success -> {
+                    val auth = parseAuthResponse(response.data)
+                    SupabaseResult.Success(auth)
+                }
+                is SupabaseResult.Error -> {
+                    // If signup type failed, attempt email type fallback
+                    if (type == "signup") {
+                        val fallbackJson = JSONObject().apply {
+                            put("email", email)
+                            put("token", token.trim())
+                            put("type", "email")
+                        }
+                        val fallbackReq = Request.Builder()
+                            .url("$baseUrl/auth/v1/verify")
+                            .addHeader("apikey", anonKey)
+                            .addHeader("Content-Type", "application/json")
+                            .post(fallbackJson.toString().toRequestBody(JSON_MEDIA_TYPE))
+                            .build()
+                        val fallbackResp = executeRequest(fallbackReq)
+                        if (fallbackResp is SupabaseResult.Success) {
+                            return@withContext SupabaseResult.Success(parseAuthResponse(fallbackResp.data))
+                        }
+                    }
+                    SupabaseResult.Error(response.message, response.throwable, response.code)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Supabase verifyOtp failed", e)
+            SupabaseResult.Error(e.message ?: "OTP verification error", e)
+        }
+    }
+
+    suspend fun resendOtp(
+        email: String,
+        type: String = "signup"
+    ): SupabaseResult<String> = withContext(Dispatchers.IO) {
+        if (!isReady()) return@withContext SupabaseResult.Error("Supabase is not configured yet.")
+
+        try {
+            val json = JSONObject().apply {
+                put("email", email)
+                put("type", type)
+            }
+
+            val request = Request.Builder()
+                .url("$baseUrl/auth/v1/resend")
+                .addHeader("apikey", anonKey)
+                .addHeader("Content-Type", "application/json")
+                .post(json.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+
+            executeRequest(request)
+        } catch (e: Exception) {
+            Log.e(TAG, "Supabase resendOtp failed", e)
+            SupabaseResult.Error(e.message ?: "Failed to resend OTP", e)
+        }
+    }
+
     suspend fun recoverPasswordForEmail(
         email: String
     ): SupabaseResult<String> = withContext(Dispatchers.IO) {
@@ -553,13 +634,14 @@ class SupabaseClient(
                     "HTTP $code"
                 }
 
-                val friendlyMsg = when (code) {
-                    401 -> "Session expired. Please re-authenticate."
-                    403 -> "Action not authorized."
-                    409 -> "Record conflict. Re-synchronizing changes."
-                    429 -> "Rate limit reached. Please wait a moment."
-                    in 500..599 -> "Cloud server temporarily busy. Saved locally."
-                    else -> "Unable to sync with cloud ($errorDetails)"
+                val friendlyMsg = when {
+                    code == 401 -> if (errorDetails.isNotBlank() && errorDetails != "HTTP $code") errorDetails else "Session expired. Please re-authenticate."
+                    code == 403 -> if (errorDetails.isNotBlank() && errorDetails != "HTTP $code") errorDetails else "Action not authorized."
+                    code == 409 -> "Record conflict. Re-synchronizing changes."
+                    code == 429 -> "Rate limit reached. Please wait a moment before trying again."
+                    code in 400..422 && errorDetails.isNotBlank() && errorDetails != "HTTP $code" -> errorDetails
+                    code in 500..599 -> "Cloud server temporarily busy. Saved locally."
+                    else -> "Unable to complete request ($errorDetails)"
                 }
 
                 SupabaseResult.Error(

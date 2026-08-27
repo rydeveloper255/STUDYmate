@@ -39,6 +39,14 @@ sealed class AuthState {
     data class Error(val message: String) : AuthState()
 }
 
+data class AuthSignUpResult(
+    val isVerificationRequired: Boolean,
+    val email: String,
+    val fullName: String = "",
+    val mobileNumber: String = "",
+    val user: UserProfile? = null
+)
+
 class AuthRepository(
     private val context: Context,
     private val userDao: UserDao,
@@ -124,6 +132,19 @@ class AuthRepository(
         val localProfile = userDao.getUserProfileOnce()
         if (localProfile != null) {
             return@withContext localProfile
+        }
+        val storedUserId = supabaseAuthManager?.getStoredUserId()
+        val storedEmail = supabaseAuthManager?.getUserEmail()
+        if (!storedUserId.isNullOrBlank() && !storedEmail.isNullOrBlank() && storedUserId != "guest_uid") {
+            val profile = UserProfile(
+                id = "current_user",
+                uid = storedUserId,
+                name = storedEmail.substringBefore("@").replaceFirstChar { it.uppercase() },
+                email = storedEmail,
+                isOnboardingCompleted = false
+            )
+            userDao.insertOrUpdateUserProfile(profile)
+            return@withContext profile
         }
         val firebaseUser = try { firebaseAuth?.currentUser } catch (e: Exception) { null }
         if (firebaseUser != null) {
@@ -340,28 +361,44 @@ class AuthRepository(
         }
     }
 
-    suspend fun signUpWithEmail(
+    suspend fun signUpUser(
+        fullName: String,
         email: String,
+        mobileNumber: String,
         pass: String,
-        displayName: String = "",
-        examName: String = "RRB Group D"
-    ): Result<UserProfile> = withContext(Dispatchers.IO) {
+        confirmPass: String
+    ): Result<AuthSignUpResult> = withContext(Dispatchers.IO) {
+        val trimmedName = fullName.trim()
         val normalizedEmail = email.trim().lowercase(java.util.Locale.ROOT)
+        val cleanPhone = mobileNumber.filter { it.isDigit() }
+
+        if (trimmedName.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Kripya apna pura naam darj karein."))
+        }
         if (normalizedEmail.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(normalizedEmail).matches()) {
-            return@withContext Result.failure(IllegalArgumentException("Please enter a valid email address."))
+            return@withContext Result.failure(IllegalArgumentException("Kripya ek valid email address enter karein."))
+        }
+        if (cleanPhone.length < 10) {
+            return@withContext Result.failure(IllegalArgumentException("Kripya valid 10-digit mobile number enter karein."))
         }
         if (pass.length < 6) {
-            return@withContext Result.failure(IllegalArgumentException("Password must be at least 6 characters."))
+            return@withContext Result.failure(IllegalArgumentException("Password kam se kam 6 characters ka hona chahiye."))
+        }
+        if (pass != confirmPass) {
+            return@withContext Result.failure(IllegalArgumentException("Password aur Confirm Password match nahi kar rahe hain."))
         }
 
         try {
-            var supabaseUid = ""
             if (supabaseClient?.isReady() == true) {
-                when (val signUpRes = supabaseClient.signUp(normalizedEmail, pass, mapOf("full_name" to displayName))) {
+                val metadata = mapOf(
+                    "full_name" to trimmedName,
+                    "phone" to cleanPhone,
+                    "mobile_number" to cleanPhone
+                )
+                when (val signUpRes = supabaseClient.signUp(normalizedEmail, pass, metadata)) {
                     is SupabaseResult.Success -> {
                         val session = signUpRes.data
                         if (!session.accessToken.isNullOrBlank() && session.user != null) {
-                            supabaseUid = session.user.id
                             supabaseAuthManager?.saveSession(
                                 accessToken = session.accessToken,
                                 refreshToken = session.refreshToken,
@@ -369,9 +406,16 @@ class AuthRepository(
                                 email = session.user.email ?: normalizedEmail,
                                 expiresInSeconds = session.expiresIn ?: 3600L
                             )
-                        } else if (session.user != null) {
-                            supabaseUid = session.user.id
                         }
+                        PersistenceMonitor.log("AUTH_SIGNUP_OTP", "auth.users", normalizedEmail, normalizedEmail, "SUCCESS")
+                        return@withContext Result.success(
+                            AuthSignUpResult(
+                                isVerificationRequired = true,
+                                email = normalizedEmail,
+                                fullName = trimmedName,
+                                mobileNumber = cleanPhone
+                            )
+                        )
                     }
                     is SupabaseResult.Error -> {
                         val err = signUpRes.message
@@ -380,7 +424,10 @@ class AuthRepository(
                             signUpRes.code == 422
                         ) {
                             PersistenceMonitor.log("AUTH_SIGNUP", "auth.users", normalizedEmail, normalizedEmail, "FAILED", "ALREADY_EXISTS", err)
-                            return@withContext Result.failure(IllegalStateException("An account with this email already exists. Please log in instead."))
+                            return@withContext Result.failure(IllegalStateException("Yeh email pehle se registered hai. Kripya Log In karein."))
+                        }
+                        if (err.contains("rate limit", ignoreCase = true) || signUpRes.code == 429) {
+                            return@withContext Result.failure(IllegalStateException("Email rate limit reached. Kripya 2 minute baad koshish karein."))
                         }
                         PersistenceMonitor.log("AUTH_SIGNUP", "auth.users", normalizedEmail, normalizedEmail, "FAILED", signUpRes.code?.toString(), err)
                         return@withContext Result.failure(Exception("Sign-up failed: $err"))
@@ -388,49 +435,316 @@ class AuthRepository(
                 }
             }
 
-            val uidToUse = if (supabaseUid.isNotBlank()) supabaseUid else "usr_${Math.abs(normalizedEmail.hashCode())}"
-            val nameToUse = if (displayName.isNotBlank()) displayName else normalizedEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
-
+            // Fallback if Supabase is offline / local mode
+            val localUid = "usr_${Math.abs(normalizedEmail.hashCode())}"
             val profile = UserProfile(
                 id = "current_user",
-                uid = uidToUse,
-                name = nameToUse,
+                uid = localUid,
+                name = trimmedName,
                 email = normalizedEmail,
-                examName = if (examName.isNotBlank()) examName else "RRB Group D",
                 isGuest = false,
-                isOnboardingCompleted = true
+                isOnboardingCompleted = false
             )
-
-            val localSaved = try {
-                userDao.insertOrUpdateUserProfile(profile)
-                true
-            } catch (e: Exception) {
-                false
-            }
-
-            if (!localSaved) {
-                PersistenceMonitor.log("PROFILE_CREATE", "user_profile", uidToUse, uidToUse, "FAILED", details = "Room DB insert error")
-                return@withContext Result.failure(Exception("Account created, profile setup incomplete. Your account was created, but profile data could not be saved."))
-            }
-
-            supabaseAuthManager?.associateFirebaseOrLocalUser(profile.uid, profile.email)
-            supabaseSyncService?.syncUserProfile(profile)
-
-            PersistenceMonitor.log("AUTH_SIGNUP", "profiles", uidToUse, uidToUse, "SUCCESS")
-            Result.success(profile)
+            userDao.insertOrUpdateUserProfile(profile)
+            Result.success(
+                AuthSignUpResult(
+                    isVerificationRequired = true,
+                    email = normalizedEmail,
+                    fullName = trimmedName,
+                    mobileNumber = cleanPhone,
+                    user = profile
+                )
+            )
         } catch (e: Exception) {
             PersistenceMonitor.log("AUTH_SIGNUP", "profiles", normalizedEmail, "unknown", "FAILED", details = e.message)
             Result.failure(e)
         }
     }
 
+    suspend fun verifyEmailOtp(
+        email: String,
+        otp: String,
+        fullName: String = "",
+        mobileNumber: String = ""
+    ): Result<UserProfile> = withContext(Dispatchers.IO) {
+        val normalizedEmail = email.trim().lowercase(java.util.Locale.ROOT)
+        val cleanOtp = otp.trim()
+
+        if (cleanOtp.length < 6) {
+            return@withContext Result.failure(IllegalArgumentException("Kripya pura 6-digit OTP darj karein."))
+        }
+
+        try {
+            var userId = ""
+            if (supabaseClient?.isReady() == true) {
+                when (val verifyRes = supabaseClient.verifyOtp(normalizedEmail, cleanOtp, type = "signup")) {
+                    is SupabaseResult.Success -> {
+                        val session = verifyRes.data
+                        if (!session.accessToken.isNullOrBlank() && session.user != null) {
+                            userId = session.user.id
+                            supabaseAuthManager?.saveSession(
+                                accessToken = session.accessToken,
+                                refreshToken = session.refreshToken,
+                                userId = session.user.id,
+                                email = session.user.email ?: normalizedEmail,
+                                expiresInSeconds = session.expiresIn ?: 3600L
+                            )
+                        } else if (session.user != null) {
+                            userId = session.user.id
+                        }
+                    }
+                    is SupabaseResult.Error -> {
+                        val err = verifyRes.message
+                        Log.e(TAG, "OTP verification error: $err (code: ${verifyRes.code})")
+                        val friendlyErr = when {
+                            err.contains("expired", ignoreCase = true) || err.contains("invalid", ignoreCase = true) || verifyRes.code in 400..422 ->
+                                "OTP galat hai ya expire ho chuka hai. Kripya naya OTP request karein."
+                            err.contains("rate limit", ignoreCase = true) || verifyRes.code == 429 ->
+                                "Too many attempts. Kripya thodi der baad koshish karein."
+                            else -> err
+                        }
+                        PersistenceMonitor.log("AUTH_OTP_VERIFY", "auth.users", normalizedEmail, normalizedEmail, "FAILED", verifyRes.code?.toString(), friendlyErr)
+                        return@withContext Result.failure(Exception(friendlyErr))
+                    }
+                }
+            }
+
+            val uidToUse = if (userId.isNotBlank()) userId else "usr_${Math.abs(normalizedEmail.hashCode())}"
+            supabaseAuthManager?.associateFirebaseOrLocalUser(uidToUse, normalizedEmail)
+
+            // Try restoring profile from Supabase first
+            try {
+                supabaseSyncService?.fullCloudRestore()
+            } catch (ignored: Exception) {}
+
+            val existing = userDao.getUserProfileOnce()
+            val nameToUse = when {
+                fullName.isNotBlank() -> fullName
+                existing != null && existing.name.isNotBlank() && existing.name != "Student" -> existing.name
+                else -> normalizedEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
+            }
+
+            val profile = if (existing != null && existing.isOnboardingCompleted) {
+                existing.copy(
+                    id = "current_user",
+                    uid = uidToUse,
+                    email = normalizedEmail,
+                    name = nameToUse,
+                    isGuest = false,
+                    isOnboardingCompleted = true
+                )
+            } else {
+                UserProfile(
+                    id = "current_user",
+                    uid = uidToUse,
+                    name = nameToUse,
+                    email = normalizedEmail,
+                    isGuest = false,
+                    isOnboardingCompleted = false,
+                    examName = "RRB Group D"
+                )
+            }
+
+            userDao.insertOrUpdateUserProfile(profile)
+            supabaseSyncService?.syncUserProfile(profile)
+
+            PersistenceMonitor.log("AUTH_OTP_VERIFY", "profiles", uidToUse, uidToUse, "SUCCESS")
+            Result.success(profile)
+        } catch (e: Exception) {
+            PersistenceMonitor.log("AUTH_OTP_VERIFY", "profiles", normalizedEmail, "unknown", "FAILED", details = e.message)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun resendEmailOtp(email: String, type: String = "signup"): Result<Unit> = withContext(Dispatchers.IO) {
+        val normalizedEmail = email.trim().lowercase(java.util.Locale.ROOT)
+        if (normalizedEmail.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(normalizedEmail).matches()) {
+            return@withContext Result.failure(IllegalArgumentException("Kripya ek valid email address enter karein."))
+        }
+
+        try {
+            if (supabaseClient?.isReady() == true) {
+                when (val res = supabaseClient.resendOtp(normalizedEmail, type)) {
+                    is SupabaseResult.Success -> {
+                        PersistenceMonitor.log("AUTH_OTP_RESEND", "auth.users", normalizedEmail, normalizedEmail, "SUCCESS")
+                        Result.success(Unit)
+                    }
+                    is SupabaseResult.Error -> {
+                        val err = res.message
+                        if (err.contains("rate limit", ignoreCase = true) || res.code == 429) {
+                            return@withContext Result.failure(Exception("Resend limit reached. Kripya 2 minute countdown ke baad dobara try karein."))
+                        }
+                        PersistenceMonitor.log("AUTH_OTP_RESEND", "auth.users", normalizedEmail, normalizedEmail, "FAILED", res.code?.toString(), err)
+                        Result.failure(Exception(err))
+                    }
+                }
+            } else {
+                Result.success(Unit)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun signInWithEmailOrPhone(identifier: String, pass: String): Result<UserProfile> = withContext(Dispatchers.IO) {
+        val trimmed = identifier.trim()
+        if (trimmed.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Kripya Email ya Mobile Number enter karein."))
+        }
+        if (pass.length < 6) {
+            return@withContext Result.failure(IllegalArgumentException("Password kam se kam 6 characters ka hona chahiye."))
+        }
+
+        val isEmail = trimmed.contains("@")
+        val emailToUse = if (isEmail) {
+            trimmed.lowercase(java.util.Locale.ROOT)
+        } else {
+            // Check if phone matches any local or remote profile
+            val cleanPhone = trimmed.filter { it.isDigit() }
+            val existing = userDao.getUserProfileOnce()
+            if (existing != null && existing.email.isNotBlank()) {
+                existing.email
+            } else {
+                // If pure digits, attempt to search or format
+                return@withContext Result.failure(Exception("Mobile login ke liye kripya apna registered email use karein ya naya account banayein."))
+            }
+        }
+
+        signInWithEmail(emailToUse, pass)
+    }
+
+    suspend fun sendPasswordRecoveryOtp(email: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val normalizedEmail = email.trim().lowercase(java.util.Locale.ROOT)
+        if (normalizedEmail.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(normalizedEmail).matches()) {
+            return@withContext Result.failure(IllegalArgumentException("Kripya ek valid email address enter karein."))
+        }
+
+        try {
+            if (supabaseClient?.isReady() == true) {
+                when (val res = supabaseClient.recoverPasswordForEmail(normalizedEmail)) {
+                    is SupabaseResult.Success -> {
+                        PersistenceMonitor.log("AUTH_PASSWORD_RECOVER", "auth.users", normalizedEmail, normalizedEmail, "SUCCESS")
+                        Result.success(Unit)
+                    }
+                    is SupabaseResult.Error -> {
+                        val err = res.message
+                        if (err.contains("rate limit", ignoreCase = true) || res.code == 429) {
+                            return@withContext Result.failure(Exception("Rate limit reached. Kripya 2 minute wait karein."))
+                        }
+                        PersistenceMonitor.log("AUTH_PASSWORD_RECOVER", "auth.users", normalizedEmail, normalizedEmail, "FAILED", res.code?.toString(), err)
+                        Result.failure(Exception(err))
+                    }
+                }
+            } else {
+                Result.success(Unit)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun verifyPasswordRecoveryOtp(email: String, otp: String): Result<String> = withContext(Dispatchers.IO) {
+        val normalizedEmail = email.trim().lowercase(java.util.Locale.ROOT)
+        val cleanOtp = otp.trim()
+
+        if (cleanOtp.length < 6) {
+            return@withContext Result.failure(IllegalArgumentException("Kripya pura 6-digit OTP darj karein."))
+        }
+
+        try {
+            if (supabaseClient?.isReady() == true) {
+                when (val res = supabaseClient.verifyOtp(normalizedEmail, cleanOtp, type = "recovery")) {
+                    is SupabaseResult.Success -> {
+                        val token = res.data.accessToken ?: ""
+                        if (token.isNotBlank()) {
+                            supabaseAuthManager?.saveSession(
+                                accessToken = token,
+                                refreshToken = res.data.refreshToken,
+                                userId = res.data.user?.id ?: "",
+                                email = normalizedEmail,
+                                expiresInSeconds = res.data.expiresIn ?: 3600L
+                            )
+                        }
+                        Result.success(token)
+                    }
+                    is SupabaseResult.Error -> {
+                        val err = res.message
+                        val friendlyErr = when {
+                            err.contains("expired", ignoreCase = true) || err.contains("invalid", ignoreCase = true) || res.code in 400..422 ->
+                                "OTP galat hai ya expire ho chuka hai. Kripya naya OTP mangwayein."
+                            err.contains("rate limit", ignoreCase = true) || res.code == 429 ->
+                                "Too many attempts. Kripya thodi der baad dobara koshish karein."
+                            else -> err
+                        }
+                        Result.failure(Exception(friendlyErr))
+                    }
+                }
+            } else {
+                Result.success("mock_recovery_token")
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun resetPasswordWithToken(accessToken: String, newPassword: String): Result<Unit> = withContext(Dispatchers.IO) {
+        if (newPassword.length < 6) {
+            return@withContext Result.failure(IllegalArgumentException("Naya password kam se kam 6 characters ka hona chahiye."))
+        }
+
+        try {
+            val tokenToUse = if (accessToken.isNotBlank()) accessToken else supabaseAuthManager?.getAccessToken() ?: ""
+            if (supabaseClient?.isReady() == true && tokenToUse.isNotBlank()) {
+                when (val res = supabaseClient.updateUser(accessToken = tokenToUse, password = newPassword)) {
+                    is SupabaseResult.Success -> {
+                        PersistenceMonitor.log("AUTH_PASSWORD_RESET", "auth.users", "current_user", "current_user", "SUCCESS")
+                        Result.success(Unit)
+                    }
+                    is SupabaseResult.Error -> {
+                        Result.failure(Exception(res.message))
+                    }
+                }
+            } else {
+                Result.success(Unit)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun signUpWithEmail(
+        email: String,
+        pass: String,
+        displayName: String = "",
+        examName: String = "RRB Group D"
+    ): Result<UserProfile> = withContext(Dispatchers.IO) {
+        val res = signUpUser(
+            fullName = displayName.ifBlank { "Student" },
+            email = email,
+            mobileNumber = "9999999999",
+            pass = pass,
+            confirmPass = pass
+        )
+        res.map {
+            it.user ?: UserProfile(
+                id = "current_user",
+                uid = "usr_${Math.abs(email.hashCode())}",
+                name = displayName.ifBlank { "Student" },
+                email = email.trim().lowercase(java.util.Locale.ROOT),
+                examName = examName,
+                isGuest = false,
+                isOnboardingCompleted = true
+            )
+        }
+    }
+
     suspend fun signInWithEmail(email: String, pass: String): Result<UserProfile> = withContext(Dispatchers.IO) {
         val normalizedEmail = email.trim().lowercase(java.util.Locale.ROOT)
         if (normalizedEmail.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(normalizedEmail).matches()) {
-            return@withContext Result.failure(IllegalArgumentException("Please enter a valid email address."))
+            return@withContext Result.failure(IllegalArgumentException("Kripya ek valid email address enter karein."))
         }
         if (pass.length < 6) {
-            return@withContext Result.failure(IllegalArgumentException("Password must be at least 6 characters."))
+            return@withContext Result.failure(IllegalArgumentException("Password kam se kam 6 characters ka hona chahiye."))
         }
 
         try {
@@ -454,7 +768,10 @@ class AuthRepository(
                         val err = signInRes.message
                         PersistenceMonitor.log("AUTH_SIGNIN", "auth.users", normalizedEmail, normalizedEmail, "FAILED", signInRes.code?.toString(), err)
                         if (err.contains("invalid", ignoreCase = true) || signInRes.code == 400) {
-                            return@withContext Result.failure(Exception("Invalid email or password. Please try again."))
+                            return@withContext Result.failure(Exception("Email/Password galat hai. Kripya dobara check karein."))
+                        }
+                        if (err.contains("confirm", ignoreCase = true) || err.contains("not verified", ignoreCase = true)) {
+                            return@withContext Result.failure(Exception("Aapka email verify nahi hua hai. Kripya pehle OTP verify karein."))
                         }
                         return@withContext Result.failure(Exception(err))
                     }
@@ -478,7 +795,7 @@ class AuthRepository(
                     uid = uidToUse,
                     email = normalizedEmail,
                     isGuest = false,
-                    isOnboardingCompleted = true
+                    isOnboardingCompleted = existing.isOnboardingCompleted
                 )
             } else {
                 UserProfile(
@@ -487,7 +804,7 @@ class AuthRepository(
                     name = normalizedEmail.substringBefore("@").replaceFirstChar { it.uppercase() },
                     email = normalizedEmail,
                     isGuest = false,
-                    isOnboardingCompleted = true,
+                    isOnboardingCompleted = false,
                     examName = "RRB Group D"
                 )
             }
