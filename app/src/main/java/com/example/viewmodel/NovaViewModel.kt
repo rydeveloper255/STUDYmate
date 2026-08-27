@@ -349,6 +349,10 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
     private val _snackbarMessage = MutableSharedFlow<String>()
     val snackbarMessage: SharedFlow<String> = _snackbarMessage.asSharedFlow()
 
+    // Step 54: Nova Sensitive Action & Risk Management States
+    private val _pendingSensitiveAction = MutableStateFlow<NovaPendingSensitiveAction?>(null)
+    val pendingSensitiveAction: StateFlow<NovaPendingSensitiveAction?> = _pendingSensitiveAction.asStateFlow()
+
     // STEP 20: Home Universal Widget & Context-Aware AI States
     private val _homeWidgetDisplayState = MutableStateFlow(HomeWidgetDisplayState.COLLAPSED)
     val homeWidgetDisplayState: StateFlow<HomeWidgetDisplayState> = _homeWidgetDisplayState.asStateFlow()
@@ -610,7 +614,173 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         _attachedImageBitmap.value = null
         _attachedImageUri.value = null
 
+        // Step 54: Structured Intent Classification & Fast-Path Routing
+        val classification = com.example.service.intelligence.NovaIntentClassifier.classify(userText)
+        if (classification.isDeterministicFastPath && imageToSend == null) {
+            val fastMsg = com.example.service.intelligence.NovaDeterministicRouter.generateFastPathResponse(
+                classification = classification,
+                context = _studyContext.value
+            )
+            _messages.update { it + fastMsg }
+            if (_settings.value.ttsAutoSpeak && _settings.value.voiceEnabled) {
+                voiceManager.speak(fastMsg.text, NovaVoiceEmotion.CALM)
+            }
+            if (classification.intent == NovaIntent.CURRENT_AFFAIRS && allCurrentAffairs.value.isEmpty()) {
+                refreshCurrentAffairs(forceRefresh = true)
+            }
+            return
+        }
+
         val lower = userText.trim().lowercase()
+
+        // Step 60 Smart Revision & Knowledge Retention Intent
+        val isRevisionIntent = lower.contains("revise") || lower.contains("revision") ||
+                lower.contains("aaj kya revise") || lower.contains("revision list") ||
+                lower.contains("postpone") || lower.contains("galat hue the unko revise") ||
+                lower.contains("mistakes revise") || lower.contains("retention") ||
+                (lower.contains("add") && lower.contains("revision"))
+
+        if (isRevisionIntent && imageToSend == null) {
+            viewModelScope.launch {
+                _isGenerating.value = true
+                val ctx = _studyContext.value
+                val exam = ctx.targetExam.ifBlank { "Competitive Exam" }
+                val revisionResp = studyRepository.smartRevisionService.getNovaRevisionAnswer(userText, exam)
+                val novaMsg = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = revisionResp.answerText,
+                    actionButtons = revisionResp.actions
+                )
+                _messages.update { it + novaMsg }
+                if (_settings.value.ttsAutoSpeak && _settings.value.voiceEnabled) {
+                    voiceManager.speak("Revision plan ready for $exam", NovaVoiceEmotion.CALM)
+                }
+                _isGenerating.value = false
+            }
+            return
+        }
+
+        // Step 58 Resource Engine Intent: Notes, PDF, Study material, Formula sheet
+        val isResourceIntent = lower.contains("notes") || lower.contains("pdf") ||
+                lower.contains("formula") || lower.contains("revision material") ||
+                lower.contains("resource") || lower.contains("material") ||
+                lower.contains("iska notes") || lower.contains("iska pdf") ||
+                lower.contains("pdf hai")
+
+        if (isResourceIntent && imageToSend == null) {
+            viewModelScope.launch {
+                _isGenerating.value = true
+                val ctx = _studyContext.value
+                val currentSubj = ctx.selectedSubject.ifBlank { ctx.subjects.firstOrNull() ?: "General" }
+                val currentTop = ctx.selectedTopic.ifBlank { ctx.weakTopics.firstOrNull() ?: "Core Revision" }
+                val resourceResp = studyRepository.resourceEngineService.getNovaResourceAnswer(
+                    userQuery = userText,
+                    currentExam = ctx.targetExam,
+                    currentSubject = currentSubj,
+                    currentTopic = currentTop
+                )
+
+                val actions = mutableListOf<NovaContextualAction>()
+                if (resourceResp.found && resourceResp.topResource != null) {
+                    val topRes = resourceResp.topResource!!
+                    actions.add(
+                        NovaContextualAction(
+                            label = "📖 Read ${topRes.title.take(20)}...",
+                            actionType = NovaActionType.OPEN_RESOURCE_HUB,
+                            payload = topRes.resourceId,
+                            isPrimary = true
+                        )
+                    )
+                    actions.add(
+                        NovaContextualAction(
+                            label = "⏱️ Start Focus",
+                            actionType = NovaActionType.START_RESOURCE_FOCUS,
+                            payload = "${topRes.subjectName}|${topRes.topicName}|${topRes.resourceId}"
+                        )
+                    )
+                } else {
+                    actions.add(
+                        NovaContextualAction(
+                            label = "📁 Open Study Resources",
+                            actionType = NovaActionType.OPEN_RESOURCE_HUB,
+                            isPrimary = true
+                        )
+                    )
+                }
+
+                val aiMsg = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = resourceResp.answerText,
+                    actionButtons = actions
+                )
+                _messages.update { it + aiMsg }
+                if (_settings.value.ttsAutoSpeak && _settings.value.voiceEnabled) {
+                    voiceManager.speak("Resource details available for $currentSubj", NovaVoiceEmotion.CALM)
+                }
+                _isGenerating.value = false
+            }
+            return
+        }
+
+        // Step 57 Exam Prep Intent: Exam date, syllabus progress, study plans, revision, topic focus
+        val isExamPrepIntent = lower.contains("exam kab hai") || lower.contains("din bache") ||
+                lower.contains("exam date") || lower.contains("syllabus") || lower.contains("aaj kya") ||
+                lower.contains("kal ka plan") || lower.contains("aaj ka plan") || lower.contains("plan bata") ||
+                lower.contains("pending topic") || lower.contains("revision me") || lower.contains("prepare karna") ||
+                (lower.contains("start") && (lower.contains("percentage") || lower.contains("puzzles") || lower.contains("algebra") || lower.contains("focus")))
+
+        if (isExamPrepIntent && imageToSend == null) {
+            viewModelScope.launch {
+                val prepResponse = studyRepository.examPreparationService.getNovaExamPrepAnswer(userText)
+                val novaMessage = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = prepResponse.answerText,
+                    actionButtons = prepResponse.actions
+                )
+                _messages.update { it + novaMessage }
+                if (_settings.value.ttsAutoSpeak && _settings.value.voiceEnabled) {
+                    voiceManager.speak(prepResponse.answerText, NovaVoiceEmotion.CALM)
+                }
+            }
+            return
+        }
+
+        // Step 56 Analytics Intent: Study stats, progress, consistency, weekly report, planned vs actual
+        val isAnalyticsIntent = lower.contains("kitna padha") || lower.contains("kitni padhai") ||
+                lower.contains("study time") || lower.contains("my progress") || lower.contains("progress kaisa") ||
+                lower.contains("weekly report") || lower.contains("weekly summary") || lower.contains("weekly review") ||
+                lower.contains("consistency") || lower.contains("streak") || lower.contains("planned vs actual") ||
+                lower.contains("sabse zyada time") || lower.contains("top subject")
+
+        if (isAnalyticsIntent && imageToSend == null) {
+            viewModelScope.launch {
+                val analyticsAnswer = studyRepository.analyticsEngine.getNovaAnalyticsAnswer(userText)
+                val actions = listOf(
+                    NovaContextualAction(
+                        label = "📊 Open Strategy & Analytics",
+                        iconName = "chart",
+                        actionType = NovaActionType.OPEN_ANALYTICS,
+                        isPrimary = true
+                    ),
+                    NovaContextualAction(
+                        label = "📅 Planned vs Actual",
+                        iconName = "calendar",
+                        actionType = NovaActionType.OPEN_ANALYTICS,
+                        payload = "{\"filter\":\"planned_vs_actual\"}"
+                    )
+                )
+                val novaMessage = NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = analyticsAnswer,
+                    actionButtons = actions
+                )
+                _messages.update { it + novaMessage }
+                if (_settings.value.ttsAutoSpeak && _settings.value.voiceEnabled) {
+                    voiceManager.speak(analyticsAnswer, NovaVoiceEmotion.CALM)
+                }
+            }
+            return
+        }
 
         // 1. Instant Intent: Today's Current Affairs
         val isCurrentAffairsIntent = lower.contains("current affair") || lower.contains("current affairs") ||
@@ -714,16 +884,96 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // 3. Instant Intent: Practice Quiz
-        val isQuizIntent = lower.contains("practice question") || lower.contains("practice questions") ||
-                lower.contains("quiz start") || lower.contains("quiz shuru") || lower.contains("start quiz") ||
-                lower.contains("questions solve") || lower.contains("mcq solve")
+        // 3. Instant Intent: Smart Practice Commands & Analytics
+        val isPracticeAccuracyIntent = lower.contains("practice accuracy") || lower.contains("accuracy batao") || lower.contains("kitni accuracy hai")
+        if (isPracticeAccuracyIntent && imageToSend == null) {
+            viewModelScope.launch {
+                val attempts = studyRepository.allQuestionAttempts.firstOrNull() ?: emptyList()
+                val replyText = if (attempts.isEmpty()) {
+                    "Abhi practice accuracy calculate karne ke liye enough data nahi hai. Pehle 1-2 practice sessions complete karein! 🚀"
+                } else {
+                    val total = attempts.size
+                    val correct = attempts.count { it.isCorrect }
+                    val percent = String.format(java.util.Locale.US, "%.1f", (correct.toFloat() / total) * 100)
+                    "Tumhari overall practice accuracy **$percent%** hai ($correct/$total questions correct). Performance ko boost karne ke liye weak areas practice attempt karein! 📈"
+                }
+                val actions = listOf(
+                    NovaContextualAction(
+                        label = "✍️ Start Practice",
+                        iconName = "quiz",
+                        actionType = NovaActionType.START_QUIZ,
+                        isPrimary = true
+                    )
+                )
+                _messages.update { it + NovaChatMessage(sender = NovaSender.NOVA, text = replyText, actionButtons = actions) }
+            }
+            return
+        }
 
-        if (isQuizIntent && imageToSend == null) {
-            val subj = _studyContext.value.subjects.firstOrNull() ?: "General Studies"
+        val isWeakAreaQuery = lower.contains("practice kam hai") || lower.contains("kis topic me") || lower.contains("weak topics")
+        if (isWeakAreaQuery && imageToSend == null) {
+            viewModelScope.launch {
+                val attempts = studyRepository.allQuestionAttempts.firstOrNull() ?: emptyList()
+                val topicStats = attempts.groupBy { it.topic.ifBlank { it.subject } }
+                    .mapValues { (_, atts) ->
+                        val corr = atts.count { it.isCorrect }
+                        val acc = if (atts.isNotEmpty()) (corr.toFloat() / atts.size) * 100f else 0f
+                        Pair(atts.size, acc)
+                    }
+                val weak = topicStats.filter { it.value.first >= 2 && it.value.second < 60f }.keys
+
+                val replyText = if (attempts.isEmpty()) {
+                    "Abhi tak kafi practice sessions complete nahi hue hain. Pehle thodi practice complete karein, fir main weak areas identify kar dunga! 🎯"
+                } else if (weak.isEmpty()) {
+                    "Shandar! Tumhara performance abhi balanced hai. High accuracy maintain rakhne ke liye regular Revision Practice karte rahein. ✨"
+                } else {
+                    "Aapke ye topics me practice & accuracy kam hai: **${weak.joinToString(", ")}**. Inka target practice test start karein?"
+                }
+                val actions = listOf(
+                    NovaContextualAction(
+                        label = "🎯 Target Weak Areas",
+                        iconName = "psychology",
+                        actionType = NovaActionType.START_QUIZ,
+                        isPrimary = true
+                    )
+                )
+                _messages.update { it + NovaChatMessage(sender = NovaSender.NOVA, text = replyText, actionButtons = actions) }
+            }
+            return
+        }
+
+        val isMistakesPracticeIntent = lower.contains("galat hue") || lower.contains("mistakes practice") || lower.contains("wrong questions")
+        if (isMistakesPracticeIntent && imageToSend == null) {
             val actions = listOf(
                 NovaContextualAction(
-                    label = "✍️ Start 10-Q Practice Quiz",
+                    label = "🔄 Start Revision Test",
+                    iconName = "history",
+                    actionType = NovaActionType.START_QUIZ,
+                    payload = "{\"mode\":\"REVISION\"}",
+                    isPrimary = true
+                )
+            )
+            val replyText = "Bilkul! Past mistakes aur incorrect questions ka targeted revision session ready hai. Practice start karein?"
+            _messages.update { it + NovaChatMessage(sender = NovaSender.NOVA, text = replyText, actionButtons = actions) }
+            return
+        }
+
+        val isQuizIntent = lower.contains("practice question") || lower.contains("practice questions") ||
+                lower.contains("quiz start") || lower.contains("quiz shuru") || lower.contains("start quiz") ||
+                lower.contains("questions solve") || lower.contains("mcq solve") || lower.contains("questions karao") ||
+                lower.contains("practice start") || lower.contains("revision test")
+
+        if (isQuizIntent && imageToSend == null) {
+            val subj = when {
+                lower.contains("math") -> "Mathematics"
+                lower.contains("reasoning") -> "Reasoning"
+                lower.contains("science") -> "General Science"
+                lower.contains("gk") || lower.contains("gs") -> "General Awareness"
+                else -> _studyContext.value.subjects.firstOrNull() ?: "General Studies"
+            }
+            val actions = listOf(
+                NovaContextualAction(
+                    label = "✍️ Start $subj Practice (10 Qs)",
                     iconName = "quiz",
                     actionType = NovaActionType.START_QUIZ,
                     payload = "{\"subject\":\"$subj\"}",
@@ -735,7 +985,7 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                     actionType = NovaActionType.OPEN_TOPIC
                 )
             )
-            val replyText = "Shandar! $subj ke high-yield MCQs ready hain. Practice start karein?"
+            val replyText = "Shandar! $subj ke verified practice questions ready hain. Practice start karein?"
             val novaMessage = NovaChatMessage(
                 sender = NovaSender.NOVA,
                 text = replyText,
@@ -1648,7 +1898,26 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun confirmPendingSensitiveAction() {
+        val pending = _pendingSensitiveAction.value ?: return
+        _pendingSensitiveAction.value = null
+        executeActionDirectly(pending.actionType, pending.payload)
+    }
+
+    fun dismissPendingSensitiveAction() {
+        _pendingSensitiveAction.value = null
+    }
+
     fun executeAction(actionType: NovaActionType, payload: String?) {
+        val sensitiveCheck = com.example.service.intelligence.NovaToolRegistry.checkSensitiveAction(actionType, payload)
+        if (sensitiveCheck != null) {
+            _pendingSensitiveAction.value = sensitiveCheck
+            return
+        }
+        executeActionDirectly(actionType, payload)
+    }
+
+    private fun executeActionDirectly(actionType: NovaActionType, payload: String?) {
         viewModelScope.launch {
             when (actionType) {
                 NovaActionType.OPEN_CURRENT_AFFAIRS -> {
@@ -1995,6 +2264,9 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                         fetchDailyExamBriefing(forceRefresh = true)
                     }
                     _showDailyBriefDialog.value = true
+                }
+                NovaActionType.OPEN_REVISION_HUB -> {
+                    _navigationEvent.emit("NAVIGATE_TO_REVISION_HUB" to emptyMap())
                 }
                 NovaActionType.VERIFY_SOURCE_TRUST -> {
                     val query = payload ?: "pib.gov.in"

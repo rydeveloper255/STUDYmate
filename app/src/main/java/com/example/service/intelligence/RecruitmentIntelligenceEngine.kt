@@ -19,7 +19,8 @@ import kotlinx.coroutines.flow.update
 class RecruitmentIntelligenceEngine(
     private val recruitmentDao: RecruitmentDao,
     private val geminiRepository: GeminiRepository,
-    private val supabaseClient: SupabaseClient
+    private val supabaseClient: SupabaseClient,
+    private val scraperService: SmartRecruitmentScraperService = SmartRecruitmentScraperService(geminiRepository)
 ) {
     companion object {
         private const val TAG = "RecruitmentEngine3.0"
@@ -69,7 +70,8 @@ class RecruitmentIntelligenceEngine(
     }
 
     /**
-     * Refreshes the recruitment intelligence catalog and applies user profile personalization.
+     * Refreshes the recruitment intelligence catalog using live discovery from sarkariresult.com.cm,
+     * performs deduplication, change detection, expiry validation, and applies user profile personalization.
      */
     suspend fun refreshRecruitmentCatalog(
         profile: UserRecruitmentProfile = UserRecruitmentProfile(),
@@ -78,18 +80,76 @@ class RecruitmentIntelligenceEngine(
         forceLiveSearch: Boolean = false
     ): Result<Int> = withContext(Dispatchers.IO) {
         try {
-            val currentItems = recruitmentDao.getAllOnce().toMutableList()
-            if (currentItems.isEmpty()) {
-                currentItems.addAll(getVerifiedDefaultCatalog())
+            val existingItems = recruitmentDao.getAllOnce().toMutableList()
+            val existingMap = existingItems.associateBy { it.id }.toMutableMap()
+
+            // 1. Fetch & Parse live from scraper if requested or DB is small
+            val scrapedItems = if (forceLiveSearch || existingItems.size < 4) {
+                scraperService.discoverAndProcessAllSections()
+            } else {
+                emptyList()
             }
 
-            // Apply deterministic validation, status recalculation & personalization pass
+            // 2. Merge scraped items with change detection & versioning
+            for (scraped in scrapedItems) {
+                val existing = existingMap[scraped.id]
+                if (existing != null) {
+                    val diff = scraperService.detectChanges(existing, scraped)
+                    val merged = when (diff.changeType) {
+                        SmartRecruitmentScraperService.DetectedChangeType.DEADLINE_EXTENDED -> {
+                            existing.copy(
+                                applicationLastDate = scraped.applicationLastDate,
+                                previousLastDate = existing.applicationLastDate,
+                                isDeadlineExtended = true,
+                                changeSummary = diff.summaryNote,
+                                rawStatus = VacancyStatus.EXTENDED.name,
+                                lastVerifiedAt = System.currentTimeMillis()
+                            )
+                        }
+                        SmartRecruitmentScraperService.DetectedChangeType.ADMIT_CARD_RELEASED -> {
+                            existing.copy(
+                                admitCardDate = scraped.admitCardDate,
+                                admitCardStatus = "AVAILABLE",
+                                changeSummary = diff.summaryNote,
+                                lastVerifiedAt = System.currentTimeMillis()
+                            )
+                        }
+                        SmartRecruitmentScraperService.DetectedChangeType.RESULT_RELEASED -> {
+                            existing.copy(
+                                resultDate = scraped.resultDate,
+                                resultType = "DECLARED",
+                                changeSummary = diff.summaryNote,
+                                lastVerifiedAt = System.currentTimeMillis()
+                            )
+                        }
+                        SmartRecruitmentScraperService.DetectedChangeType.EXAM_DATE_ANNOUNCED,
+                        SmartRecruitmentScraperService.DetectedChangeType.EXAM_DATE_CHANGED -> {
+                            existing.copy(
+                                examDate = scraped.examDate,
+                                changeSummary = diff.summaryNote,
+                                lastVerifiedAt = System.currentTimeMillis()
+                            )
+                        }
+                        else -> {
+                            existing.copy(
+                                lastVerifiedAt = System.currentTimeMillis()
+                            )
+                        }
+                    }
+                    existingMap[scraped.id] = merged
+                } else {
+                    existingMap[scraped.id] = scraped
+                }
+            }
+
+            val currentItems = existingMap.values.toList().ifEmpty { getVerifiedDefaultCatalog() }
+
+            // 3. Apply deterministic validation, status recalculation & personalization pass
             val updatedItems = currentItems.map { item ->
                 val computedStatus = item.getComputedStatus()
                 val (eligStatus, eligReasons) = evaluateEligibility(item, profile)
                 val (relevanceScore, relevanceTier) = calculateRelevanceScore(item, profile)
                 val whyReason = generateWhyRecommendedReason(item, profile, eligStatus)
-                val deadlinePriority = item.getDeadlinePriority()
 
                 item.copy(
                     rawStatus = computedStatus.name,
@@ -103,6 +163,9 @@ class RecruitmentIntelligenceEngine(
             }
 
             recruitmentDao.insertOrUpdateAll(updatedItems)
+            generateNotificationEventsForCatalog(updatedItems, profile)
+            generateDailyDigest(updatedItems, profile)
+            
             Result.success(updatedItems.size)
         } catch (e: Exception) {
             Log.e(TAG, "Error refreshing recruitment catalog", e)

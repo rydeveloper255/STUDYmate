@@ -208,6 +208,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val flashcardMessage by viewModel.flashcardMessage.collectAsStateWithLifecycle()
     val pendingResumeSession by viewModel.pendingResumeSession.collectAsStateWithLifecycle()
     val activeTestState by viewModel.activeTestState.collectAsStateWithLifecycle()
+    val savedQuestionsList by viewModel.savedQuestionsList.collectAsStateWithLifecycle()
     val isTestGenerating by viewModel.isTestGenerating.collectAsStateWithLifecycle()
     val generationError by viewModel.generationError.collectAsStateWithLifecycle()
     val insufficientPyqNotice by viewModel.insufficientPyqNotice.collectAsStateWithLifecycle()
@@ -258,6 +259,12 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val isNovaDoubtThinking by viewModel.isNovaDoubtThinking.collectAsStateWithLifecycle()
     val novaProgressAnalysis by viewModel.novaProgressAnalysis.collectAsStateWithLifecycle()
     val isNovaProgressAnalyzing by viewModel.isNovaProgressAnalyzing.collectAsStateWithLifecycle()
+
+    // Step 58 Resource Engine State
+    val searchResources by viewModel.searchResourcesState.collectAsStateWithLifecycle()
+    val resourceQuery by viewModel.resourceQueryState.collectAsStateWithLifecycle()
+    val selectedResourceTypeFilter by viewModel.selectedResourceTypeFilter.collectAsStateWithLifecycle()
+    val activeResourceForViewer by viewModel.activeResourceForViewer.collectAsStateWithLifecycle()
     val allLearningBookmarks by viewModel.allLearningBookmarks.collectAsStateWithLifecycle()
     val smartNotes by viewModel.allSmartNotes.collectAsStateWithLifecycle()
 
@@ -297,6 +304,12 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val weeklyStudyGoalHours by viewModel.weeklyStudyGoalHours.collectAsStateWithLifecycle()
     val studyStreakDays by viewModel.studyStreakDays.collectAsStateWithLifecycle()
     var showSmartPlannerScreen by remember { mutableStateOf(false) }
+    var showRevisionHubScreen by remember { mutableStateOf(false) }
+
+    // Step 57 Exam Prep & Planner State
+    val primaryExamSummary by viewModel.primaryExamSummary.collectAsStateWithLifecycle()
+    val allExamGoals by viewModel.allExamGoals.collectAsStateWithLifecycle()
+    val dailyPlanPreview by viewModel.dailyPlanPreview.collectAsStateWithLifecycle()
 
     val handleDeepLink: (String, String) -> Unit = { link, payload ->
         showNotificationCenter = false
@@ -428,6 +441,9 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                 "NAVIGATE_TO_READINESS" -> {
                     showExamReadinessCenter = true
                 }
+                "NAVIGATE_TO_REVISION_HUB", "NAVIGATE_TO_REVISION" -> {
+                    showRevisionHubScreen = true
+                }
                 "NAVIGATE_TO_NOTIFICATIONS" -> {
                     showNotificationCenter = true
                 }
@@ -466,6 +482,9 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
             }
             showSmartVacancyScreen -> {
                 viewModel.setShowSmartVacancyScreen(false)
+            }
+            showRevisionHubScreen -> {
+                showRevisionHubScreen = false
             }
             showDocumentSummarizer -> {
                 showDocumentSummarizer = false
@@ -806,6 +825,25 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     isStudyKitGenerating = isStudyKitGenerating,
                     onGenerateStudyKit = { uri -> viewModel.generateCompleteStudyKit(uri, userProfile?.subjects?.firstOrNull() ?: "General", context) }
                 )
+            } else if (showRevisionHubScreen) {
+                com.example.ui.screens.revision.RevisionHubScreen(
+                    mainViewModel = viewModel,
+                    onBack = { showRevisionHubScreen = false },
+                    onStartFocus = { sub, top, mins ->
+                        viewModel.startFocusSession(sub, top, mins)
+                        showRevisionHubScreen = false
+                        onSelectTab(AppNavTab.FOCUS)
+                    },
+                    onStartPractice = { mode, sub, top ->
+                        viewModel.launchPracticeSession(mode, sub, top, 10)
+                        showRevisionHubScreen = false
+                        onSelectTab(AppNavTab.PRACTICE)
+                    },
+                    onOpenResources = { _ ->
+                        showRevisionHubScreen = false
+                        onSelectTab(AppNavTab.STUDY)
+                    }
+                )
             } else {
                 Crossfade(
                     targetState = currentTab,
@@ -948,6 +986,8 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                         AppNavTab.STUDY -> StudyHubScreen(
                             user = userProfile,
                             examContext = activeExamContext ?: ExamContext(),
+                            mainViewModel = viewModel,
+                            onOpenRevisionHub = { showRevisionHubScreen = true },
                             subjectSummaries = subjectProgressSummaries,
                             allMasteries = allTopicMasteries,
                             bookmarks = allLearningBookmarks,
@@ -969,6 +1009,15 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             flashcardMessage = flashcardMessage,
                             allFocusSessions = allFocusSessions,
                             mistakes = mistakes,
+                            examPrepSummary = primaryExamSummary,
+                            allExamGoals = allExamGoals,
+                            dailyPlanPreview = dailyPlanPreview,
+                            onSelectExamGoal = { viewModel.selectExamGoal(it) },
+                            onCreateExamGoal = { name, org, date, target, prio -> viewModel.createOrUpdateExamGoal(name, org, date, target, prio) },
+                            onUpdateTopicStatus = { topicId, status -> viewModel.updateSyllabusTopicStatus(topicId, status) },
+                            onAddCustomTopic = { examId, sub, top -> viewModel.addCustomSyllabusTopic(examId, sub, top) },
+                            onGenerateDailyPlan = { examId -> viewModel.generateDailyPlanPreview(examId) },
+                            onConfirmDailyPlan = { preview -> viewModel.confirmDailyPlan(preview) },
                             onSelectTopicLearning = { sub, chap, top -> viewModel.loadLearningTopicContent(sub, chap, top) },
                             onGenerateAiPlan = { viewModel.generateAdaptiveDailyPlan() },
                             onTogglePlanItem = { id, done -> viewModel.togglePlanItem(id, done) },
@@ -1017,6 +1066,21 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onSavePreferences = { prefs -> viewModel.saveUserPreferences(prefs) },
                             onApplySubjectAllocations = { subMinutes, totalMins, startHr, breakMins ->
                                 viewModel.applySubjectTimeAllocations(subMinutes, totalMins, startHr, 0, breakMins)
+                            },
+                            // Step 58 Resource Engine Arguments
+                            resourcesList = searchResources,
+                            resourceQuery = resourceQuery,
+                            selectedResourceTypeFilter = selectedResourceTypeFilter,
+                            onSearchResourceQueryChange = { viewModel.setResourceSearchQuery(it) },
+                            onSelectResourceTypeFilter = { viewModel.setResourceTypeFilter(it) },
+                            onOpenResourceDetail = { viewModel.openResourceForViewer(it) },
+                            onToggleSaveResourceItem = { viewModel.toggleSaveResource(it) },
+                            onStartFocusFromResourceItem = { sub, top, resId ->
+                                viewModel.startFocusSession(sub, top, 25)
+                                onSelectTab(AppNavTab.FOCUS)
+                            },
+                            onUploadResourceItem = { title, desc, exam, sub, top, content ->
+                                viewModel.uploadCustomResource(title, desc, exam, sub, top, content)
                             }
                         )
 
@@ -1061,6 +1125,14 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             generationError = generationError,
                             insufficientPyqNotice = insufficientPyqNotice,
                             mistakeDiagnosis = mistakeDiagnosis,
+                            savedQuestionsList = savedQuestionsList,
+                            onOpenRevisionHub = { showRevisionHubScreen = true },
+                            onLaunchPracticeMode = { mode, sub, top, qCount ->
+                                viewModel.launchPracticeSession(mode, sub, top, qCount)
+                            },
+                            onSaveQuestion = { q -> viewModel.saveQuestion(q) },
+                            onUnsaveQuestion = { qId -> viewModel.unsaveQuestion(qId) },
+                            onReportQuestion = { qId, reason, notes -> viewModel.reportQuestion(qId, reason, notes) },
                             onStartTestWithConfig = { config -> viewModel.startMockTestWithConfig(config) },
                             onSelectAnswer = { qIdx, optIdx -> viewModel.selectTestAnswer(qIdx, optIdx) },
                             onClearAnswer = { qIdx -> viewModel.clearTestAnswer(qIdx) },
@@ -1297,6 +1369,22 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     },
                     containerColor = androidx.compose.ui.graphics.Color(0xFF0F172A),
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
+                )
+            }
+
+            // Step 58 Full Screen In-App PDF Viewer Overlay
+            if (activeResourceForViewer != null) {
+                com.example.ui.screens.resources.PdfViewerScreen(
+                    resource = activeResourceForViewer!!,
+                    onUpdatePageProgress = { resId, page, total -> viewModel.updateResourceReadingProgress(resId, page, total) },
+                    onBookmarkPage = { resId, page, snippet -> viewModel.addResourceBookmark(resId, page, snippet) },
+                    onAskDocumentQA = { resId, question, onResult -> viewModel.answerDocumentQA(resId, question, onResult) },
+                    onStartFocus = { sub, top, resId ->
+                        viewModel.closeResourceViewer()
+                        viewModel.startFocusSession(sub, top, 25)
+                        onSelectTab(AppNavTab.FOCUS)
+                    },
+                    onBack = { viewModel.closeResourceViewer() }
                 )
             }
 

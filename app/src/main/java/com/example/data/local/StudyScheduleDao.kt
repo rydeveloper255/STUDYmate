@@ -28,6 +28,9 @@ interface StudyScheduleDao {
     @Query("SELECT * FROM study_schedule_logs ORDER BY scheduledDateMillis DESC")
     suspend fun getAllScheduleLogs(): List<StudyScheduleLog>
 
+    @Query("SELECT * FROM study_schedule_logs WHERE scheduledDateMillis >= :startMillis AND scheduledDateMillis <= :endMillis")
+    suspend fun getScheduleLogsForDateRange(startMillis: Long, endMillis: Long): List<StudyScheduleLog>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateScheduleLog(log: StudyScheduleLog)
 

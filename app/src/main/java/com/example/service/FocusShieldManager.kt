@@ -1,6 +1,7 @@
 package com.example.service
 
 import android.app.AppOpsManager
+import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
@@ -9,9 +10,12 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
+import android.util.Log
 import com.example.data.model.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +36,7 @@ data class InstalledAppInfo(
 
 object FocusShieldManager {
 
+    private const val TAG = "FocusShield"
     private const val PREFS_NAME = "nova_focus_shield_prefs_v2"
     private const val KEY_SHIELD_ENABLED = "focus_shield_enabled"
     private const val KEY_RESTRICTED_PACKAGES = "restricted_packages"
@@ -119,7 +124,7 @@ object FocusShieldManager {
         "com.android.mms",
         "com.android.emergency",
 
-        // UPI & Digital Payment Apps
+        // UPI & Digital Payment Apps (Never intercepted / never blocked)
         "net.one97.paytm",
         "com.phonepe.app",
         "com.google.android.apps.nbu.paisa.user",
@@ -152,6 +157,9 @@ object FocusShieldManager {
 
     private val _isSessionActive = MutableStateFlow(false)
     val isSessionActive: StateFlow<Boolean> = _isSessionActive.asStateFlow()
+
+    private val _isStrictModeActive = MutableStateFlow(false)
+    val isStrictModeActive: StateFlow<Boolean> = _isStrictModeActive.asStateFlow()
 
     private val _currentSubject = MutableStateFlow("General Science")
     val currentSubject: StateFlow<String> = _currentSubject.asStateFlow()
@@ -254,14 +262,18 @@ object FocusShieldManager {
             )
         }
 
+        // Initialize Focus Protection Engine 2.0
+        com.example.service.focus.FocusProtectionEngine.init(context)
+
         AccessibilitySafetyManager.init(context)
         syncCurrentPolicy(context)
         updateProtectionHealth(context)
         updateProtectionStatus(context)
+        Log.d(TAG, "FocusShieldManager initialized: ${restrictedPackageSet.size} restricted packages configured (Focus Protection Engine 2.0 active)")
     }
 
     /**
-     * Checks if Usage Access permission is granted (Non-Accessibility standard mechanism)
+     * Checks if Usage Access permission is granted (Core non-accessibility standard mechanism)
      */
     fun isUsageAccessGranted(context: Context): Boolean {
         return try {
@@ -279,7 +291,30 @@ object FocusShieldManager {
     }
 
     /**
-     * Legacy check for accessibility service (Optional / Secondary).
+     * Checks if Display Over Other Apps (Overlay) permission is granted
+     */
+    fun canDrawOverlays(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Settings.canDrawOverlays(context)
+        } else {
+            true
+        }
+    }
+
+    /**
+     * Checks if battery optimizations are ignored for always-running background reliability
+     */
+    fun isIgnoringBatteryOptimizations(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            pm?.isIgnoringBatteryOptimizations(context.packageName) ?: false
+        } else {
+            true
+        }
+    }
+
+    /**
+     * Legacy optional accessibility check (Explicitly marked as NOT required)
      */
     fun isAccessibilityServiceEnabled(context: Context): Boolean {
         return try {
@@ -293,28 +328,110 @@ object FocusShieldManager {
         }
     }
 
+    fun isProtectionReady(context: Context): Boolean {
+        return isUsageAccessGranted(context)
+    }
+
+    fun openUsageAccessSettings(context: Context) {
+        try {
+            val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                data = Uri.parse("package:${context.packageName}")
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            val fallback = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            try {
+                context.startActivity(fallback)
+            } catch (e2: Exception) {
+                Log.e(TAG, "Cannot open usage settings: ${e2.message}")
+            }
+        }
+    }
+
+    fun openOverlaySettings(context: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:${context.packageName}")
+                ).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                val fallback = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                try {
+                    context.startActivity(fallback)
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Cannot open overlay settings: ${e2.message}")
+                }
+            }
+        }
+    }
+
+    fun openBatteryOptimizationSettings(context: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                try {
+                    val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(fallback)
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Cannot open battery settings: ${e2.message}")
+                }
+            }
+        }
+    }
+
     /**
-     * Evaluate diagnostic health of focus protection engine
+     * Evaluate diagnostic health of focus protection engine honestly (No fake green status)
      */
     fun updateProtectionHealth(context: Context): ProtectionHealth {
         val hasUsage = isUsageAccessGranted(context)
+        val hasOverlay = canDrawOverlays(context)
+        val hasBattery = isIgnoringBatteryOptimizations(context)
+
         val health = when {
             !isShieldFeatureEnabled -> ProtectionHealth(
                 isOperational = false,
                 message = "Focus Shield is paused in settings",
                 actionRequired = false
             )
-            hasUsage -> ProtectionHealth(
-                isOperational = true,
-                message = "Non-accessibility shield active (Zero payment interference)",
-                actionRequired = false,
-                permissionType = "NONE"
-            )
-            else -> ProtectionHealth(
+            !hasUsage -> ProtectionHealth(
                 isOperational = false,
-                message = "Usage Access needed to monitor distractions accurately",
+                message = "Usage Access is required to detect distracting apps without Accessibility",
                 actionRequired = true,
                 permissionType = "USAGE_STATS"
+            )
+            !hasOverlay -> ProtectionHealth(
+                isOperational = true,
+                message = "Display over other apps recommended for instant blocking overlay",
+                actionRequired = false,
+                permissionType = "OVERLAY"
+            )
+            !hasBattery -> ProtectionHealth(
+                isOperational = true,
+                message = "Background execution recommended to prevent OEM timer kills",
+                actionRequired = false,
+                permissionType = "BATTERY"
+            )
+            else -> ProtectionHealth(
+                isOperational = true,
+                message = "Accessibility-Free Shield Active (Zero UPI/Banking interference)",
+                actionRequired = false,
+                permissionType = "NONE"
             )
         }
         _protectionHealth.value = health
@@ -352,6 +469,10 @@ object FocusShieldManager {
     }
 
     fun selectAllApps(context: Context, packageNames: List<String>) {
+        if (_isSessionActive.value && _isStrictModeActive.value) {
+            Log.w(TAG, "Cannot modify block list: Strict Mode is currently active!")
+            return
+        }
         packageNames.forEach { pkg ->
             if (!isEssentialApp(pkg)) {
                 restrictedPackageSet.add(pkg)
@@ -364,6 +485,10 @@ object FocusShieldManager {
     }
 
     fun deselectAllApps(context: Context, packageNames: List<String>) {
+        if (_isSessionActive.value && _isStrictModeActive.value) {
+            Log.w(TAG, "Cannot modify block list: Strict Mode is currently active!")
+            return
+        }
         packageNames.forEach { pkg ->
             restrictedPackageSet.remove(pkg)
         }
@@ -373,6 +498,10 @@ object FocusShieldManager {
     }
 
     fun toggleWebsiteCategory(context: Context, categoryId: String, isEnabled: Boolean) {
+        if (_isSessionActive.value && _isStrictModeActive.value) {
+            Log.w(TAG, "Cannot modify website rules: Strict Mode is currently active!")
+            return
+        }
         val cat = PREDEFINED_WEBSITE_CATEGORIES.find { it.id == categoryId } ?: return
         cat.domains.forEach { domain ->
             if (isEnabled) {
@@ -393,6 +522,10 @@ object FocusShieldManager {
     fun setStudyModeContentFilter(context: Context, enabled: Boolean) = setStudyOnlyMode(context, enabled)
 
     fun applyPreset(context: Context, preset: FocusPreset) {
+        if (_isSessionActive.value && _isStrictModeActive.value) {
+            Log.w(TAG, "Cannot apply preset: Strict Mode is currently active!")
+            return
+        }
         _activePreset.value = preset
         when (preset) {
             FocusPreset.DEEP_STUDY -> {
@@ -440,6 +573,10 @@ object FocusShieldManager {
     }
 
     fun setAppRestricted(context: Context, packageName: String, restricted: Boolean) {
+        if (_isSessionActive.value && _isStrictModeActive.value) {
+            Log.w(TAG, "Cannot modify restricted app $packageName: Strict Mode active!")
+            return
+        }
         if (restricted) {
             restrictedPackageSet.add(packageName)
             allowedPackageSet.remove(packageName)
@@ -452,6 +589,10 @@ object FocusShieldManager {
     }
 
     fun setAppAllowed(context: Context, packageName: String, allowed: Boolean) {
+        if (_isSessionActive.value && _isStrictModeActive.value) {
+            Log.w(TAG, "Cannot modify allowed app $packageName: Strict Mode active!")
+            return
+        }
         if (allowed) {
             allowedPackageSet.add(packageName)
             restrictedPackageSet.remove(packageName)
@@ -464,6 +605,7 @@ object FocusShieldManager {
     }
 
     fun addBlockedWebsite(context: Context, domain: String, category: String = "Custom") {
+        if (_isSessionActive.value && _isStrictModeActive.value) return
         val cleanDomain = domain.trim().lowercase().removePrefix("https://").removePrefix("http://").removePrefix("www.").substringBefore('/')
         if (cleanDomain.isBlank()) return
         if (blockedWebsitesList.none { it.domain.equals(cleanDomain, ignoreCase = true) }) {
@@ -475,6 +617,7 @@ object FocusShieldManager {
     }
 
     fun removeBlockedWebsite(context: Context, domain: String) {
+        if (_isSessionActive.value && _isStrictModeActive.value) return
         blockedWebsitesList.removeAll { it.domain.equals(domain, ignoreCase = true) }
         _activePreset.value = FocusPreset.CUSTOM
         savePrefs(context)
@@ -482,6 +625,7 @@ object FocusShieldManager {
     }
 
     fun toggleBlockedWebsite(context: Context, domain: String, isEnabled: Boolean) {
+        if (_isSessionActive.value && _isStrictModeActive.value) return
         val idx = blockedWebsitesList.indexOfFirst { it.domain.equals(domain, ignoreCase = true) }
         if (idx >= 0) {
             val item = blockedWebsitesList[idx]
@@ -493,6 +637,7 @@ object FocusShieldManager {
     }
 
     fun setYouTubeShortsBlocked(context: Context, blocked: Boolean) {
+        if (_isSessionActive.value && _isStrictModeActive.value) return
         blockShortsEnabled = blocked
         _activePreset.value = FocusPreset.CUSTOM
         savePrefs(context)
@@ -500,6 +645,7 @@ object FocusShieldManager {
     }
 
     fun setInstagramReelsBlocked(context: Context, blocked: Boolean) {
+        if (_isSessionActive.value && _isStrictModeActive.value) return
         blockReelsEnabled = blocked
         _activePreset.value = FocusPreset.CUSTOM
         savePrefs(context)
@@ -507,6 +653,7 @@ object FocusShieldManager {
     }
 
     fun setStudyOnlyMode(context: Context, enabled: Boolean) {
+        if (_isSessionActive.value && _isStrictModeActive.value) return
         studyOnlyModeEnabled = enabled
         _activePreset.value = FocusPreset.CUSTOM
         savePrefs(context)
@@ -514,6 +661,7 @@ object FocusShieldManager {
     }
 
     fun addCustomException(context: Context, packageName: String) {
+        if (_isSessionActive.value && _isStrictModeActive.value) return
         customExceptionsSet.add(packageName)
         restrictedPackageSet.remove(packageName)
         savePrefs(context)
@@ -521,12 +669,17 @@ object FocusShieldManager {
     }
 
     fun removeCustomException(context: Context, packageName: String) {
+        if (_isSessionActive.value && _isStrictModeActive.value) return
         customExceptionsSet.remove(packageName)
         savePrefs(context)
         syncCurrentPolicy(context)
     }
 
     fun setShieldFeatureEnabled(context: Context, enabled: Boolean) {
+        if (_isSessionActive.value && _isStrictModeActive.value) {
+            Log.w(TAG, "Cannot disable shield during active Strict Mode session!")
+            return
+        }
         isShieldFeatureEnabled = enabled
         savePrefs(context)
         syncCurrentPolicy(context)
@@ -603,75 +756,159 @@ object FocusShieldManager {
         return list
     }
 
-    fun startFocusSession(context: Context, subject: String, topic: String, durationMinutes: Int) {
+    fun startFocusSession(
+        context: Context,
+        subject: String,
+        topic: String,
+        durationMinutes: Int,
+        isStrictMode: Boolean = false
+    ) {
         _currentSubject.value = subject
         _currentTopic.value = topic
         _initialMinutes.value = durationMinutes
         _remainingSeconds.value = durationMinutes * 60
+        _isStrictModeActive.value = isStrictMode
         _isSessionActive.value = true
+        lastTriggeredPackage = ""
+        lastTriggerTime = 0L
 
+        Log.d(TAG, "Focus started: '$subject - $topic' ($durationMinutes mins, strict=$isStrictMode)")
+        com.example.service.focus.FocusProtectionEngine.startFocusSession(
+            context = context,
+            subject = subject,
+            topic = topic,
+            durationMinutes = durationMinutes,
+            isStrictMode = isStrictMode
+        )
         startForegroundWatcher(context.applicationContext)
     }
 
     fun updateRemainingTime(seconds: Int) {
         _remainingSeconds.value = seconds
+        com.example.service.focus.FocusProtectionEngine.updateRemainingSeconds(seconds)
     }
 
-    fun endFocusSession() {
+    fun endFocusSession(context: Context? = null) {
+        Log.d(TAG, "Focus ended. Terminating foreground monitoring & clearing blocking state.")
         _isSessionActive.value = false
+        _isStrictModeActive.value = false
+        lastTriggeredPackage = ""
         monitoringJob?.cancel()
         monitoringJob = null
+        if (context != null) {
+            com.example.service.focus.FocusProtectionEngine.endFocusSession(context)
+        }
     }
 
     /**
-     * Trigger the full screen distraction interruption screen safely
+     * Efficient, real-time foreground package detection using UsageEvents with fallback to queryUsageStats
+     */
+    fun getForegroundPackage(context: Context): String? {
+        if (!isUsageAccessGranted(context)) return null
+        val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return null
+
+        try {
+            val endTime = System.currentTimeMillis()
+            val beginTime = endTime - 10_000 // Last 10 seconds
+
+            // 1. High precision event stream query
+            val events = usageStatsManager.queryEvents(beginTime, endTime)
+            val event = UsageEvents.Event()
+            var latestPkg: String? = null
+            var latestTs = 0L
+
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                val type = event.eventType
+                val isForegroundEvent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    type == UsageEvents.Event.ACTIVITY_RESUMED || type == UsageEvents.Event.MOVE_TO_FOREGROUND
+                } else {
+                    @Suppress("DEPRECATION")
+                    type == UsageEvents.Event.MOVE_TO_FOREGROUND
+                }
+
+                if (isForegroundEvent && event.timeStamp >= latestTs) {
+                    latestTs = event.timeStamp
+                    latestPkg = event.packageName
+                }
+            }
+
+            if (!latestPkg.isNullOrBlank()) {
+                return latestPkg
+            }
+
+            // 2. Fallback: Aggregate usage stats
+            val stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, beginTime, endTime)
+            if (!stats.isNullOrEmpty()) {
+                val top = stats.maxByOrNull { it.lastTimeUsed }
+                return top?.packageName
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Foreground package query failed: ${e.message}")
+        }
+        return null
+    }
+
+    /**
+     * Trigger the full screen distraction interruption screen safely with loop prevention
      */
     fun triggerInterruption(context: Context, blockedPkg: String) {
         if (!_isSessionActive.value || !isShieldFeatureEnabled) return
         if (isEssentialApp(blockedPkg)) return
         if (AccessibilitySafetyManager.shouldSuppressInterruption(blockedPkg)) return
+        if (blockedPkg == context.packageName) return // Never block StudyMate itself
 
         val now = System.currentTimeMillis()
-        if (blockedPkg == lastTriggeredPackage && (now - lastTriggerTime) < 1800L) {
-            return
+        if (blockedPkg == lastTriggeredPackage && (now - lastTriggerTime) < 1500L) {
+            return // Prevent duplicate trigger loops
         }
         lastTriggeredPackage = blockedPkg
         lastTriggerTime = now
 
+        Log.d(TAG, "Blocked package detected in foreground: $blockedPkg -> Showing StudyMate blocking screen")
+
         val intent = Intent(context, FocusShieldBlockActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             putExtra("BLOCKED_PACKAGE", blockedPkg)
+            putExtra("IS_STRICT_MODE", _isStrictModeActive.value)
         }
-        context.startActivity(intent)
+        try {
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to launch block screen: ${e.message}", e)
+        }
     }
 
     /**
-     * Non-Accessibility foreground watcher using UsageStatsManager
+     * Adaptive, battery-efficient foreground watcher using UsageStatsManager (Accessibility-Free)
      */
     private fun startForegroundWatcher(appContext: Context) {
         monitoringJob?.cancel()
         monitoringJob = CoroutineScope(Dispatchers.Default).launch {
-            val usageStatsManager = appContext.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+            val powerManager = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            Log.d(TAG, "Monitoring active: Scanning foreground app transitions without Accessibility...")
+
             while (_isSessionActive.value && isActive) {
-                delay(1200)
+                val isScreenInteractive = powerManager?.isInteractive ?: true
+                // Check every 600ms when screen is on; relax to 3000ms when screen is off to save battery
+                val delayMs = if (isScreenInteractive) 600L else 3000L
+                delay(delayMs)
+
                 if (!_isSessionActive.value) break
 
-                if (isUsageAccessGranted(appContext) && usageStatsManager != null) {
-                    try {
-                        val endTime = System.currentTimeMillis()
-                        val beginTime = endTime - 1000 * 5
-                        val stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, beginTime, endTime)
-                        if (!stats.isNullOrEmpty()) {
-                            val top = stats.maxByOrNull { it.lastTimeUsed }
-                            val pkg = top?.packageName
-                            if (pkg != null && pkg != appContext.packageName && isAppRestricted(pkg)) {
-                                withContext(Dispatchers.Main) {
-                                    triggerInterruption(appContext, pkg)
-                                }
+                if (isScreenInteractive && isUsageAccessGranted(appContext)) {
+                    val currentForegroundPkg = getForegroundPackage(appContext)
+                    if (currentForegroundPkg != null && currentForegroundPkg != appContext.packageName) {
+                        if (isAppRestricted(currentForegroundPkg)) {
+                            withContext(Dispatchers.Main) {
+                                triggerInterruption(appContext, currentForegroundPkg)
+                            }
+                        } else {
+                            // User is in an allowed app; reset throttle so switching back to blocked app is caught
+                            if (currentForegroundPkg != lastTriggeredPackage) {
+                                lastTriggeredPackage = ""
                             }
                         }
-                    } catch (e: Exception) {
-                        // Handled
                     }
                 }
             }

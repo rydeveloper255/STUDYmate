@@ -150,6 +150,7 @@ class MainViewModel(
     )
 
     private val sessionPersistence = com.example.service.intelligence.TestSessionPersistence(getApplication())
+    private val focusSessionPersistence = com.example.service.FocusSessionPersistence.getInstance(getApplication())
 
     val activeExamContext: StateFlow<ExamContext> = examContextRepository.activeExamContext
     val examDiscoveryState: StateFlow<ExamDiscoveryState> = examContextRepository.discoveryState
@@ -243,6 +244,15 @@ class MainViewModel(
         .map { it ?: UserStudyPreferences() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UserStudyPreferences())
 
+    val allPracticeSessions: StateFlow<List<PracticeSessionEntity>> = studyRepository.allPracticeSessions
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allQuestionAttempts: StateFlow<List<QuestionAttemptEntity>> = studyRepository.allQuestionAttempts
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val savedQuestionsList: StateFlow<List<SavedQuestionEntity>> = studyRepository.allSavedQuestions
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     private val _isPlanGenerating = MutableStateFlow(false)
     val isPlanGenerating: StateFlow<Boolean> = _isPlanGenerating.asStateFlow()
 
@@ -311,6 +321,7 @@ class MainViewModel(
 
     init {
         checkAndRestoreActiveSession()
+        checkAndRestoreActiveFocusSession()
         seedDefaultSchedulesIfEmpty()
         startScheduleTickerLoop()
         refreshNovaSmartPlannerData()
@@ -391,14 +402,18 @@ class MainViewModel(
         items.filter { !it.isPaused }.forEach { item ->
             val dayMatches = item.dayOfWeek.equals(currentDay, ignoreCase = true) || item.repeatDaysJson.contains(currentDay, ignoreCase = true) || item.repeatType == "DAILY"
             if (dayMatches && item.startTime.equals(currentTimeStr, ignoreCase = true)) {
-                if (item.isAutoFocus && !_focusState.value.isRunning) {
-                    startFocusSession(
-                        subject = item.subject,
-                        topic = item.topic.ifBlank { "Scheduled Session" },
-                        durationMinutes = item.durationMinutes,
-                        isStrictMode = item.isStrictMode,
-                        isAutoStarted = true
-                    )
+                val occurrenceId = focusSessionPersistence.buildOccurrenceId(item.id, item.startTime)
+                if (!focusSessionPersistence.hasOccurrenceExecuted(occurrenceId)) {
+                    if (item.isAutoFocus && !_focusState.value.isRunning) {
+                        startFocusSession(
+                            subject = item.subject,
+                            topic = item.topic.ifBlank { "Scheduled Session" },
+                            durationMinutes = item.durationMinutes,
+                            isStrictMode = item.isStrictMode,
+                            isAutoStarted = true,
+                            occurrenceId = occurrenceId
+                        )
+                    }
                 }
             }
         }
@@ -572,6 +587,18 @@ class MainViewModel(
     val flashcards: StateFlow<List<FlashcardItem>> = studyRepository.allFlashcards
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val allRevisionItems: StateFlow<List<RevisionItemEntity>> = studyRepository.allRevisionItems
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val dueRevisionItems: StateFlow<List<RevisionItemEntity>> = studyRepository.dueRevisionItems
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allRevisionSessions: StateFlow<List<RevisionSessionEntity>> = studyRepository.allRevisionSessions
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val revisionRetentionStats: StateFlow<RevisionRetentionStats> = studyRepository.revisionRetentionStats
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), RevisionRetentionStats())
+
     val userQuestionMaterials: StateFlow<List<UserQuestionMaterial>> = studyRepository.allUserQuestionMaterials
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -667,6 +694,227 @@ class MainViewModel(
     val snackbarMessage: SharedFlow<String> = _snackbarMessage.asSharedFlow()
 
     // --- Master Intelligence Engine State ---
+    val analyticsEngine = studyRepository.analyticsEngine
+
+    val analyticsDateFilter = MutableStateFlow(com.example.data.model.AnalyticsDateFilter.THIS_WEEK)
+    val selectedAnalyticsSubjectFilter = MutableStateFlow("All")
+
+    val dailyAnalytics: StateFlow<com.example.data.model.DailyAnalytics> = combine(
+        analyticsEngine.analyticsUpdateTrigger,
+        studyRepository.allFocusSessions,
+        analyticsDateFilter
+    ) { _, _, _ ->
+        analyticsEngine.getDailyAnalytics()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.example.data.model.DailyAnalytics(dateFormatted = "Today"))
+
+    val weeklyAnalytics: StateFlow<com.example.data.model.WeeklyAnalytics> = combine(
+        analyticsEngine.analyticsUpdateTrigger,
+        studyRepository.allFocusSessions,
+        analyticsDateFilter
+    ) { _, _, _ ->
+        analyticsEngine.getWeeklyAnalytics()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.example.data.model.WeeklyAnalytics(startDateFormatted = "", endDateFormatted = ""))
+
+    val monthlyAnalytics: StateFlow<com.example.data.model.MonthlyAnalytics> = combine(
+        analyticsEngine.analyticsUpdateTrigger,
+        studyRepository.allFocusSessions,
+        analyticsDateFilter
+    ) { _, _, _ ->
+        analyticsEngine.getMonthlyAnalytics()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.example.data.model.MonthlyAnalytics(monthYearFormatted = ""))
+
+    val streakInfo: StateFlow<com.example.data.model.StreakInfo> = combine(
+        analyticsEngine.analyticsUpdateTrigger,
+        studyRepository.allFocusSessions
+    ) { _, _ ->
+        analyticsEngine.getStreakInfo()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.example.data.model.StreakInfo())
+
+    val subjectAnalyticsList: StateFlow<List<com.example.data.model.SubjectAnalytics>> = combine(
+        analyticsEngine.analyticsUpdateTrigger,
+        studyRepository.allFocusSessions,
+        selectedAnalyticsSubjectFilter
+    ) { _, _, subjectFilter ->
+        val list = analyticsEngine.getSubjectAnalytics()
+        if (subjectFilter == "All") list else list.filter { it.subject.equals(subjectFilter, ignoreCase = true) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val timeOfDayDistribution: StateFlow<com.example.data.model.TimeOfDayDistribution> = combine(
+        analyticsEngine.analyticsUpdateTrigger,
+        studyRepository.allFocusSessions
+    ) { _, _ ->
+        analyticsEngine.getTimeOfDayDistribution()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.example.data.model.TimeOfDayDistribution())
+
+    val smartInsightsList: StateFlow<List<com.example.data.model.SmartInsight>> = combine(
+        analyticsEngine.analyticsUpdateTrigger,
+        studyRepository.allFocusSessions
+    ) { _, _ ->
+        analyticsEngine.getSmartInsights()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // --- Step 57 Exam Preparation & Planner StateFlows ---
+    val examPrepService = studyRepository.examPreparationService
+
+    val selectedExamIdFilter = MutableStateFlow<String?>(null)
+
+    val allExamGoals: StateFlow<List<com.example.data.model.ExamGoalEntity>> = combine(
+        examPrepService.updateTrigger,
+        studyRepository.allFocusSessions
+    ) { _, _ ->
+        examPrepService.getAllExamGoals()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val primaryExamSummary: StateFlow<com.example.data.model.ExamPreparationSummary?> = combine(
+        examPrepService.updateTrigger,
+        selectedExamIdFilter,
+        allExamGoals
+    ) { _, selectedId, goals ->
+        val targetId = selectedId ?: goals.firstOrNull()?.examId
+        if (targetId != null) examPrepService.getExamPreparationSummary(targetId) else null
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val dailyPlanPreviewState = MutableStateFlow<com.example.data.model.DailyStudyPlanPreview?>(null)
+    val dailyPlanPreview: StateFlow<com.example.data.model.DailyStudyPlanPreview?> = dailyPlanPreviewState.asStateFlow()
+
+    fun selectExamGoal(examId: String) {
+        selectedExamIdFilter.value = examId
+    }
+
+    fun createOrUpdateExamGoal(
+        name: String,
+        organization: String,
+        dateMillis: Long?,
+        target: String,
+        priority: String
+    ) {
+        viewModelScope.launch {
+            val created = examPrepService.createOrUpdateExamGoal(
+                examName = name,
+                organization = organization,
+                examDateMillis = dateMillis,
+                isExamDateKnown = dateMillis != null,
+                target = target,
+                priority = priority
+            )
+            selectedExamIdFilter.value = created.examId
+        }
+    }
+
+    fun updateSyllabusTopicStatus(topicId: String, status: String) {
+        viewModelScope.launch {
+            examPrepService.updateTopicStatus(topicId, status)
+        }
+    }
+
+    fun addCustomSyllabusTopic(examId: String, subject: String, topic: String) {
+        viewModelScope.launch {
+            examPrepService.addCustomTopic(examId, subject, topic)
+        }
+    }
+
+    fun generateDailyPlanPreview(examId: String) {
+        viewModelScope.launch {
+            val preview = examPrepService.generateDailyStudyPlanPreview(examId)
+            dailyPlanPreviewState.value = preview
+        }
+    }
+
+    fun confirmDailyPlan(preview: com.example.data.model.DailyStudyPlanPreview) {
+        viewModelScope.launch {
+            val success = examPrepService.confirmAndScheduleDailyPlan(preview)
+            if (success) {
+                _snackbarMessage.emit("Study Plan confirmed and saved to schedule!")
+                dailyPlanPreviewState.value = null
+            }
+        }
+    }
+
+    // Step 58 Smart Learning Resources & AI Study Material Engine 2.0
+    val resourceEngineService = studyRepository.resourceEngineService
+    val resourceQueryState = MutableStateFlow("")
+    val selectedResourceTypeFilter = MutableStateFlow(com.example.data.model.ResourceType.ALL.name)
+    val resourceUpdateTrigger = MutableStateFlow(System.currentTimeMillis())
+
+    val activeResourceForViewer = MutableStateFlow<com.example.data.model.StudyResourceEntity?>(null)
+
+    val searchResourcesState: StateFlow<List<com.example.data.model.ResourceSearchResult>> = combine(
+        resourceQueryState,
+        selectedResourceTypeFilter,
+        resourceUpdateTrigger
+    ) { query, typeFilter, _ ->
+        val activeContext = activeExamContext.value
+        resourceEngineService.searchAndRankResources(
+            query = query,
+            selectedType = typeFilter,
+            examId = activeContext.examId,
+            subjectName = activeContext.subjects.firstOrNull()?.name ?: "",
+            topicName = activeContext.topics.firstOrNull()?.name ?: ""
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun setResourceSearchQuery(q: String) {
+        resourceQueryState.value = q
+    }
+
+    fun setResourceTypeFilter(type: String) {
+        selectedResourceTypeFilter.value = type
+    }
+
+    fun openResourceForViewer(resource: com.example.data.model.StudyResourceEntity) {
+        activeResourceForViewer.value = resource
+        viewModelScope.launch {
+            studyRepository.analyticsEngine.logEvent(
+                eventType = com.example.data.model.StudyEventType.FOCUS_STARTED,
+                subject = resource.subjectName,
+                topic = resource.topicName,
+                metadataJson = "{\"resourceId\":\"${resource.resourceId}\"}"
+            )
+        }
+    }
+
+    fun closeResourceViewer() {
+        activeResourceForViewer.value = null
+    }
+
+    fun toggleSaveResource(resourceId: String) {
+        viewModelScope.launch {
+            val saved = resourceEngineService.toggleSaveState(resourceId)
+            resourceUpdateTrigger.value = System.currentTimeMillis()
+            _snackbarMessage.emit(if (saved) "Resource saved to My Resources!" else "Resource removed from saved list.")
+        }
+    }
+
+    fun updateResourceReadingProgress(resourceId: String, page: Int, totalPages: Int) {
+        viewModelScope.launch {
+            resourceEngineService.updateReadingProgress(resourceId, page, totalPages)
+            resourceUpdateTrigger.value = System.currentTimeMillis()
+        }
+    }
+
+    fun addResourceBookmark(resourceId: String, page: Int, snippet: String) {
+        viewModelScope.launch {
+            resourceEngineService.addBookmark(resourceId, page, snippet)
+            _snackbarMessage.emit("Bookmark saved for Page $page!")
+        }
+    }
+
+    fun uploadCustomResource(title: String, desc: String, exam: String, subject: String, topic: String, content: String) {
+        viewModelScope.launch {
+            val user = userProfile.value?.id ?: "current_user"
+            resourceEngineService.saveUserUploadedResource(getApplication(), user, title, desc, exam, subject, topic, content)
+            resourceUpdateTrigger.value = System.currentTimeMillis()
+            _snackbarMessage.emit("Custom study material uploaded successfully!")
+        }
+    }
+
+    fun answerDocumentQA(resourceId: String, userQuestion: String, onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val result = resourceEngineService.answerDocumentQuestion(resourceId, userQuestion)
+            onResult(result.answerText)
+        }
+    }
+
     val allFocusSessions: StateFlow<List<FocusSession>> = studyRepository.allFocusSessions
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -1728,6 +1976,68 @@ class MainViewModel(
         _focusState.value = _focusState.value.copy(isStrictModeEnabled = enabled)
     }
 
+    fun checkAndRestoreActiveFocusSession() {
+        viewModelScope.launch {
+            val session = focusSessionPersistence.loadActiveSession()
+            if (session != null && (session.state == com.example.service.FocusSessionExecutionState.FOCUS_ACTIVE || session.state == com.example.service.FocusSessionExecutionState.PAUSED)) {
+                val remSecs = session.calculateRemainingSeconds()
+                val actMins = session.calculateActualMinutesSpent()
+                if (remSecs > 0) {
+                    _focusState.value = _focusState.value.copy(
+                        isRunning = true,
+                        isPaused = session.isPaused,
+                        initialMinutes = session.plannedDurationMinutes,
+                        remainingSeconds = remSecs,
+                        actualMinutesSpent = actMins,
+                        subject = session.subject,
+                        topic = session.topic,
+                        examName = session.examName,
+                        sessionGoal = session.sessionGoal,
+                        planItemId = session.planItemId,
+                        sessionStartTimestamp = session.startedAtTimestamp,
+                        pausedAccumulatedSeconds = session.pausedAccumulatedSeconds,
+                        pauseStartTimestamp = session.pauseStartTimestamp,
+                        isStrictModeActive = session.isStrictMode,
+                        isAutoStarted = session.isAutoStarted,
+                        isInterrupted = (session.state == com.example.service.FocusSessionExecutionState.INTERRUPTED)
+                    )
+                    com.example.service.FocusShieldManager.startFocusSession(
+                        getApplication(),
+                        session.subject,
+                        session.topic,
+                        session.plannedDurationMinutes
+                    )
+                    com.example.service.FocusShieldForegroundService.startService(
+                        context = getApplication(),
+                        subject = session.subject,
+                        topic = session.topic,
+                        durationMinutes = session.plannedDurationMinutes,
+                        examName = session.examName,
+                        sessionGoal = session.sessionGoal,
+                        planItemId = session.planItemId,
+                        isStrictMode = session.isStrictMode,
+                        isAutoStarted = session.isAutoStarted,
+                        occurrenceId = session.occurrenceId
+                    )
+                    startAccurateFocusTimerLoop()
+                } else {
+                    _focusState.value = _focusState.value.copy(
+                        isRunning = true,
+                        initialMinutes = session.plannedDurationMinutes,
+                        remainingSeconds = 0,
+                        actualMinutesSpent = session.plannedDurationMinutes,
+                        subject = session.subject,
+                        topic = session.topic,
+                        examName = session.examName,
+                        sessionGoal = session.sessionGoal,
+                        planItemId = session.planItemId
+                    )
+                    endFocusSession(isAutoFinished = true)
+                }
+            }
+        }
+    }
+
     fun startFocusSession(
         subject: String,
         topic: String,
@@ -1736,7 +2046,8 @@ class MainViewModel(
         sessionGoal: String = "",
         planItemId: Long? = null,
         isStrictMode: Boolean = _focusState.value.isStrictModeEnabled,
-        isAutoStarted: Boolean = false
+        isAutoStarted: Boolean = false,
+        occurrenceId: String? = null
     ) {
         timerJob?.cancel()
         val appContext = getApplication<Application>()
@@ -1766,14 +2077,18 @@ class MainViewModel(
             isInterrupted = false
         )
 
-        com.example.service.FocusShieldManager.startFocusSession(appContext, subject, topic, durationMinutes)
-        val userName = userProfile.value?.name ?: "Rahul"
-        com.example.notification.StudyNotificationManager.sendFocusSessionStarted(
+        // Start Foreground Service with accurate ongoing notification
+        com.example.service.FocusShieldForegroundService.startService(
             context = appContext,
-            userName = userName,
             subject = subject,
             topic = topic,
-            durationMinutes = durationMinutes
+            durationMinutes = durationMinutes,
+            examName = currentExam,
+            sessionGoal = sessionGoal.ifBlank { "Complete $topic — Key Concepts" },
+            planItemId = planItemId,
+            isStrictMode = isStrictMode,
+            isAutoStarted = isAutoStarted,
+            occurrenceId = occurrenceId
         )
 
         startAccurateFocusTimerLoop()
@@ -1784,27 +2099,44 @@ class MainViewModel(
         timerJob = viewModelScope.launch {
             while (_focusState.value.isRunning) {
                 delay(1000L)
-                val state = _focusState.value
-                if (state.isRunning && !state.isPaused) {
-                    val now = System.currentTimeMillis()
-                    val totalPaused = state.pausedAccumulatedSeconds + (if (state.isPaused && state.pauseStartTimestamp > 0L) (now - state.pauseStartTimestamp) / 1000L else 0L)
-                    val elapsedSecs = if (state.sessionStartTimestamp > 0L) {
-                        ((now - state.sessionStartTimestamp) / 1000L - totalPaused).coerceAtLeast(0L).toInt()
-                    } else {
-                        (state.initialMinutes * 60) - state.remainingSeconds
-                    }
-                    val remSecs = (state.initialMinutes * 60 - elapsedSecs).coerceAtLeast(0)
-                    val actMins = (elapsedSecs / 60).coerceAtLeast(0)
-
-                    _focusState.value = state.copy(
+                val session = focusSessionPersistence.loadActiveSession()
+                if (session != null) {
+                    val remSecs = session.calculateRemainingSeconds()
+                    val actMins = session.calculateActualMinutesSpent()
+                    _focusState.value = _focusState.value.copy(
                         remainingSeconds = remSecs,
-                        actualMinutesSpent = actMins
+                        actualMinutesSpent = actMins,
+                        isPaused = session.isPaused
                     )
                     com.example.service.FocusShieldManager.updateRemainingTime(remSecs)
 
                     if (remSecs == 0) {
                         endFocusSession(isAutoFinished = true)
                         break
+                    }
+                } else {
+                    val state = _focusState.value
+                    if (state.isRunning && !state.isPaused) {
+                        val now = System.currentTimeMillis()
+                        val totalPaused = state.pausedAccumulatedSeconds + (if (state.isPaused && state.pauseStartTimestamp > 0L) (now - state.pauseStartTimestamp) / 1000L else 0L)
+                        val elapsedSecs = if (state.sessionStartTimestamp > 0L) {
+                            ((now - state.sessionStartTimestamp) / 1000L - totalPaused).coerceAtLeast(0L).toInt()
+                        } else {
+                            (state.initialMinutes * 60) - state.remainingSeconds
+                        }
+                        val remSecs = (state.initialMinutes * 60 - elapsedSecs).coerceAtLeast(0)
+                        val actMins = (elapsedSecs / 60).coerceAtLeast(0)
+
+                        _focusState.value = state.copy(
+                            remainingSeconds = remSecs,
+                            actualMinutesSpent = actMins
+                        )
+                        com.example.service.FocusShieldManager.updateRemainingTime(remSecs)
+
+                        if (remSecs == 0) {
+                            endFocusSession(isAutoFinished = true)
+                            break
+                        }
                     }
                 }
             }
@@ -1815,11 +2147,14 @@ class MainViewModel(
         val state = _focusState.value
         if (!state.isRunning) return
         val willPause = !state.isPaused
+        val appContext = getApplication<Application>()
         if (willPause) {
             _focusState.value = state.copy(
                 isPaused = true,
                 pauseStartTimestamp = System.currentTimeMillis()
             )
+            focusSessionPersistence.updatePauseState(true)
+            com.example.service.FocusShieldForegroundService.pauseFocus(appContext)
         } else {
             val pausedDuration = if (state.pauseStartTimestamp > 0L) {
                 (System.currentTimeMillis() - state.pauseStartTimestamp) / 1000L
@@ -1829,13 +2164,18 @@ class MainViewModel(
                 pausedAccumulatedSeconds = state.pausedAccumulatedSeconds + pausedDuration,
                 pauseStartTimestamp = 0L
             )
+            focusSessionPersistence.updatePauseState(false)
+            com.example.service.FocusShieldForegroundService.resumeFocus(appContext)
         }
     }
 
     fun endFocusSession(isAutoFinished: Boolean = false) {
         timerJob?.cancel()
         val appContext = getApplication<Application>()
+        com.example.service.FocusShieldForegroundService.stopFocus(appContext)
         com.example.service.FocusShieldManager.endFocusSession()
+        focusSessionPersistence.clearActiveSession()
+
         val state = _focusState.value
         val initialMins = state.initialMinutes
 
@@ -1909,7 +2249,10 @@ class MainViewModel(
     fun emergencyExitFocusSession() {
         timerJob?.cancel()
         val appContext = getApplication<Application>()
+        com.example.service.FocusShieldForegroundService.stopFocus(appContext)
         com.example.service.FocusShieldManager.endFocusSession()
+        focusSessionPersistence.clearActiveSession()
+
         val state = _focusState.value
         val initialMins = state.initialMinutes
 
@@ -2000,6 +2343,137 @@ class MainViewModel(
     private var pendingTestConfig: MockTestConfig? = null
 
     // --- Mock Test & Practice Actions ---
+
+    fun launchPracticeSession(
+        mode: com.example.service.intelligence.PracticeMode,
+        subject: String = "",
+        topic: String = "",
+        questionCount: Int = 10,
+        onSessionCreated: (com.example.service.intelligence.PracticeCurationResult) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            _isTestGenerating.value = true
+            try {
+                val exam = selectedExam.value.examName
+                val res = studyRepository.practiceEngineService.createPracticeSession(
+                    mode = mode,
+                    examName = exam,
+                    subject = subject,
+                    topic = topic,
+                    desiredQuestionCount = questionCount
+                )
+
+                val mockType = when(mode) {
+                    com.example.service.intelligence.PracticeMode.QUICK_PRACTICE -> MockTestType.SMART_PRACTICE
+                    com.example.service.intelligence.PracticeMode.TOPIC_PRACTICE -> MockTestType.TOPIC_TEST
+                    com.example.service.intelligence.PracticeMode.SUBJECT_PRACTICE -> MockTestType.SUBJECT_TEST
+                    com.example.service.intelligence.PracticeMode.REVISION_PRACTICE -> MockTestType.REVISION_TEST
+                    com.example.service.intelligence.PracticeMode.MOCK_TEST -> MockTestType.MOCK_TEST
+                    com.example.service.intelligence.PracticeMode.WEAK_AREA_PRACTICE -> MockTestType.WEAK_AREAS
+                    com.example.service.intelligence.PracticeMode.SAVED_QUESTIONS -> MockTestType.SMART_PRACTICE
+                }
+
+                 val config = MockTestConfig(
+                    exam = exam,
+                    subject = subject.ifBlank { "All Subjects" },
+                    chapter = topic.ifBlank { "All Topics" },
+                    questionCount = res.questions.size,
+                    timeLimitMinutes = (res.questions.size * 1.2).toInt().coerceAtLeast(5),
+                    testType = mockType
+                )
+
+                _activeTestState.value = ActiveTestState(
+                    config = config,
+                    questions = res.questions,
+                    remainingSeconds = config.timeLimitMinutes * 60,
+                    isTestInProgress = true
+                )
+                startMockTestTimerJob()
+                onSessionCreated(res)
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "Failed to launch practice session: ${e.message}")
+            } finally {
+                _isTestGenerating.value = false
+            }
+        }
+    }
+
+    fun saveQuestion(question: Question) {
+        viewModelScope.launch {
+            studyRepository.practiceEngineService.saveQuestion(question)
+        }
+    }
+
+    fun unsaveQuestion(questionId: String) {
+        viewModelScope.launch {
+            studyRepository.practiceEngineService.unsaveQuestion(questionId)
+        }
+    }
+
+    // --- Step 60 Smart Revision Actions ---
+    fun addTopicToRevision(
+        subject: String,
+        topic: String,
+        sourceType: RevisionSourceType = RevisionSourceType.MANUAL,
+        preferredMethod: RevisionMethodType = RevisionMethodType.QUICK_REVIEW,
+        notes: String = "",
+        resourceId: String? = null,
+        resourceTitle: String? = null
+    ) {
+        viewModelScope.launch {
+            val exam = selectedExam.value.examName
+            val examDays = selectedExam.value.daysRemaining
+            studyRepository.smartRevisionService.addOrUpdateRevisionItem(
+                subject = subject,
+                topic = topic,
+                examId = exam,
+                sourceType = sourceType,
+                preferredMethod = preferredMethod,
+                notes = notes,
+                resourceId = resourceId,
+                resourceTitle = resourceTitle,
+                daysToExam = examDays
+            )
+        }
+    }
+
+    fun snoozeRevisionItem(revisionItemId: String, option: com.example.service.intelligence.SnoozeOption) {
+        viewModelScope.launch {
+            studyRepository.smartRevisionService.snoozeRevisionItem(revisionItemId, option)
+        }
+    }
+
+    fun completeRevisionSession(
+        revisionItemId: String,
+        scoreEarned: Int = 0,
+        totalQuestions: Int = 0,
+        methodUsed: RevisionMethodType = RevisionMethodType.QUICK_REVIEW,
+        timeSpentSeconds: Int = 300,
+        notes: String = ""
+    ) {
+        viewModelScope.launch {
+            studyRepository.smartRevisionService.completeRevision(
+                revisionItemId = revisionItemId,
+                scoreEarned = scoreEarned,
+                totalQuestions = totalQuestions,
+                methodUsed = methodUsed,
+                timeSpentSeconds = timeSpentSeconds,
+                notes = notes
+            )
+        }
+    }
+
+    fun removeRevisionItem(revisionItemId: String) {
+        viewModelScope.launch {
+            studyRepository.smartRevisionService.removeRevisionItem(revisionItemId)
+        }
+    }
+
+    fun updateRevisionItem(item: RevisionItemEntity) {
+        viewModelScope.launch {
+            studyRepository.smartRevisionService.updateRevisionItem(item)
+        }
+    }
 
     fun startMockTestWithConfig(config: MockTestConfig, forceStartWithAvailable: Boolean = false) {
         pendingTestConfig = config
@@ -3173,6 +3647,7 @@ class MainViewModel(
     fun updateNotificationPrefs(prefs: NotificationPreference) {
         _notificationPrefs.value = prefs
         val appContext = getApplication<Application>()
+        com.example.notification.SmartNotificationPipeline.getInstance(appContext).updatePreferences(prefs)
         val s = com.example.notification.AppNotificationSettings(
             masterEnabled = prefs.masterEnabled,
             studySessionReminders = prefs.studyReminders,
@@ -3375,6 +3850,9 @@ class MainViewModel(
             NotificationCategory.CURRENT_AFFAIRS -> prefs.currentAffairsReminders
             NotificationCategory.EXAM_UPDATES -> prefs.examUpdatesReminders
             NotificationCategory.NOVA -> prefs.novaReminders
+            NotificationCategory.VACANCY -> prefs.vacancyAlerts
+            NotificationCategory.RESULTS -> prefs.resultAlerts
+            NotificationCategory.ADMIT_CARD -> prefs.admitCardAlerts
             NotificationCategory.SYSTEM -> true
         }
         if (!categoryEnabled) return

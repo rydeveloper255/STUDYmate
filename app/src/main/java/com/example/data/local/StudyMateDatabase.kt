@@ -43,9 +43,19 @@ import com.example.data.model.*
         com.example.data.model.StudyScheduleLog::class,
         com.example.data.model.DailyMissionTask::class,
         com.example.data.model.UserWeeklyGoalEntity::class,
-        com.example.data.model.MotivationHistoryEntity::class
+        com.example.data.model.MotivationHistoryEntity::class,
+        com.example.data.model.StudyEventEntity::class,
+        com.example.data.model.ExamGoalEntity::class,
+        com.example.data.model.SyllabusTopicEntity::class,
+        com.example.data.model.StudyResourceEntity::class,
+        com.example.data.model.ResourceBookmarkEntity::class,
+        PracticeSessionEntity::class,
+        QuestionAttemptEntity::class,
+        SavedQuestionEntity::class,
+        RevisionItemEntity::class,
+        RevisionSessionEntity::class
     ],
-    version = 16,
+    version = 21,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -79,6 +89,11 @@ abstract class StudyMateDatabase : RoomDatabase() {
     abstract fun pendingSyncDao(): com.example.data.persistence.PendingSyncDao
     abstract fun studyScheduleDao(): StudyScheduleDao
     abstract fun novaIntelligenceDao(): NovaIntelligenceDao
+    abstract fun studyEventDao(): StudyEventDao
+    abstract fun examPrepDao(): ExamPrepDao
+    abstract fun resourceDao(): ResourceDao
+    abstract fun practiceDao(): PracticeDao
+    abstract fun revisionDao(): RevisionDao
 
     companion object {
         @Volatile

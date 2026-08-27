@@ -1659,7 +1659,7 @@ fun RecruitmentDetailDialog(
     onSubmitReport: (String, String) -> Unit,
     onOpenUrl: (String) -> Unit
 ) {
-    var selectedLanguageHi by remember { mutableStateOf(false) }
+    var selectedLanguageHi by remember { mutableStateOf(true) }
     var showTrackerEditor by remember { mutableStateOf(false) }
     var showReportDialog by remember { mutableStateOf(false) }
     val isDark = isAppInDarkTheme()

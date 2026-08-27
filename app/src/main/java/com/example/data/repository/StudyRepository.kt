@@ -17,12 +17,24 @@ class StudyRepository(
         database = database,
         geminiRepository = com.example.data.remote.GeminiRepository()
     )
+    val analyticsEngine = com.example.service.analytics.StudyAnalyticsEngine(database)
+    val examPreparationService = com.example.service.intelligence.ExamPreparationService(database)
+    val resourceEngineService = com.example.service.intelligence.ResourceEngineService(database)
+    val practiceEngineService = com.example.service.intelligence.PracticeEngineService(database)
+    val smartRevisionService = com.example.service.intelligence.SmartRevisionService(database)
 
     val userProfile: Flow<UserProfile?> = database.userDao().getUserProfile()
     val userStudyPreferences: Flow<UserStudyPreferences?> = database.userStudyPreferencesDao().getUserPreferences()
     val allPlanItems: Flow<List<StudyPlanItem>> = database.studyPlanDao().getAllPlanItems()
     val allFocusSessions: Flow<List<FocusSession>> = database.focusDao().getAllFocusSessions()
     val allMockTestAttempts: Flow<List<MockTestAttempt>> = database.mockTestDao().getAllAttempts()
+    val allPracticeSessions: Flow<List<PracticeSessionEntity>> = database.practiceDao().getAllPracticeSessions()
+    val allQuestionAttempts: Flow<List<QuestionAttemptEntity>> = database.practiceDao().getAllQuestionAttempts()
+    val allSavedQuestions: Flow<List<SavedQuestionEntity>> = database.practiceDao().getAllSavedQuestions()
+    val allRevisionItems: Flow<List<RevisionItemEntity>> = smartRevisionService.allRevisionItems
+    val dueRevisionItems: Flow<List<RevisionItemEntity>> = smartRevisionService.dueRevisionItems
+    val allRevisionSessions: Flow<List<RevisionSessionEntity>> = smartRevisionService.allRevisionSessions
+    val revisionRetentionStats: Flow<RevisionRetentionStats> = smartRevisionService.revisionRetentionStats
     val allMistakes: Flow<List<MistakeItem>> = database.mistakeDao().getAllMistakes()
     val allFlashcards: Flow<List<FlashcardItem>> = database.flashcardDao().getAllFlashcards()
     val allUserQuestionMaterials: Flow<List<UserQuestionMaterial>> = database.userQuestionMaterialDao().getAllMaterials()
@@ -282,6 +294,8 @@ class StudyRepository(
         database.smartNoteDao().clearAllSmartNotes()
         database.questionHistoryDao().clearAllHistory()
         database.pendingSyncDao().clearAll()
+        database.studyEventDao().clearAllEvents()
+        analyticsEngine.invalidateCache()
     }
 
     suspend fun addStudyPlanItem(item: StudyPlanItem): Long = withContext(Dispatchers.IO) {
@@ -325,7 +339,8 @@ class StudyRepository(
         subject: String,
         topic: String,
         durationMinutes: Int,
-        actualMinutesSpent: Int
+        actualMinutesSpent: Int,
+        isCompleted: Boolean = true
     ): FocusSession = withContext(Dispatchers.IO) {
         val earnedXp = (actualMinutesSpent * 2).coerceAtLeast(20)
         val session = FocusSession(
@@ -333,11 +348,30 @@ class StudyRepository(
             topic = topic,
             durationMinutes = durationMinutes,
             actualMinutesSpent = actualMinutesSpent,
-            xpEarned = earnedXp
+            xpEarned = earnedXp,
+            isCompleted = isCompleted
         )
         val id = database.focusDao().insertFocusSession(session)
         val savedSession = session.copy(id = id)
         syncService?.syncFocusSession(savedSession)
+
+        // Log event to Analytics Engine
+        val eventType = if (isCompleted) StudyEventType.FOCUS_COMPLETED else StudyEventType.FOCUS_INTERRUPTED
+        analyticsEngine.logEvent(
+            eventType = eventType,
+            subject = subject,
+            topic = topic,
+            sessionId = id.toString(),
+            plannedDurationMinutes = durationMinutes,
+            actualDurationMinutes = actualMinutesSpent
+        )
+
+        // Sync focus study progress to Exam Preparation Syllabus Topics
+        examPreparationService.recordFocusSessionStudyProgress(
+            subject = subject,
+            topic = topic,
+            actualMinutesSpent = actualMinutesSpent
+        )
 
         val user = database.userDao().getUserProfileOnce()
         if (user != null) {

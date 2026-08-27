@@ -151,13 +151,17 @@ data class FocusSession(
 )
 
 enum class QuestionSource(val displayName: String, val badgeIcon: String) {
+    OFFICIAL("Official PYQ", "🏛️"),
+    APP_CURATED("Curated Question Bank", "🎯"),
+    USER_CREATED("User Material", "📝"),
+    AI_GENERATED("AI Practice Question", "✨"),
+    IMPORTED("Imported Material", "📥"),
     PREVIOUS_YEAR("Verified Previous-Year Question", "🏷️"),
     VERIFIED_PREVIOUS_YEAR("Verified Previous-Year Question", "🏷️"),
     CHAPTER_PRACTICE("AI Practice Question", "✨"),
     EXAM_PATTERN("Official Pattern Question", "📐"),
     CURRENT_AFFAIRS("Current Affairs Question", "📰"),
     USER_PROVIDED("User-Provided Question", "👤"),
-    AI_GENERATED("AI-Generated Practice Question", "✨"),
     PRACTICE("Practice Bank Question", "📚"),
     MIXED("Mixed Question", "🔀")
 }
@@ -309,12 +313,20 @@ data class Question(
     val examId: String = "",
     val chapterId: String = "",
     val language: String = "English",
-    val questionType: String = "MCQ",
+    val questionType: String = "SINGLE_SELECT", // SINGLE_SELECT, MULTI_SELECT, TRUE_FALSE, NUMERICAL, SHORT_ANSWER
     val generationModel: String = "",
     val generationTimestamp: Long = 0L,
     val tags: List<String> = emptyList(),
-    val status: String = "ACTIVE"
-)
+    val status: String = "ACTIVE",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val version: Int = 1
+) {
+    val questionId: String get() = id
+    val subjectId: String get() = if (subject.isNotBlank()) subject else "General"
+    val topicId: String get() = if (topic.isNotBlank()) topic else "Core"
+    val correctAnswer: String get() = options.getOrNull(correctOptionIndex) ?: ""
+}
 
 data class QuestionAttemptDetail(
     val question: Question,
@@ -394,6 +406,9 @@ data class Achievement(
 enum class NotificationCategory(val displayName: String, val iconName: String) {
     STUDY("Study", "menu_book"),
     TESTS("Tests", "quiz"),
+    VACANCY("Vacancy", "work"),
+    RESULTS("Results", "emoji_events"),
+    ADMIT_CARD("Admit Card", "confirmation_number"),
     CURRENT_AFFAIRS("Current Affairs", "newspaper"),
     EXAM_UPDATES("Exam Updates", "verified"),
     NOVA("NOVA", "auto_awesome"),
@@ -446,9 +461,18 @@ data class NotificationPreference(
     val breakReminders: Boolean = true,
     val focusStartedAlerts: Boolean = true,
     val focusCompletedAlerts: Boolean = true,
+    val focusInterruptedAlerts: Boolean = true,
     val motivationalQuotes: Boolean = true,
     val weeklyReport: Boolean = true,
     val streakAlerts: Boolean = true,
+    val vacancyAlerts: Boolean = true,
+    val resultAlerts: Boolean = true,
+    val admitCardAlerts: Boolean = true,
+    val deadlineAlerts: Boolean = true,
+    val scheduleReminders: Boolean = true,
+    val mutedCategories: List<String> = emptyList(),
+    val targetExamOnly: Boolean = false,
+    val homeStateOnly: Boolean = false,
     val reminderHour: Int = 19,
     val reminderMinute: Int = 0,
     val dailyGoalHour: Int = 20,
@@ -730,6 +754,14 @@ enum class NovaActionType {
     MAKE_QUIZ_FOR_TOPIC,
     ADD_TOPIC_TO_REVISION,
     LEARN_TOPIC,
+    // Step 57 Exam Prep & Planner Actions
+    OPEN_EXAM_PREPARATION,
+    CONFIRM_STUDY_PLAN,
+    // Step 58 Resource Engine Actions
+    OPEN_RESOURCE_HUB,
+    START_RESOURCE_FOCUS,
+    // Step 60 Smart Revision Actions
+    OPEN_REVISION_HUB,
     // Step 23 Smart Learning System Actions
     GENERATE_FRESH_MCQ,
     START_SMART_REVISION,
@@ -758,7 +790,8 @@ enum class NovaActionType {
     OPEN_ADMIT_CARDS,
     OPEN_SAVED_JOBS,
     OPEN_RECRUITMENT_NOTICES,
-    SET_DEADLINE_REMINDER
+    SET_DEADLINE_REMINDER,
+    UPDATE_NOTIFICATION_SETTINGS
 }
 
 enum class NovaSearchIntent {
@@ -1445,6 +1478,159 @@ data class CurrentAffairsQuizSession(
     val unansweredCount: Int = 0,
     val language: String = "English"
 )
+
+@Entity(tableName = "practice_sessions")
+data class PracticeSessionEntity(
+    @PrimaryKey val practiceSessionId: String = java.util.UUID.randomUUID().toString(),
+    val userId: String = "current_user",
+    val examId: String = "default_exam",
+    val subjectId: String = "General",
+    val topicId: String = "Core",
+    val mode: String = "QUICK_PRACTICE", // QUICK_PRACTICE, TOPIC_PRACTICE, SUBJECT_PRACTICE, REVISION_PRACTICE, MOCK_TEST, WEAK_AREA_PRACTICE, SAVED_QUESTIONS
+    val questionCount: Int = 10,
+    val startedAt: Long = System.currentTimeMillis(),
+    val completedAt: Long = 0L,
+    val status: String = "IN_PROGRESS", // IN_PROGRESS, COMPLETED, ABANDONED
+    val score: Float = 0f,
+    val accuracyPercent: Float = 0f,
+    val timeSpentSeconds: Int = 0
+)
+
+@Entity(tableName = "question_attempts")
+data class QuestionAttemptEntity(
+    @PrimaryKey val attemptId: String = java.util.UUID.randomUUID().toString(),
+    val practiceSessionId: String,
+    val questionId: String,
+    val selectedAnswer: String = "",
+    val isCorrect: Boolean = false,
+    val timeSpentSeconds: Int = 0,
+    val attemptedAt: Long = System.currentTimeMillis(),
+    val examId: String = "",
+    val subject: String = "",
+    val topic: String = "",
+    val difficulty: String = "Medium"
+)
+
+@Entity(tableName = "saved_questions")
+data class SavedQuestionEntity(
+    @PrimaryKey val id: String, // questionId
+    val userId: String = "current_user",
+    val questionId: String,
+    val questionText: String,
+    val optionsJson: String = "",
+    val correctOptionIndex: Int = 0,
+    val explanation: String = "",
+    val subject: String = "",
+    val topic: String = "",
+    val source: String = "APP_CURATED",
+    val savedAt: Long = System.currentTimeMillis()
+)
+
+// =========================================================================
+// STEP 60 — SMART REVISION & KNOWLEDGE RETENTION 2.0 MODELS
+// =========================================================================
+
+enum class RevisionItemStatus {
+    PENDING,
+    DUE,
+    IN_PROGRESS,
+    COMPLETED,
+    SNOOZED,
+    ARCHIVED
+}
+
+enum class RevisionSourceType {
+    MANUAL,
+    STUDY_TOPIC,
+    PRACTICE_MISTAKE,
+    RESOURCE,
+    EXAM_PLAN,
+    NOVA_COMMAND,
+    SPACED_CYCLE
+}
+
+enum class RevisionMethodType(val displayName: String, val iconName: String) {
+    QUICK_REVIEW("Quick Review", "Bolt"),
+    PRACTICE_QUESTIONS("Practice Questions", "Quiz"),
+    READ_NOTES("Read Notes", "MenuBook"),
+    REVIEW_MISTAKES("Review Mistakes", "ErrorOutline"),
+    ACTIVE_RECALL("Active Recall", "Psychology"),
+    FLASHCARDS("Flashcards", "Style")
+}
+
+@Entity(tableName = "revision_items")
+data class RevisionItemEntity(
+    @PrimaryKey val revisionItemId: String = java.util.UUID.randomUUID().toString(),
+    val userId: String = "current_user",
+    val examId: String = "",
+    val subjectId: String = "",
+    val subject: String = "",
+    val topicId: String = "",
+    val topic: String = "",
+    val resourceId: String? = null,
+    val resourceTitle: String? = null,
+    val sourceType: String = "MANUAL", // RevisionSourceType name
+    val status: String = "DUE", // RevisionItemStatus name
+    val priority: String = "MEDIUM", // URGENT, HIGH, MEDIUM, LOW
+    val scheduledAt: Long = System.currentTimeMillis(),
+    val lastReviewedAt: Long = 0L,
+    val reviewCount: Int = 0,
+    val intervalDays: Int = 1,
+    val practiceAccuracy: Float = 0f,
+    val mistakeCount: Int = 0,
+    val activeRecallPrompt: String = "",
+    val activeRecallAnswer: String = "",
+    val notes: String = "",
+    val preferredMethod: String = "QUICK_REVIEW",
+    val priorityReason: String = "Scheduled for regular retention",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "revision_sessions")
+data class RevisionSessionEntity(
+    @PrimaryKey val revisionSessionId: String = java.util.UUID.randomUUID().toString(),
+    val userId: String = "current_user",
+    val examId: String = "",
+    val subject: String = "",
+    val topic: String = "",
+    val revisionItemId: String = "",
+    val startedAt: Long = System.currentTimeMillis(),
+    val completedAt: Long = 0L,
+    val itemsPlanned: Int = 1,
+    val itemsCompleted: Int = 0,
+    val timeSpentSeconds: Int = 0,
+    val status: String = "IN_PROGRESS", // IN_PROGRESS, COMPLETED, ABANDONED
+    val method: String = "QUICK_REVIEW",
+    val scoreEarned: Int = 0,
+    val totalQuestions: Int = 0,
+    val notes: String = "",
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+data class RevisionConflict(
+    val conflictTime: String,
+    val existingTitle: String,
+    val revisionTopic: String,
+    val proposedScheduledAt: Long
+)
+
+data class RevisionRetentionStats(
+    val totalSessions: Int = 0,
+    val totalTimeMinutes: Int = 0,
+    val itemsReviewed: Int = 0,
+    val itemsCompleted: Int = 0,
+    val completionRatePercent: Float = 0f,
+    val averageAccuracy: Float = 0f
+)
+
+data class RevisionPlanSchedule(
+    val targetDailyMinutes: Int = 30,
+    val queuedItems: List<RevisionItemEntity> = emptyList(),
+    val conflicts: List<RevisionConflict> = emptyList()
+)
+
+
 
 
 

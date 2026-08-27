@@ -46,7 +46,7 @@ import com.example.ui.components.GlassCard
 import com.example.ui.theme.*
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun NotificationSettingsScreen(
     user: UserProfile?,
@@ -105,7 +105,16 @@ fun NotificationSettingsScreen(
     var breakReminders by remember(currentPrefs) { mutableStateOf(currentPrefs.breakReminders) }
     var focusStartedAlerts by remember(currentPrefs) { mutableStateOf(currentPrefs.focusStartedAlerts) }
     var focusCompletedAlerts by remember(currentPrefs) { mutableStateOf(currentPrefs.focusCompletedAlerts) }
+    var focusInterruptedAlerts by remember(currentPrefs) { mutableStateOf(currentPrefs.focusInterruptedAlerts) }
     var motivationalQuotes by remember(currentPrefs) { mutableStateOf(currentPrefs.motivationalQuotes) }
+    var vacancyAlerts by remember(currentPrefs) { mutableStateOf(currentPrefs.vacancyAlerts) }
+    var resultAlerts by remember(currentPrefs) { mutableStateOf(currentPrefs.resultAlerts) }
+    var admitCardAlerts by remember(currentPrefs) { mutableStateOf(currentPrefs.admitCardAlerts) }
+    var deadlineAlerts by remember(currentPrefs) { mutableStateOf(currentPrefs.deadlineAlerts) }
+    var scheduleReminders by remember(currentPrefs) { mutableStateOf(currentPrefs.scheduleReminders) }
+    var targetExamOnly by remember(currentPrefs) { mutableStateOf(currentPrefs.targetExamOnly) }
+    var homeStateOnly by remember(currentPrefs) { mutableStateOf(currentPrefs.homeStateOnly) }
+    var mutedCategories by remember(currentPrefs) { mutableStateOf(currentPrefs.mutedCategories.toSet()) }
     var briefingLanguage by remember(currentPrefs) { mutableStateOf(currentPrefs.language) }
 
     var reminderHour by remember(currentPrefs) { mutableIntStateOf(currentPrefs.reminderHour) }
@@ -188,7 +197,16 @@ fun NotificationSettingsScreen(
                                 breakReminders = breakReminders,
                                 focusStartedAlerts = focusStartedAlerts,
                                 focusCompletedAlerts = focusCompletedAlerts,
+                                focusInterruptedAlerts = focusInterruptedAlerts,
                                 motivationalQuotes = motivationalQuotes,
+                                vacancyAlerts = vacancyAlerts,
+                                resultAlerts = resultAlerts,
+                                admitCardAlerts = admitCardAlerts,
+                                deadlineAlerts = deadlineAlerts,
+                                scheduleReminders = scheduleReminders,
+                                mutedCategories = mutedCategories.toList(),
+                                targetExamOnly = targetExamOnly,
+                                homeStateOnly = homeStateOnly,
                                 reminderHour = reminderHour,
                                 reminderMinute = reminderMinute,
                                 dailyGoalHour = dailyGoalHour,
@@ -739,6 +757,133 @@ fun NotificationSettingsScreen(
             )
 
             // =========================================================================
+            // Sarkari Vacancy, Result & Admit Card Notifications
+            // =========================================================================
+            Text(
+                text = "Sarkari Updates & Vacancies Alerts",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+
+            NotificationTypeSwitchTile(
+                title = "11. Verified Vacancy Alerts",
+                description = "Official notifications when new posts open matching your eligibility",
+                icon = Icons.Filled.Work,
+                checked = vacancyAlerts,
+                onCheckedChange = { vacancyAlerts = it }
+            )
+
+            NotificationTypeSwitchTile(
+                title = "12. Result & Cutoff Alerts",
+                description = "Instant verified alerts when official scorecards and merit lists release",
+                icon = Icons.Filled.EmojiEvents,
+                checked = resultAlerts,
+                onCheckedChange = { resultAlerts = it }
+            )
+
+            NotificationTypeSwitchTile(
+                title = "13. Admit Card Releases",
+                description = "Direct official download notifications for hall tickets and city intimation",
+                icon = Icons.Filled.Badge,
+                checked = admitCardAlerts,
+                onCheckedChange = { admitCardAlerts = it }
+            )
+
+            NotificationTypeSwitchTile(
+                title = "14. Application Deadline Alerts",
+                description = "Urgent alerts when last date to apply or pay fee is approaching (3 days / 24h)",
+                icon = Icons.Filled.Timer,
+                checked = deadlineAlerts,
+                onCheckedChange = { deadlineAlerts = it }
+            )
+
+            // Relevance Filter Controls
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Smart Relevance Filters",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "Filter notifications strictly matching your chosen exam or state to avoid noise.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF94A3B8)
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Target Exam Only ($examName)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White
+                        )
+                        Switch(
+                            checked = targetExamOnly,
+                            onCheckedChange = { targetExamOnly = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF070B19), checkedTrackColor = NeonCyan)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Home State Only",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White
+                        )
+                        Switch(
+                            checked = homeStateOnly,
+                            onCheckedChange = { homeStateOnly = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF070B19), checkedTrackColor = NeonCyan)
+                        )
+                    }
+
+                    HorizontalDivider(color = Color(0x20FFFFFF))
+
+                    Text(
+                        text = "Mute Specific Categories (Tap to Mute/Unmute):",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFCBD5E1)
+                    )
+
+                    val categories = listOf("RAILWAY", "SSC", "BANKING", "UPSC", "DEFENCE", "TEACHING", "STATE_PSC", "POLICE")
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        categories.forEach { cat ->
+                            val isMuted = mutedCategories.contains(cat)
+                            FilterChip(
+                                selected = isMuted,
+                                onClick = {
+                                    mutedCategories = if (isMuted) mutedCategories - cat else mutedCategories + cat
+                                },
+                                label = {
+                                    Text(
+                                        text = if (isMuted) "🔕 $cat (Muted)" else "🔔 $cat",
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Color(0xFFFF5252).copy(alpha = 0.25f),
+                                    selectedLabelColor = Color(0xFFFF8A80)
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            // =========================================================================
             // Quiet Hours / Do Not Disturb
             // =========================================================================
             Text(
@@ -836,13 +981,27 @@ fun NotificationSettingsScreen(
                     val newPrefs = NotificationPreference(
                         masterEnabled = masterEnabled,
                         studyReminders = studyReminders,
+                        currentAffairsReminders = currentAffairsReminders,
+                        testReminders = testReminders,
                         examCountdownAlerts = examCountdownAlerts,
+                        examUpdatesReminders = examUpdatesReminders,
+                        novaReminders = novaReminders,
+                        dailyBriefingEnabled = dailyBriefingEnabled,
                         dailyGoalReminders = dailyGoalReminders,
                         missedStudyReminders = missedStudyReminders,
                         breakReminders = breakReminders,
                         focusStartedAlerts = focusStartedAlerts,
                         focusCompletedAlerts = focusCompletedAlerts,
+                        focusInterruptedAlerts = focusInterruptedAlerts,
                         motivationalQuotes = motivationalQuotes,
+                        vacancyAlerts = vacancyAlerts,
+                        resultAlerts = resultAlerts,
+                        admitCardAlerts = admitCardAlerts,
+                        deadlineAlerts = deadlineAlerts,
+                        scheduleReminders = scheduleReminders,
+                        mutedCategories = mutedCategories.toList(),
+                        targetExamOnly = targetExamOnly,
+                        homeStateOnly = homeStateOnly,
                         reminderHour = reminderHour,
                         reminderMinute = reminderMinute,
                         dailyGoalHour = dailyGoalHour,
@@ -855,7 +1014,8 @@ fun NotificationSettingsScreen(
                         quietStartHour = quietStartHour,
                         quietStartMinute = quietStartMinute,
                         quietEndHour = quietEndHour,
-                        quietEndMinute = quietEndMinute
+                        quietEndMinute = quietEndMinute,
+                        language = briefingLanguage
                     )
                     onSavePrefs(newPrefs)
                     Toast.makeText(context, "Notification preferences saved & scheduled! ✅", Toast.LENGTH_SHORT).show()

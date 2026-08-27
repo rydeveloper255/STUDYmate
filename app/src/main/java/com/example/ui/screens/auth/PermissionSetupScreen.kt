@@ -37,6 +37,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.service.FocusShieldManager
+import com.example.service.focus.PermissionCheckStatus
+import com.example.service.focus.PermissionHealthMonitor
 import com.example.ui.components.GlassButton
 import com.example.ui.components.GlassCard
 import com.example.ui.components.StudyMateBrandLogo
@@ -75,11 +77,14 @@ fun PermissionSetupScreen(
             }
         )
     }
-    var isAccessibilityGranted by remember {
-        mutableStateOf(FocusShieldManager.isAccessibilityServiceEnabled(context))
+    var isUsageAccessGranted by remember {
+        mutableStateOf(PermissionHealthMonitor.checkUsageAccess(context) == PermissionCheckStatus.READY)
+    }
+    var isOverlayGranted by remember {
+        mutableStateOf(PermissionHealthMonitor.checkOverlayPermission(context) == PermissionCheckStatus.READY)
     }
 
-    // Refresh permission statuses on resume (critical for Accessibility Service return)
+    // Refresh permission statuses on resume
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -93,7 +98,8 @@ fun PermissionSetupScreen(
                     isNotificationGranted = true
                     isStorageGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
                 }
-                isAccessibilityGranted = FocusShieldManager.isAccessibilityServiceEnabled(context)
+                isUsageAccessGranted = PermissionHealthMonitor.checkUsageAccess(context) == PermissionCheckStatus.READY
+                isOverlayGranted = PermissionHealthMonitor.checkOverlayPermission(context) == PermissionCheckStatus.READY
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -140,7 +146,8 @@ fun PermissionSetupScreen(
         }
     }
 
-    val grantedCount = listOf(isMicGranted, isCameraGranted, isNotificationGranted, isStorageGranted, isAccessibilityGranted).count { it }
+    val isProtectionReady = isUsageAccessGranted && isOverlayGranted
+    val grantedCount = listOf(isMicGranted, isCameraGranted, isNotificationGranted, isStorageGranted, isProtectionReady).count { it }
     val totalCount = 5
 
     Box(
@@ -314,17 +321,17 @@ fun PermissionSetupScreen(
                 )
             }
 
-            // 5. ♿ Accessibility Service Card (Focus Shield)
+            // 5. 🎯 Focus Protection System Card (Accessibility-Free)
             item {
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("perm_card_accessibility"),
+                        .testTag("perm_card_focus_protection"),
                     shape = RoundedCornerShape(20.dp),
-                    color = if (isAccessibilityGranted) Color(0x2010B981) else Color(0x22F59E0B),
+                    color = if (isProtectionReady) Color(0x2010B981) else Color(0x22F59E0B),
                     border = androidx.compose.foundation.BorderStroke(
                         1.dp,
-                        if (isAccessibilityGranted) EmeraldSuccess.copy(alpha = 0.5f) else GoldenSpark.copy(alpha = 0.5f)
+                        if (isProtectionReady) EmeraldSuccess.copy(alpha = 0.5f) else GoldenSpark.copy(alpha = 0.5f)
                     )
                 ) {
                     Column(
@@ -345,28 +352,28 @@ fun PermissionSetupScreen(
                                     modifier = Modifier
                                         .size(38.dp)
                                         .clip(CircleShape)
-                                        .background(if (isAccessibilityGranted) EmeraldSuccess.copy(alpha = 0.2f) else GoldenSpark.copy(alpha = 0.2f)),
+                                        .background(if (isProtectionReady) EmeraldSuccess.copy(alpha = 0.2f) else GoldenSpark.copy(alpha = 0.2f)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        imageVector = if (isAccessibilityGranted) Icons.Filled.CheckCircle else Icons.Filled.Shield,
+                                        imageVector = if (isProtectionReady) Icons.Filled.CheckCircle else Icons.Filled.Shield,
                                         contentDescription = null,
-                                        tint = if (isAccessibilityGranted) EmeraldSuccess else GoldenSpark,
+                                        tint = if (isProtectionReady) EmeraldSuccess else GoldenSpark,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
                                     Text(
-                                        text = "♿ Focus Shield Service",
+                                        text = "🎯 Focus Protection Engine 2.0",
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White
                                     )
                                     Text(
-                                        text = if (isAccessibilityGranted) "✓ Active & Protecting" else "Setup Required",
+                                        text = if (isProtectionReady) "✓ Ready & Protecting" else "Setup Required (No Accessibility Needed)",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = if (isAccessibilityGranted) EmeraldSuccess else GoldenSpark,
+                                        color = if (isProtectionReady) EmeraldSuccess else GoldenSpark,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
@@ -376,70 +383,87 @@ fun PermissionSetupScreen(
                         Spacer(modifier = Modifier.height(10.dp))
 
                         Text(
-                            text = "Accessibility Service is used exclusively during active focus sessions to detect when you launch apps you selected to block. No personal data or keystrokes are recorded.",
+                            text = "Standard Android Usage Access detects when you open blocked apps during study sessions. Zero Accessibility service or keystroke monitoring required.",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFFCBD5E1),
                             lineHeight = 18.sp
                         )
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Sub-permission 1: Usage Access
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = if (isUsageAccessGranted) Icons.Filled.CheckCircle else Icons.Filled.Warning,
+                                    contentDescription = null,
+                                    tint = if (isUsageAccessGranted) EmeraldSuccess else GoldenSpark,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("1. Usage Access", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.SemiBold)
+                            }
+                            if (!isUsageAccessGranted) {
+                                Button(
+                                    onClick = { PermissionHealthMonitor.openUsageAccessSettings(context) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = GoldenSpark, contentColor = Color(0xFF070B19)),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    Text("Enable", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                Text("✓ Granted", fontSize = 11.sp, color = EmeraldSuccess, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Sub-permission 2: Display Over Other Apps (Overlay)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = if (isOverlayGranted) Icons.Filled.CheckCircle else Icons.Filled.Warning,
+                                    contentDescription = null,
+                                    tint = if (isOverlayGranted) EmeraldSuccess else GoldenSpark,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("2. Display Over Other Apps", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.SemiBold)
+                            }
+                            if (!isOverlayGranted) {
+                                Button(
+                                    onClick = { PermissionHealthMonitor.openOverlaySettings(context) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = GoldenSpark, contentColor = Color(0xFF070B19)),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    Text("Enable", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                Text("✓ Granted", fontSize = 11.sp, color = EmeraldSuccess, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
 
                         Text(
-                            text = "🛡️ Safety Mode Enabled: Sensitive banking & payment apps (Paytm, PhonePe, Google Pay) automatically run in Passive Mode with zero screen interaction.",
+                            text = "🛡️ Zero-Interference Banking: UPI & Payment apps (Paytm, PhonePe, GPay) run with zero screen interception.",
                             style = MaterialTheme.typography.labelSmall,
                             color = NeonCyan,
                             fontSize = 11.sp,
                             lineHeight = 15.sp
                         )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        if (!isAccessibilityGranted) {
-                            Button(
-                                onClick = {
-                                    try {
-                                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                                        context.startActivity(intent)
-                                    } catch (e: Exception) {
-                                        context.startActivity(Intent(Settings.ACTION_SETTINGS))
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = GoldenSpark,
-                                    contentColor = Color(0xFF070B19)
-                                ),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(44.dp)
-                                    .testTag("enable_accessibility_service_btn")
-                            ) {
-                                Icon(Icons.Filled.Settings, null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Enable in Accessibility Settings", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            }
-                        } else {
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = EmeraldSuccess.copy(alpha = 0.15f),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.3f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(Icons.Filled.Check, null, tint = EmeraldSuccess, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Focus Shield Accessibility Service is active",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = EmeraldSuccess,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
                     }
                 }
             }

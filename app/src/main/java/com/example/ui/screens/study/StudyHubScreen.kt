@@ -45,6 +45,9 @@ import com.example.ui.screens.planner.StudySessionTimerView
 import com.example.ui.theme.*
 
 enum class StudySectionTab(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    EXAM_PREP("Exam Prep", Icons.Filled.TrackChanges),
+    REVISION("Revision", Icons.Filled.Autorenew),
+    RESOURCES("Resources", Icons.Filled.FolderZip),
     SUBJECTS("Subjects & Chapters", Icons.AutoMirrored.Filled.MenuBook),
     NOTES("Notes & Flashcards", Icons.Filled.EditNote),
     TOOLS("Study Tools & Plan", Icons.Filled.Psychology)
@@ -55,6 +58,8 @@ enum class StudySectionTab(val title: String, val icon: androidx.compose.ui.grap
 fun StudyHubScreen(
     user: UserProfile?,
     examContext: ExamContext,
+    mainViewModel: com.example.viewmodel.MainViewModel? = null,
+    onOpenRevisionHub: () -> Unit = {},
     subjectSummaries: List<SubjectProgressSummary> = emptyList(),
     allMasteries: List<TopicMastery> = emptyList(),
     bookmarks: List<UserLearningBookmark> = emptyList(),
@@ -77,6 +82,16 @@ fun StudyHubScreen(
     flashcardMessage: String? = null,
     allFocusSessions: List<FocusSession> = emptyList(),
     mistakes: List<MistakeItem> = emptyList(),
+    // Step 57 Exam Preparation Integration
+    examPrepSummary: ExamPreparationSummary? = null,
+    allExamGoals: List<ExamGoalEntity> = emptyList(),
+    dailyPlanPreview: DailyStudyPlanPreview? = null,
+    onSelectExamGoal: (String) -> Unit = {},
+    onCreateExamGoal: (name: String, org: String, dateMillis: Long?, target: String, priority: String) -> Unit = { _, _, _, _, _ -> },
+    onUpdateTopicStatus: (topicId: String, status: String) -> Unit = { _, _ -> },
+    onAddCustomTopic: (examId: String, subject: String, topic: String) -> Unit = { _, _, _ -> },
+    onGenerateDailyPlan: (examId: String) -> Unit = {},
+    onConfirmDailyPlan: (DailyStudyPlanPreview) -> Unit = {},
     // Navigation / Action Callbacks
     onSelectTopicLearning: (subject: String, chapter: String, topic: String) -> Unit = { _, _, _ -> },
     onBackToSubjects: () -> Unit = {},
@@ -115,6 +130,16 @@ fun StudyHubScreen(
     onUpdateDailyAvailableTime: (Int) -> Unit = {},
     onSavePreferences: (UserStudyPreferences) -> Unit = {},
     onApplySubjectAllocations: (Map<String, Int>, Int, Int, Int) -> Unit = { _, _, _, _ -> },
+    // Step 58 Resource Engine Integration
+    resourcesList: List<com.example.data.model.ResourceSearchResult> = emptyList(),
+    resourceQuery: String = "",
+    selectedResourceTypeFilter: String = com.example.data.model.ResourceType.ALL.name,
+    onSearchResourceQueryChange: (String) -> Unit = {},
+    onSelectResourceTypeFilter: (String) -> Unit = {},
+    onOpenResourceDetail: (com.example.data.model.StudyResourceEntity) -> Unit = {},
+    onToggleSaveResourceItem: (String) -> Unit = {},
+    onStartFocusFromResourceItem: (subject: String, topic: String, resourceId: String) -> Unit = { _, _, _ -> },
+    onUploadResourceItem: (title: String, desc: String, exam: String, subject: String, topic: String, content: String) -> Unit = { _, _, _, _, _, _ -> },
     initialSectionTab: StudySectionTab = StudySectionTab.SUBJECTS,
     modifier: Modifier = Modifier
 ) {
@@ -345,6 +370,52 @@ fun StudyHubScreen(
         // Section Content
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             when (currentSection) {
+                StudySectionTab.EXAM_PREP -> {
+                    com.example.ui.screens.examprep.ExamPreparationDashboardScreen(
+                        summary = examPrepSummary,
+                        allGoals = allExamGoals,
+                        dailyPlanPreview = dailyPlanPreview,
+                        onSelectExam = onSelectExamGoal,
+                        onCreateExamGoal = onCreateExamGoal,
+                        onUpdateTopicStatus = onUpdateTopicStatus,
+                        onAddCustomTopic = onAddCustomTopic,
+                        onGenerateDailyPlan = onGenerateDailyPlan,
+                        onConfirmDailyPlan = onConfirmDailyPlan,
+                        onStartTopicFocus = { sub, top, _ -> onStartFocusSession(sub, top) },
+                        onBack = { selectedSection = StudySectionTab.SUBJECTS.name }
+                    )
+                }
+
+                StudySectionTab.REVISION -> {
+                    if (mainViewModel != null) {
+                        com.example.ui.screens.revision.RevisionHubScreen(
+                            mainViewModel = mainViewModel,
+                            onBack = { selectedSection = StudySectionTab.SUBJECTS.name },
+                            onStartFocus = { sub, top, _ -> onStartFocusSession(sub, top) },
+                            onStartPractice = { _, _, _ -> },
+                            onOpenResources = { _ -> selectedSection = StudySectionTab.RESOURCES.name }
+                        )
+                    }
+                }
+
+                StudySectionTab.RESOURCES -> {
+                    com.example.ui.screens.resources.StudyResourceHubScreen(
+                        resources = resourcesList,
+                        activeExam = examContext.examName,
+                        activeSubject = examContext.subjects.firstOrNull()?.name ?: "",
+                        activeTopic = examContext.topics.firstOrNull()?.name ?: "",
+                        searchQuery = resourceQuery,
+                        selectedResourceType = selectedResourceTypeFilter,
+                        onSearchQueryChange = onSearchResourceQueryChange,
+                        onSelectResourceType = onSelectResourceTypeFilter,
+                        onOpenResource = onOpenResourceDetail,
+                        onToggleSave = onToggleSaveResourceItem,
+                        onStartFocusFromResource = onStartFocusFromResourceItem,
+                        onUploadCustomResource = onUploadResourceItem,
+                        onBack = { selectedSection = StudySectionTab.SUBJECTS.name }
+                    )
+                }
+
                 StudySectionTab.SUBJECTS -> {
                     LearningDashboardScreen(
                         user = user,

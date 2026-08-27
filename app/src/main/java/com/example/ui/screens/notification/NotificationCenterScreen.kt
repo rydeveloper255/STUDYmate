@@ -380,6 +380,9 @@ private fun getCategoryIcon(category: NotificationCategory): ImageVector {
     return when (category) {
         NotificationCategory.STUDY -> Icons.AutoMirrored.Filled.MenuBook
         NotificationCategory.TESTS -> Icons.Filled.Quiz
+        NotificationCategory.VACANCY -> Icons.Filled.Work
+        NotificationCategory.RESULTS -> Icons.Filled.EmojiEvents
+        NotificationCategory.ADMIT_CARD -> Icons.Filled.Badge
         NotificationCategory.CURRENT_AFFAIRS -> Icons.Filled.Newspaper
         NotificationCategory.EXAM_UPDATES -> Icons.Filled.Verified
         NotificationCategory.NOVA -> Icons.Filled.AutoAwesome
@@ -391,6 +394,9 @@ private fun getCategoryColor(category: NotificationCategory): Color {
     return when (category) {
         NotificationCategory.STUDY -> NeonCyan
         NotificationCategory.TESTS -> ElectricViolet
+        NotificationCategory.VACANCY -> GoldenSpark
+        NotificationCategory.RESULTS -> Color(0xFF00E676) // Green
+        NotificationCategory.ADMIT_CARD -> Color(0xFFFF9100) // Amber Orange
         NotificationCategory.CURRENT_AFFAIRS -> GoldenSpark
         NotificationCategory.EXAM_UPDATES -> Color(0xFF00E676) // Bright Green
         NotificationCategory.NOVA -> Color(0xFFFF4081) // Neon Pink

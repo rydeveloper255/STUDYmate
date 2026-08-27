@@ -27,6 +27,9 @@ interface StudyPlanDao {
     @Query("SELECT * FROM study_plan_items ORDER BY isCompleted ASC, scheduledDateMillis ASC, id ASC")
     fun getAllPlanItems(): Flow<List<StudyPlanItem>>
 
+    @Query("SELECT * FROM study_plan_items ORDER BY scheduledDateMillis ASC")
+    suspend fun getAllPlanItemsSync(): List<StudyPlanItem>
+
     @Query("SELECT * FROM study_plan_items WHERE examId = :examId OR examId = '' ORDER BY isCompleted ASC, scheduledDateMillis ASC, id ASC")
     fun getPlanItemsForExam(examId: String): Flow<List<StudyPlanItem>>
 
@@ -110,6 +113,12 @@ interface UserQuestionMaterialDao {
 interface MistakeDao {
     @Query("SELECT * FROM mistakes ORDER BY isMastered ASC, timestamp DESC")
     fun getAllMistakes(): Flow<List<MistakeItem>>
+
+    @Query("SELECT * FROM mistakes ORDER BY isMastered ASC, timestamp DESC")
+    suspend fun getAllMistakesSync(): List<MistakeItem>
+
+    @Query("SELECT * FROM mistakes WHERE isMastered = 0 ORDER BY timestamp DESC")
+    suspend fun getAllUnmasteredMistakesSync(): List<MistakeItem>
 
     @Query("SELECT * FROM mistakes WHERE examId = :examId ORDER BY isMastered ASC, timestamp DESC")
     fun getMistakesByExam(examId: String): Flow<List<MistakeItem>>
@@ -685,6 +694,119 @@ interface QuestionQualityReportDao {
 
     @Query("UPDATE question_quality_reports SET status = :status WHERE id = :reportId")
     suspend fun updateReportStatus(reportId: Long, status: String)
+}
+
+@Dao
+interface PracticeDao {
+    // Practice Sessions
+    @Query("SELECT * FROM practice_sessions ORDER BY startedAt DESC")
+    fun getAllPracticeSessions(): Flow<List<PracticeSessionEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPracticeSession(session: PracticeSessionEntity)
+
+    @Update
+    suspend fun updatePracticeSession(session: PracticeSessionEntity)
+
+    @Query("SELECT * FROM practice_sessions WHERE practiceSessionId = :sessionId LIMIT 1")
+    suspend fun getPracticeSessionById(sessionId: String): PracticeSessionEntity?
+
+    // Question Attempts
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertQuestionAttempt(attempt: QuestionAttemptEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertQuestionAttempts(attempts: List<QuestionAttemptEntity>)
+
+    @Query("SELECT * FROM question_attempts WHERE practiceSessionId = :sessionId ORDER BY attemptedAt ASC")
+    fun getAttemptsForSession(sessionId: String): Flow<List<QuestionAttemptEntity>>
+
+    @Query("SELECT * FROM question_attempts ORDER BY attemptedAt DESC")
+    fun getAllQuestionAttempts(): Flow<List<QuestionAttemptEntity>>
+
+    @Query("SELECT * FROM question_attempts ORDER BY attemptedAt DESC")
+    suspend fun getAllQuestionAttemptsOnce(): List<QuestionAttemptEntity>
+
+    @Query("SELECT * FROM question_attempts WHERE subject = :subject ORDER BY attemptedAt DESC")
+    suspend fun getAttemptsForSubject(subject: String): List<QuestionAttemptEntity>
+
+    @Query("SELECT * FROM question_attempts WHERE subject = :subject AND topic = :topic ORDER BY attemptedAt DESC")
+    suspend fun getAttemptsForTopic(subject: String, topic: String): List<QuestionAttemptEntity>
+
+    // Saved Questions
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveQuestion(savedQuestion: SavedQuestionEntity)
+
+    @Query("DELETE FROM saved_questions WHERE id = :id OR questionId = :id")
+    suspend fun unsaveQuestion(id: String)
+
+    @Query("SELECT * FROM saved_questions ORDER BY savedAt DESC")
+    fun getAllSavedQuestions(): Flow<List<SavedQuestionEntity>>
+
+    @Query("SELECT * FROM saved_questions ORDER BY savedAt DESC")
+    suspend fun getAllSavedQuestionsOnce(): List<SavedQuestionEntity>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM saved_questions WHERE id = :id OR questionId = :id)")
+    fun isQuestionSaved(id: String): Flow<Boolean>
+}
+
+// =========================================================================
+// STEP 60: REVISION DAO
+// =========================================================================
+
+@Dao
+interface RevisionDao {
+    @Query("SELECT * FROM revision_items ORDER BY CASE priority WHEN 'URGENT' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END ASC, scheduledAt ASC")
+    fun getAllRevisionItems(): Flow<List<RevisionItemEntity>>
+
+    @Query("SELECT * FROM revision_items WHERE status != 'ARCHIVED' ORDER BY CASE priority WHEN 'URGENT' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END ASC, scheduledAt ASC")
+    fun getActiveRevisionItems(): Flow<List<RevisionItemEntity>>
+
+    @Query("SELECT * FROM revision_items WHERE status = 'DUE' OR (status = 'PENDING' AND scheduledAt <= :currentTime) ORDER BY CASE priority WHEN 'URGENT' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END ASC, scheduledAt ASC")
+    fun getDueRevisionItems(currentTime: Long): Flow<List<RevisionItemEntity>>
+
+    @Query("SELECT * FROM revision_items WHERE status = :status ORDER BY scheduledAt ASC")
+    fun getRevisionItemsByStatus(status: String): Flow<List<RevisionItemEntity>>
+
+    @Query("SELECT * FROM revision_items WHERE revisionItemId = :id LIMIT 1")
+    suspend fun getRevisionItemById(id: String): RevisionItemEntity?
+
+    @Query("SELECT * FROM revision_items WHERE subject = :subject AND topic = :topic AND status != 'ARCHIVED' LIMIT 1")
+    suspend fun getRevisionItemByTopic(subject: String, topic: String): RevisionItemEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRevisionItem(item: RevisionItemEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRevisionItems(items: List<RevisionItemEntity>)
+
+    @Update
+    suspend fun updateRevisionItem(item: RevisionItemEntity)
+
+    @Query("DELETE FROM revision_items WHERE revisionItemId = :id")
+    suspend fun deleteRevisionItem(id: String)
+
+    @Query("UPDATE revision_items SET status = 'SNOOZED', scheduledAt = :newScheduledAt, updatedAt = :now WHERE revisionItemId = :id")
+    suspend fun snoozeRevisionItem(id: String, newScheduledAt: Long, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE revision_items SET status = 'COMPLETED', lastReviewedAt = :now, reviewCount = reviewCount + 1, intervalDays = :newIntervalDays, scheduledAt = :nextScheduledAt, updatedAt = :now WHERE revisionItemId = :id")
+    suspend fun completeRevisionItem(id: String, newIntervalDays: Int, nextScheduledAt: Long, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE revision_items SET status = 'ARCHIVED', updatedAt = :now WHERE examId = :examId")
+    suspend fun archiveRevisionsForExam(examId: String, now: Long = System.currentTimeMillis())
+
+    // Revision Sessions
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRevisionSession(session: RevisionSessionEntity)
+
+    @Update
+    suspend fun updateRevisionSession(session: RevisionSessionEntity)
+
+    @Query("SELECT * FROM revision_sessions ORDER BY startedAt DESC")
+    fun getAllRevisionSessions(): Flow<List<RevisionSessionEntity>>
+
+    @Query("SELECT * FROM revision_sessions WHERE revisionSessionId = :sessionId LIMIT 1")
+    suspend fun getRevisionSessionById(sessionId: String): RevisionSessionEntity?
 }
 
 

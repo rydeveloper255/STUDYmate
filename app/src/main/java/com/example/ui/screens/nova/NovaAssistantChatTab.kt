@@ -69,6 +69,7 @@ fun NovaAssistantChatTab(
     val settings by viewModel.settings.collectAsState()
     val studyContext by viewModel.studyContext.collectAsState()
     val savedConversations by viewModel.savedConversations.collectAsState()
+    val pendingSensitiveAction by viewModel.pendingSensitiveAction.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
     var showMoreMenu by remember { mutableStateOf(false) }
@@ -685,6 +686,57 @@ fun NovaAssistantChatTab(
                 viewModel.startNewChat()
                 showHistoryDialog = false
             }
+        )
+    }
+
+    // =========================================================================
+    // 8. SENSITIVE ACTION CONFIRMATION DIALOG (STEP 54)
+    // =========================================================================
+    pendingSensitiveAction?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissPendingSensitiveAction() },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.WarningAmber,
+                        contentDescription = null,
+                        tint = AmberGold,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = pending.title,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        fontSize = 16.sp
+                    )
+                }
+            },
+            text = {
+                Text(
+                    text = pending.description,
+                    color = TextSecondary,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.confirmPendingSensitiveAction() },
+                    colors = ButtonDefaults.buttonColors(containerColor = ElectricIndigo)
+                ) {
+                    Text("Confirm & Execute", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.dismissPendingSensitiveAction() }
+                ) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
+            containerColor = DarkSurfaceElevated,
+            shape = RoundedCornerShape(16.dp)
         )
     }
 }

@@ -2,7 +2,7 @@ package com.example.notification
 
 import android.content.Context
 import android.util.Log
-import com.example.data.model.NotificationPreference
+import com.example.data.model.*
 
 enum class ProactiveEventType {
     STUDY_SESSION_UPCOMING,
@@ -46,59 +46,79 @@ object ProactiveEventBus {
         event: ProactiveEvent,
         prefs: NotificationPreference? = null
     ) {
-        val engine = NovaNotificationEngine(context)
+        val pipeline = SmartNotificationPipeline.getInstance(context)
 
-        // Respect Quiet Hours & Master Switch
-        if (prefs != null && !prefs.masterEnabled) {
-            Log.d(TAG, "Master notifications disabled, ignoring event: ${event.eventType}")
+        // Handle cancellations on study start/complete
+        if (event.eventType == ProactiveEventType.STUDY_SESSION_STARTED ||
+            event.eventType == ProactiveEventType.STUDY_SESSION_COMPLETED
+        ) {
+            StudyNotificationManager.cancelAllReminders(context)
+            Log.d(TAG, "Smart cancellation: cleared pending alarms for ${event.eventType}")
             return
         }
 
-        if (engine.isQuietHours(prefs?.quietStartHour ?: 22, prefs?.quietEndHour ?: 7) && event.priority != EventPriority.HIGH) {
-            Log.d(TAG, "Quiet hours active, skipping non-high priority event: ${event.eventType}")
-            return
+        // Map proactive event to SmartNotificationType & NotificationPriority
+        val (notifType, notifPriority) = when (event.eventType) {
+            ProactiveEventType.STUDY_SESSION_UPCOMING -> Pair(
+                SmartNotificationType.STUDY_REMINDER,
+                NotificationPriority.NORMAL
+            )
+            ProactiveEventType.STUDY_SESSION_MISSED -> Pair(
+                SmartNotificationType.MISSED_STUDY_SESSION,
+                NotificationPriority.NORMAL
+            )
+            ProactiveEventType.REVISION_DUE, ProactiveEventType.REVISION_OVERDUE -> Pair(
+                SmartNotificationType.SCHEDULE_REMINDER,
+                NotificationPriority.NORMAL
+            )
+            ProactiveEventType.MOCK_RECOMMENDED -> Pair(
+                SmartNotificationType.SCHEDULE_REMINDER,
+                NotificationPriority.NORMAL
+            )
+            ProactiveEventType.EXAM_DATE_APPROACHING -> Pair(
+                SmartNotificationType.IMPORTANT_UPDATE,
+                NotificationPriority.CRITICAL
+            )
+            ProactiveEventType.PERFORMANCE_IMPROVED, ProactiveEventType.PERFORMANCE_NEEDS_ATTENTION -> Pair(
+                SmartNotificationType.MOTIVATION,
+                NotificationPriority.NORMAL
+            )
+            ProactiveEventType.DISTRACTION_THRESHOLD_REACHED -> Pair(
+                SmartNotificationType.FOCUS_INTERRUPTED,
+                NotificationPriority.CRITICAL
+            )
+            else -> Pair(
+                SmartNotificationType.SYSTEM,
+                NotificationPriority.NORMAL
+            )
         }
 
-        when (event.eventType) {
-            ProactiveEventType.STUDY_SESSION_UPCOMING -> {
-                if (prefs?.studyReminders != false) {
-                    engine.sendStudyReminder(event.subject, event.topic, event.payloadMinutes)
-                }
-            }
-            ProactiveEventType.STUDY_SESSION_COMPLETED,
-            ProactiveEventType.STUDY_SESSION_STARTED -> {
-                // SMART CANCELLATION: Cancel active reminders for this study session
-                StudyNotificationManager.cancelAllReminders(context)
-            }
-            ProactiveEventType.STUDY_SESSION_MISSED -> {
-                if (prefs?.missedStudyReminders != false) {
-                    engine.sendMissedSessionRecovery(event.subject, event.topic, event.payloadMinutes)
-                }
-            }
-            ProactiveEventType.REVISION_DUE,
-            ProactiveEventType.REVISION_OVERDUE -> {
-                engine.sendRevisionReminder(event.subject, event.topic)
-            }
-            ProactiveEventType.MOCK_RECOMMENDED -> {
-                engine.sendMockTestReminder(event.subject, if (event.title.isNotBlank()) event.title else "Full Practice Test")
-            }
-            ProactiveEventType.PERFORMANCE_IMPROVED,
-            ProactiveEventType.PERFORMANCE_NEEDS_ATTENTION -> {
-                if (prefs?.motivationalQuotes != false) {
-                    engine.sendPerformanceInsight(event.subject, event.message, event.eventType == ProactiveEventType.PERFORMANCE_IMPROVED)
-                }
-            }
-            ProactiveEventType.EXAM_DATE_APPROACHING -> {
-                if (prefs?.examCountdownAlerts != false) {
-                    engine.sendExamCountdownAlert(event.subject, event.payloadMinutes)
-                }
-            }
-            ProactiveEventType.DISTRACTION_THRESHOLD_REACHED -> {
-                engine.sendSocialMediaNudge(event.title, event.payloadMinutes, if (event.subject.isNotBlank()) event.subject else "Study Session")
-            }
-            else -> {
-                Log.d(TAG, "Event logged: ${event.eventType}")
-            }
-        }
+        val smartEvent = SmartNotificationEvent(
+            eventId = "proactive_${event.eventType.name}_${event.timestamp}",
+            type = notifType,
+            priority = notifPriority,
+            title = if (event.title.isNotBlank()) event.title else when (event.eventType) {
+                ProactiveEventType.STUDY_SESSION_UPCOMING -> "📚 Study Time: ${event.subject}"
+                ProactiveEventType.STUDY_SESSION_MISSED -> "💙 Missed Session Recovery"
+                ProactiveEventType.REVISION_DUE -> "🧠 Revision Due: ${event.subject}"
+                ProactiveEventType.MOCK_RECOMMENDED -> "✍️ Recommended Mock Test"
+                ProactiveEventType.EXAM_DATE_APPROACHING -> "⏳ Exam Countdown Alert"
+                ProactiveEventType.DISTRACTION_THRESHOLD_REACHED -> "🛡️ Focus Shield Reminder"
+                else -> "🔔 StudyMate Notification"
+            },
+            message = if (event.message.isNotBlank()) event.message else when (event.eventType) {
+                ProactiveEventType.STUDY_SESSION_UPCOMING -> "Aapka ${event.payloadMinutes}-minute session (${event.topic}) start hone wala hai. Ready ho?"
+                ProactiveEventType.STUDY_SESSION_MISSED -> "Koi baat nahi! Ek short 15-20 min quick revision se track par wapas aa sakte ho."
+                ProactiveEventType.REVISION_DUE -> "Spaced repetition reminder: ${event.topic} ko revise karke concept clear rakhein."
+                ProactiveEventType.MOCK_RECOMMENDED -> "Ek full practice test solve karke apni weak areas test karein."
+                ProactiveEventType.EXAM_DATE_APPROACHING -> "${event.payloadMinutes} din bache hain exam ke liye. Planned target follow karte rahein!"
+                ProactiveEventType.DISTRACTION_THRESHOLD_REACHED -> "${event.title} screen time badh raha hai. Wapas session me focus karte hain!"
+                else -> "StudyMate update available."
+            },
+            targetExamCategory = event.examId.ifBlank { null },
+            timestamp = event.timestamp
+        )
+
+        pipeline.processAndDispatchEvent(smartEvent, prefs)
     }
 }

@@ -4,6 +4,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
@@ -58,12 +59,15 @@ class FocusShieldBlockActivity : ComponentActivity() {
                         finish()
                     },
                     onEndFocusSession = {
-                        FocusShieldManager.endFocusSession()
+                        FocusShieldForegroundService.stopFocus(this)
                         val intent = Intent(this, MainActivity::class.java).apply {
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                             putExtra("ACTION_END_FOCUS_FROM_BLOCK", true)
                         }
                         startActivity(intent)
+                        finish()
+                    },
+                    onAutoDismiss = {
                         finish()
                     }
                 )
@@ -77,12 +81,27 @@ fun FocusShieldBlockScreen(
     blockedPackageName: String = "",
     onBackToStudy: () -> Unit,
     onEndFocusSession: () -> Unit,
+    onAutoDismiss: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val subject by FocusShieldManager.currentSubject.collectAsStateWithLifecycle()
     val topic by FocusShieldManager.currentTopic.collectAsStateWithLifecycle()
     val remainingSecs by FocusShieldManager.remainingSeconds.collectAsStateWithLifecycle()
+    val isSessionActive by FocusShieldManager.isSessionActive.collectAsStateWithLifecycle()
+    val isStrictModeActive by FocusShieldManager.isStrictModeActive.collectAsStateWithLifecycle()
+
+    // When back button is pressed, navigate safely back to StudyMate rather than into blocked app
+    BackHandler {
+        onBackToStudy()
+    }
+
+    // Auto-dismiss if focus session ended externally or timer expired
+    LaunchedEffect(isSessionActive) {
+        if (!isSessionActive) {
+            onAutoDismiss()
+        }
+    }
 
     var showEndConfirmDialog by remember { mutableStateOf(false) }
 
@@ -177,14 +196,17 @@ fun FocusShieldBlockScreen(
 
             Surface(
                 shape = RoundedCornerShape(12.dp),
-                color = CoralRose.copy(alpha = 0.2f),
-                border = androidx.compose.foundation.BorderStroke(1.dp, CoralRose.copy(alpha = 0.5f))
+                color = if (isStrictModeActive) Color(0x35DC2626) else CoralRose.copy(alpha = 0.2f),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isStrictModeActive) Color(0x75DC2626) else CoralRose.copy(alpha = 0.5f)
+                )
             ) {
                 Text(
-                    text = "🛡️ FOCUS SHIELD ACTIVE",
+                    text = if (isStrictModeActive) "🔒 STRICT FOCUS ACTIVE" else "🛡️ FOCUS SHIELD ACTIVE",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.ExtraBold,
-                    color = CoralRose,
+                    color = if (isStrictModeActive) Color(0xFFFCA5A5) else CoralRose,
                     letterSpacing = 1.2.sp,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                 )
@@ -245,7 +267,7 @@ fun FocusShieldBlockScreen(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        text = subject,
+                        text = subject.ifBlank { "Study Session" },
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
                         color = Color.White
@@ -254,7 +276,7 @@ fun FocusShieldBlockScreen(
                     Spacer(modifier = Modifier.height(2.dp))
 
                     Text(
-                        text = topic,
+                        text = topic.ifBlank { "Deep Focus" },
                         style = MaterialTheme.typography.bodyMedium,
                         color = NeonCyan,
                         fontWeight = FontWeight.SemiBold
@@ -293,7 +315,7 @@ fun FocusShieldBlockScreen(
 
             // Action Buttons
             GlassButton(
-                text = "Back to Study",
+                text = "Back to StudyMate",
                 onClick = onBackToStudy,
                 icon = Icons.AutoMirrored.Filled.ArrowBack,
                 isPrimary = true,
@@ -302,21 +324,50 @@ fun FocusShieldBlockScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            OutlinedButton(
-                onClick = { showEndConfirmDialog = true },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("block_end_session_btn"),
-                shape = RoundedCornerShape(14.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x35FFFFFF))
-            ) {
-                Text(
-                    text = "End Focus Session",
-                    color = Color(0xFFCBD5E1),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
+            if (isStrictModeActive) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0x18DC2626),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x35DC2626))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Lock,
+                            contentDescription = "Strict Mode",
+                            tint = Color(0xFFFCA5A5),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Strict Mode Active • Unlocks when timer ends",
+                            color = Color(0xFFFCA5A5),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            } else {
+                OutlinedButton(
+                    onClick = { showEndConfirmDialog = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("block_end_session_btn"),
+                    shape = RoundedCornerShape(14.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x35FFFFFF))
+                ) {
+                    Text(
+                        text = "End Focus Session",
+                        color = Color(0xFFCBD5E1),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
         }
 
@@ -359,3 +410,4 @@ fun FocusShieldBlockScreen(
         }
     }
 }
+
