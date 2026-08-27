@@ -149,7 +149,10 @@ fun OtpVerificationScreen(
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "Hamne 6-digit verification code aapke email par send kiya hai:",
+                text = if (isPasswordRecovery) 
+                    "Use this verification code to reset your StudyMate password."
+                else 
+                    "Use this verification code to verify your StudyMate account.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFF94A3B8),
                 textAlign = TextAlign.Center
@@ -183,6 +186,17 @@ fun OtpVerificationScreen(
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Spam folder notice
+            Text(
+                text = "Agar inbox me code na dikhe, to kripya apna Spam/Junk folder bhi check karein.",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFF64748B),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 12.dp)
+            )
 
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -489,7 +503,36 @@ fun OtpVerificationScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            // Security Reminder
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0x10FFFFFF),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x20FFFFFF)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Security,
+                        contentDescription = null,
+                        tint = AmberGold,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "Security Notice: Never share this 6-digit OTP with anyone. StudyMate will never ask for your code.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF94A3B8),
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Back / Edit Email option
             TextButton(
