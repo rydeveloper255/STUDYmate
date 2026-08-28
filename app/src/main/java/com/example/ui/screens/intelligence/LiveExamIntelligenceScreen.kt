@@ -31,6 +31,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.*
+import com.example.data.model.content.WeeklyCurrentAffairsPdf
+import com.example.service.collector.GkNowWeeklyPdfScraper
 import com.example.ui.components.*
 import com.example.ui.screens.home.openUrlInBrowser
 import com.example.ui.theme.*
@@ -73,6 +75,46 @@ fun LiveExamIntelligenceScreen(
     var searchQuery by remember { mutableStateOf("") }
     var activeDetailUpdate by remember { mutableStateOf<LiveExamUpdateEntity?>(null) }
     var activeDetailTrending by remember { mutableStateOf<TrendingExamTopicEntity?>(null) }
+    var selectedPdfForViewer by remember { mutableStateOf<WeeklyCurrentAffairsPdf?>(null) }
+
+    // Sample / Discovered weekly Current Affairs PDFs
+    val weeklyPdfs = remember {
+        listOf(
+            WeeklyCurrentAffairsPdf(
+                id = "ca_pdf_2026_08_w3",
+                title = "Weekly Current Affairs 16–22 August 2026 (Hindi PDF)",
+                dateRange = "16 से 22 अगस्त 2026",
+                language = "Hindi",
+                sourcePageUrl = GkNowWeeklyPdfScraper.SOURCE_PAGE_URL,
+                pdfSourceUrl = "https://gknow.in/hi/weekly-current-affairs-pdf-in-hindi/#week-16-22-aug-2026",
+                publishedAt = "अगस्त 2026",
+                detectedAt = System.currentTimeMillis(),
+                status = "AVAILABLE"
+            ),
+            WeeklyCurrentAffairsPdf(
+                id = "ca_pdf_2026_08_w2",
+                title = "Weekly Current Affairs 09–15 August 2026 (Hindi PDF)",
+                dateRange = "09 से 15 अगस्त 2026",
+                language = "Hindi",
+                sourcePageUrl = GkNowWeeklyPdfScraper.SOURCE_PAGE_URL,
+                pdfSourceUrl = "https://gknow.in/hi/weekly-current-affairs-pdf-in-hindi/#week-09-15-aug-2026",
+                publishedAt = "अगस्त 2026",
+                detectedAt = System.currentTimeMillis(),
+                status = "AVAILABLE"
+            ),
+            WeeklyCurrentAffairsPdf(
+                id = "ca_pdf_2026_08_w1",
+                title = "Weekly Current Affairs 02–08 August 2026 (Hindi PDF)",
+                dateRange = "02 से 08 अगस्त 2026",
+                language = "Hindi",
+                sourcePageUrl = GkNowWeeklyPdfScraper.SOURCE_PAGE_URL,
+                pdfSourceUrl = "https://gknow.in/hi/weekly-current-affairs-pdf-in-hindi/#week-02-08-aug-2026",
+                publishedAt = "अगस्त 2026",
+                detectedAt = System.currentTimeMillis(),
+                status = "AVAILABLE"
+            )
+        )
+    }
 
     // Filter items
     val filteredUpdates = remember(feedState.liveNews, selectedTab, selectedTimeFilter, searchQuery) {
@@ -313,6 +355,129 @@ fun LiveExamIntelligenceScreen(
                 }
             }
 
+            // Weekly Current Affairs Hindi PDF Section (if tab is ALL or CURRENT_AFFAIRS)
+            if (selectedTab == LiveFeedTab.ALL || selectedTab == LiveFeedTab.CURRENT_AFFAIRS) {
+                item {
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "📑 साप्ताहिक करेंट अफेयर्स",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (isDark) Color.White else Color(0xFF0F172A)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Surface(
+                                    color = Color(0xFF10B981).copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = "Hindi PDF",
+                                        color = Color(0xFF34D399),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(weeklyPdfs, key = { it.id }) { pdf ->
+                                Surface(
+                                    modifier = Modifier
+                                        .width(260.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .border(
+                                            1.dp,
+                                            if (isDark) Color(0x3338BDF8) else Color(0x2038BDF8),
+                                            RoundedCornerShape(14.dp)
+                                        )
+                                        .clickable { selectedPdfForViewer = pdf },
+                                    color = if (isDark) Color(0xFF0F172A) else Color.White,
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "GK Now • Weekly",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color(0xFF38BDF8),
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 10.sp
+                                            )
+                                            Icon(
+                                                imageVector = Icons.Filled.PictureAsPdf,
+                                                contentDescription = null,
+                                                tint = Color(0xFFEF4444),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+
+                                        Text(
+                                            text = pdf.dateRange,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isDark) Color.White else Color(0xFF0F172A),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+
+                                        Text(
+                                            text = "UPSC, SSC, Railway & All State Exams",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+
+                                        Button(
+                                            onClick = { selectedPdfForViewer = pdf },
+                                            modifier = Modifier.fillMaxWidth().height(32.dp),
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = if (isDark) Color(0xFF0284C7) else Color(0xFF0369A1)
+                                            ),
+                                            contentPadding = PaddingValues(0.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Visibility,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(Modifier.width(4.dp))
+                                            Text(
+                                                text = "Read PDF",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Trending section (if tab is ALL or TRENDING)
             if (filteredTrending.isNotEmpty()) {
                 item {
@@ -446,7 +611,16 @@ fun LiveExamIntelligenceScreen(
             }
         )
     }
+
+    // In-App Weekly Current Affairs PDF Viewer Dialog
+    if (selectedPdfForViewer != null) {
+        WeeklyCurrentAffairsPdfViewerDialog(
+            pdf = selectedPdfForViewer!!,
+            onDismiss = { selectedPdfForViewer = null }
+        )
+    }
 }
+
 
 @Composable
 private fun LiveUpdateDetailedFeedCard(

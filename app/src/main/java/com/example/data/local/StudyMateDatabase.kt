@@ -53,9 +53,17 @@ import com.example.data.model.*
         QuestionAttemptEntity::class,
         SavedQuestionEntity::class,
         RevisionItemEntity::class,
-        RevisionSessionEntity::class
+        RevisionSessionEntity::class,
+        com.example.data.model.content.RawSourceRecordEntity::class,
+        com.example.data.model.content.ContentVersionEntity::class,
+        com.example.data.model.content.ReviewQueueItemEntity::class,
+        com.example.data.model.content.ContentCollectionJobLogEntity::class,
+        com.example.data.model.content.AiProcessingLogEntity::class,
+        com.example.data.model.content.TelegramPublicationEntity::class,
+        com.example.data.model.content.ContentSourceConfig::class,
+        com.example.data.model.content.ContentSourceReferenceEntity::class
     ],
-    version = 21,
+    version = 24,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -94,6 +102,7 @@ abstract class StudyMateDatabase : RoomDatabase() {
     abstract fun resourceDao(): ResourceDao
     abstract fun practiceDao(): PracticeDao
     abstract fun revisionDao(): RevisionDao
+    abstract fun contentIntelligenceDao(): ContentIntelligenceDao
 
     companion object {
         @Volatile

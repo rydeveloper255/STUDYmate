@@ -266,6 +266,25 @@ class MainViewModel(
     private val _otpCooldownSeconds = MutableStateFlow(0)
     val otpCooldownSeconds: StateFlow<Int> = _otpCooldownSeconds.asStateFlow()
 
+    // --- Telegram Bot Service & Health State ---
+    val telegramBotService: com.example.data.remote.telegram.TelegramBotService =
+        (application as? StudyMateApplication)?.telegramBotService
+            ?: com.example.data.remote.telegram.TelegramBotService()
+
+    private val _telegramHealthStatus = MutableStateFlow<com.example.data.remote.telegram.TelegramHealthStatus>(
+        com.example.data.remote.telegram.TelegramHealthStatus.Idle
+    )
+    val telegramHealthStatus: StateFlow<com.example.data.remote.telegram.TelegramHealthStatus> =
+        _telegramHealthStatus.asStateFlow()
+
+    fun checkTelegramBotHealth() {
+        viewModelScope.launch {
+            _telegramHealthStatus.value = com.example.data.remote.telegram.TelegramHealthStatus.Checking
+            val status = telegramBotService.checkHealth()
+            _telegramHealthStatus.value = status
+        }
+    }
+
     // --- Study Plan Items ---
     val studyPlanItems: StateFlow<List<StudyPlanItem>> = studyRepository.allPlanItems
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

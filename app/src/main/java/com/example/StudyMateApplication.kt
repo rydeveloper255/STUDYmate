@@ -31,6 +31,9 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
     lateinit var supabaseSyncService: SupabaseSyncService
         private set
 
+    lateinit var supabaseContentHubService: com.example.data.remote.supabase.SupabaseContentHubService
+        private set
+
     lateinit var authRepository: AuthRepository
         private set
 
@@ -47,6 +50,18 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
         private set
 
     lateinit var recruitmentIntelligenceEngine: com.example.service.intelligence.RecruitmentIntelligenceEngine
+        private set
+
+    lateinit var telegramBotService: com.example.data.remote.telegram.TelegramBotService
+        private set
+
+    lateinit var sourceManager: com.example.service.collector.SourceManager
+        private set
+
+    lateinit var automatedContentCollectorEngine: com.example.service.collector.AutomatedContentCollectorEngine
+        private set
+
+    lateinit var automatedContentScheduler: com.example.service.collector.AutomatedContentScheduler
         private set
 
     private var imageLoaderInstance: ImageLoader? = null
@@ -105,6 +120,10 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
         supabaseClient = SupabaseClient()
         supabaseAuthManager = SupabaseAuthManager(this, supabaseClient)
         supabaseSyncService = SupabaseSyncService(supabaseClient, supabaseAuthManager, database)
+        supabaseContentHubService = com.example.data.remote.supabase.SupabaseContentHubService(
+            supabaseClient = supabaseClient,
+            database = database
+        )
 
         authRepository = AuthRepository(this, database.userDao(), supabaseAuthManager, supabaseClient, supabaseSyncService)
         geminiRepository = GeminiRepository()
@@ -121,6 +140,21 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
             geminiRepository = geminiRepository,
             supabaseClient = supabaseClient
         )
+        telegramBotService = com.example.data.remote.telegram.TelegramBotService()
+        sourceManager = com.example.service.collector.SourceManager()
+        automatedContentCollectorEngine = com.example.service.collector.AutomatedContentCollectorEngine(
+            context = this,
+            database = database,
+            telegramBotService = telegramBotService,
+            sourceManager = sourceManager,
+            geminiRepository = geminiRepository,
+            supabaseContentHub = supabaseContentHubService
+        )
+        automatedContentScheduler = com.example.service.collector.AutomatedContentScheduler(
+            context = this,
+            collectorEngine = automatedContentCollectorEngine
+        )
+        automatedContentScheduler.startScheduler()
 
         // Initialize Focus Shield & Offline Notification System
         com.example.service.FocusShieldManager.init(this)

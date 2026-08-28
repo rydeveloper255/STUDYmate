@@ -1004,6 +1004,18 @@ fun ProfileSettingsScreen(
 
                         HorizontalDivider(color = cardBorderColor)
 
+                        SettingsNavRow(
+                            icon = Icons.Outlined.Dns,
+                            title = "Developer & Bot Diagnostics",
+                            subtitle = "Test Telegram Bot connection (getMe), database sync & system logs",
+                            primaryTextColor = primaryTextColor,
+                            secondaryTextColor = secondaryTextColor,
+                            onClick = { showDiagnosticDialog = true },
+                            testTag = "row_developer_diagnostics"
+                        )
+
+                        HorizontalDivider(color = cardBorderColor)
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1115,7 +1127,13 @@ fun ProfileSettingsScreen(
     // --- Dialogs ---
 
     if (showDiagnosticDialog) {
+        val app = context.applicationContext as? com.example.StudyMateApplication
         PersistenceDiagnosticDialog(
+            authManager = app?.supabaseAuthManager,
+            telegramBotService = app?.telegramBotService,
+            sourceManager = app?.sourceManager,
+            contentScheduler = app?.automatedContentScheduler,
+            collectorEngine = app?.automatedContentCollectorEngine,
             onDismiss = { showDiagnosticDialog = false },
             onTriggerForceSync = {
                 onTriggerSync?.invoke { _, _ -> }
