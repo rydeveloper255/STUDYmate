@@ -38,6 +38,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.remote.supabase.SupabaseConfig
 import com.example.ui.components.GlassButton
 import com.example.ui.components.GlassCard
 import com.example.ui.components.StudyMateBrandLogo
@@ -52,6 +53,7 @@ fun OtpVerificationScreen(
     successMessage: String?,
     cooldownSeconds: Int,
     isPasswordRecovery: Boolean = false,
+    otpLength: Int = SupabaseConfig.emailOtpLength,
     onVerifyOtp: (otp: String) -> Unit,
     onResendOtp: () -> Unit,
     onBackToPrevious: () -> Unit,
@@ -76,10 +78,10 @@ fun OtpVerificationScreen(
 
     fun handlePaste() {
         val clipText = clipboardManager.getText()?.text ?: ""
-        val digitsOnly = clipText.filter { it.isDigit() }.take(6)
+        val digitsOnly = clipText.filter { it.isDigit() }.take(otpLength)
         if (digitsOnly.isNotEmpty()) {
             otpValue = digitsOnly
-            if (digitsOnly.length == 6) {
+            if (digitsOnly.length == otpLength) {
                 focusManager.clearFocus()
                 onVerifyOtp(digitsOnly)
             }
@@ -296,7 +298,7 @@ fun OtpVerificationScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Enter 6-Digit Code",
+                            text = "Enter $otpLength-Digit Code",
                             style = MaterialTheme.typography.labelLarge,
                             color = Color.White,
                             fontWeight = FontWeight.SemiBold
@@ -332,7 +334,7 @@ fun OtpVerificationScreen(
                         }
                     }
 
-                    // Custom 6-Box OTP Input System
+                    // Custom Dynamic OTP Input System
                     Box(
                         modifier = Modifier.fillMaxWidth(),
                         contentAlignment = Alignment.Center
@@ -341,9 +343,9 @@ fun OtpVerificationScreen(
                         BasicTextField(
                             value = otpValue,
                             onValueChange = { newValue ->
-                                val digitsOnly = newValue.filter { it.isDigit() }.take(6)
+                                val digitsOnly = newValue.filter { it.isDigit() }.take(otpLength)
                                 otpValue = digitsOnly
-                                if (digitsOnly.length == 6) {
+                                if (digitsOnly.length == otpLength) {
                                     focusManager.clearFocus()
                                     onVerifyOtp(digitsOnly)
                                 }
@@ -355,7 +357,7 @@ fun OtpVerificationScreen(
                             keyboardActions = KeyboardActions(
                                 onDone = {
                                     focusManager.clearFocus()
-                                    if (otpValue.length == 6) {
+                                    if (otpValue.length == otpLength) {
                                         onVerifyOtp(otpValue)
                                     }
                                 }
@@ -366,54 +368,66 @@ fun OtpVerificationScreen(
                                 .testTag("otp_hidden_input")
                         )
 
-                        // 6 Visible Liquid-Glass Boxes
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        // Visible Liquid-Glass Boxes with Responsive Width Calculation
+                        BoxWithConstraints(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.Center
                         ) {
-                            for (i in 0 until 6) {
-                                val char = otpValue.getOrNull(i)?.toString() ?: ""
-                                val isCurrent = i == otpValue.length
-                                val isFilled = char.isNotEmpty()
+                            val availableWidth = maxWidth
+                            val spacing = if (otpLength >= 8) 4.dp else 8.dp
+                            val totalSpacing = spacing * (otpLength - 1)
+                            val calculatedBoxWidth = ((availableWidth - totalSpacing) / otpLength).coerceIn(28.dp, 46.dp)
+                            val calculatedBoxHeight = (calculatedBoxWidth * 1.22f).coerceIn(40.dp, 56.dp)
+                            val charFontSize = if (otpLength >= 8) 18.sp else 20.sp
 
-                                val boxBorderBrush = when {
-                                    isCurrent -> Brush.linearGradient(listOf(NeonCyan, ElectricViolet))
-                                    isFilled -> Brush.linearGradient(listOf(NeonCyan.copy(alpha = 0.8f), NebulaPurple.copy(alpha = 0.8f)))
-                                    else -> Brush.linearGradient(listOf(Color(0x30FFFFFF), Color(0x15FFFFFF)))
-                                }
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(spacing),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                for (i in 0 until otpLength) {
+                                    val char = otpValue.getOrNull(i)?.toString() ?: ""
+                                    val isCurrent = i == otpValue.length
+                                    val isFilled = char.isNotEmpty()
 
-                                val boxBackground = when {
-                                    isCurrent -> Color(0x330EA5E9)
-                                    isFilled -> Color(0x281E293B)
-                                    else -> Color(0x150F172A)
-                                }
+                                    val boxBorderBrush = when {
+                                        isCurrent -> Brush.linearGradient(listOf(NeonCyan, ElectricViolet))
+                                        isFilled -> Brush.linearGradient(listOf(NeonCyan.copy(alpha = 0.8f), NebulaPurple.copy(alpha = 0.8f)))
+                                        else -> Brush.linearGradient(listOf(Color(0x30FFFFFF), Color(0x15FFFFFF)))
+                                    }
 
-                                Box(
-                                    modifier = Modifier
-                                        .size(46.dp, 54.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(boxBackground)
-                                        .border(
-                                            width = if (isCurrent) 1.5.dp else 1.dp,
-                                            brush = boxBorderBrush,
-                                            shape = RoundedCornerShape(12.dp)
+                                    val boxBackground = when {
+                                        isCurrent -> Color(0x330EA5E9)
+                                        isFilled -> Color(0x281E293B)
+                                        else -> Color(0x150F172A)
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(calculatedBoxWidth, calculatedBoxHeight)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(boxBackground)
+                                            .border(
+                                                width = if (isCurrent) 1.5.dp else 1.dp,
+                                                brush = boxBorderBrush,
+                                                shape = RoundedCornerShape(10.dp)
+                                            )
+                                            .clickable {
+                                                try {
+                                                    focusRequester.requestFocus()
+                                                } catch (ignored: Exception) {}
+                                            }
+                                            .testTag("otp_box_$i"),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = char,
+                                            style = MaterialTheme.typography.titleLarge.copy(fontSize = charFontSize),
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            textAlign = TextAlign.Center
                                         )
-                                        .clickable {
-                                            try {
-                                                focusRequester.requestFocus()
-                                            } catch (ignored: Exception) {}
-                                        }
-                                        .testTag("otp_box_$i"),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = char,
-                                        style = MaterialTheme.typography.titleLarge,
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace,
-                                        textAlign = TextAlign.Center
-                                    )
+                                    }
                                 }
                             }
                         }
@@ -426,12 +440,12 @@ fun OtpVerificationScreen(
                         text = "Verify & Continue",
                         onClick = {
                             focusManager.clearFocus()
-                            if (otpValue.length == 6) {
+                            if (otpValue.length == otpLength) {
                                 onVerifyOtp(otpValue)
                             }
                         },
                         isLoading = isLoading,
-                        enabled = otpValue.length == 6 && !isLoading,
+                        enabled = otpValue.length == otpLength && !isLoading,
                         loadingText = "Verifying code...",
                         icon = Icons.Outlined.VerifiedUser,
                         modifier = Modifier.fillMaxWidth(),
@@ -524,7 +538,7 @@ fun OtpVerificationScreen(
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
-                        text = "Security Notice: Never share this 6-digit OTP with anyone. StudyMate will never ask for your code.",
+                        text = "Security Notice: Never share this verification OTP with anyone. StudyMate will never ask for your code.",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF94A3B8),
                         fontSize = 11.sp

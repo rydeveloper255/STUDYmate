@@ -13,6 +13,22 @@ import com.example.BuildConfig
 object SupabaseConfig {
     private const val TAG = "SupabaseConfig"
 
+    /**
+     * Configured Email OTP length for Supabase Auth verification.
+     * Standard Supabase project settings send 8-digit or 6-digit email OTPs.
+     */
+    const val DEFAULT_OTP_LENGTH = 8
+
+    val emailOtpLength: Int
+        get() {
+            return try {
+                val raw = getBuildConfigField("SUPABASE_OTP_LENGTH")
+                raw.toIntOrNull() ?: DEFAULT_OTP_LENGTH
+            } catch (e: Throwable) {
+                DEFAULT_OTP_LENGTH
+            }
+        }
+
     private fun getBuildConfigField(fieldName: String): String {
         return try {
             val field = BuildConfig::class.java.getField(fieldName)

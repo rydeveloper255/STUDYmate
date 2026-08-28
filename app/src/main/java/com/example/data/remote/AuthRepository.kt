@@ -470,8 +470,8 @@ class AuthRepository(
         val normalizedEmail = email.trim().lowercase(java.util.Locale.ROOT)
         val cleanOtp = otp.trim()
 
-        if (cleanOtp.length < 6) {
-            return@withContext Result.failure(IllegalArgumentException("Kripya pura 6-digit OTP darj karein."))
+        if (cleanOtp.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Kripya valid OTP darj karein."))
         }
 
         try {
@@ -647,8 +647,8 @@ class AuthRepository(
         val normalizedEmail = email.trim().lowercase(java.util.Locale.ROOT)
         val cleanOtp = otp.trim()
 
-        if (cleanOtp.length < 6) {
-            return@withContext Result.failure(IllegalArgumentException("Kripya pura 6-digit OTP darj karein."))
+        if (cleanOtp.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Kripya valid OTP darj karein."))
         }
 
         try {

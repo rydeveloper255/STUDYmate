@@ -121,7 +121,7 @@ fun ForgotPasswordEmailScreen(
             )
 
             Text(
-                text = "Apna registered email enter karein. Ham aapko 6-digit password reset code bhejenge.",
+                text = "Apna registered email enter karein. Ham aapko password reset OTP bhejenge.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFF94A3B8),
                 textAlign = TextAlign.Center,
