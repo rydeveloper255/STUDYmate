@@ -23,16 +23,21 @@ object TelegramBotConfig {
      */
     private val TOKEN_REGEX = Regex("""\d{8,12}:[A-Za-z0-9_-]{30,45}""")
 
+    private fun getBuildConfigField(fieldName: String): String {
+        return try {
+            val field = BuildConfig::class.java.getField(fieldName)
+            (field.get(null) as? String)?.trim() ?: ""
+        } catch (e: Throwable) {
+            ""
+        }
+    }
+
     /**
      * Safely reads the bot token from BuildConfig / Environment.
      * Returns null if missing, empty, or set to placeholder/dummy value.
      */
     fun getBotToken(): String? {
-        val raw = try {
-            BuildConfig.TELEGRAM_BOT_TOKEN.trim()
-        } catch (e: Throwable) {
-            ""
-        }
+        val raw = getBuildConfigField("TELEGRAM_BOT_TOKEN")
         return if (raw.isBlank() ||
             raw.equals("dummy_telegram_bot_token", ignoreCase = true) ||
             raw.equals("dummy_key", ignoreCase = true) ||

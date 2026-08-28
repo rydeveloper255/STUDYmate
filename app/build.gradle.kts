@@ -21,6 +21,11 @@ android {
     versionName = "1.0.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    buildConfigField("String", "TELEGRAM_BOT_TOKEN", "\"dummy_telegram_bot_token\"")
+    buildConfigField("String", "GEMINI_API_KEY", "\"dummy_key\"")
+    buildConfigField("String", "SUPABASE_URL", "\"https://your-project.supabase.co\"")
+    buildConfigField("String", "SUPABASE_ANON_KEY", "\"eyJhbGciOi...\"")
   }
 
   signingConfigs {
