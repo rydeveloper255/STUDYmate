@@ -2,10 +2,15 @@ package com.example.ui.screens.home
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -23,6 +28,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -131,6 +138,8 @@ fun HomeScreen(
     val currentTheme = currentThemeMode()
 
     // Modals state
+    var showStrictModePromptDialog by remember { mutableStateOf(false) }
+    var isStrictModeActive by remember { mutableStateOf(false) }
     var showThemeSelectionDialog by remember { mutableStateOf(false) }
     var showExamSwitcherDialog by remember { mutableStateOf(false) }
     var showQuickSearchDialog by remember { mutableStateOf(false) }
@@ -676,30 +685,28 @@ fun HomeScreen(
             }
 
             // =========================================================================
-            // 4. FOCUS MODE — HERO SECTION (Timer display & duration selection)
+            // 4. CIRCULAR HOURGLASS FOCUS TIMER (With Strict Mode & App Blocking)
             // =========================================================================
             item {
-                FocusModeHeroSection(
+                CompactHourglassFocusTimerSection(
                     focusTimerState = focusTimerState,
                     missionSubject = missionSubject,
                     missionTopic = missionTopic,
-                    missionTargetMinutes = missionTargetMinutes,
-                    onStartFocus = {
-                        onStartFocusSession(missionSubject, missionTopic)
-                    },
-                    onOpenFocusTab = {
-                        onNavigateToTab(AppNavTab.FOCUS)
+                    isStrictModeActive = isStrictModeActive,
+                    onStartFocusClick = {
+                        showStrictModePromptDialog = true
                     },
                     onPauseFocus = onPauseFocusSession,
                     onResumeFocus = onResumeFocusSession,
                     onStopFocus = onStopFocusSession,
+                    onOpenShieldSettings = { showShieldSettingsDialog = true },
                     isDark = isDark,
                     currentTheme = currentTheme
                 )
             }
 
             // =========================================================================
-            // STEP 50: TODAY'S MISSION & NOVA SMART INSIGHTS WIDGETS
+            // 5. TODAY'S MISSION (Compact)
             // =========================================================================
             item {
                 TodayMissionHomeWidget(
@@ -709,99 +716,21 @@ fun HomeScreen(
                     onToggleMission = onToggleDailyMissionTask,
                     onStartAction = { actionType, subject, topic, minutes ->
                         when (actionType) {
-                            "FOCUS" -> onStartFocusSession(subject, topic)
+                            "FOCUS" -> showStrictModePromptDialog = true
                             "PRACTICE" -> onNavigateToTab(AppNavTab.PRACTICE)
                             "CURRENT_AFFAIRS" -> onNavigateToTab(AppNavTab.UPDATES)
-                            else -> onStartFocusSession(subject, topic)
+                            else -> showStrictModePromptDialog = true
                         }
                     },
                     onOpenPlan = onOpenSmartPlanner
                 )
             }
 
-            if (weakTopicInsights.isNotEmpty()) {
-                item {
-                    WeakTopicInsightHomeWidget(
-                        insight = weakTopicInsights.first(),
-                        onStartPractice = { subject, topic, minutes ->
-                            onNavigateToTab(AppNavTab.PRACTICE)
-                        }
-                    )
-                }
-            }
-
             // =========================================================================
-            // 5. BLOCK APPS CARD (Focus Shield app blocking manager)
+            // 6. COLLAPSIBLE 2x2 FEATURE HUBS GRID
             // =========================================================================
             item {
-                BlockAppsCardSection(
-                    onOpenShieldSettings = { showShieldSettingsDialog = true },
-                    isDark = isDark,
-                    currentTheme = currentTheme
-                )
-            }
-
-            // =========================================================================
-            // 6. CONTINUE LEARNING (Where you left off)
-            // =========================================================================
-            item {
-                ContinueLearningSection(
-                    missionSubject = missionSubject,
-                    missionTopic = missionTopic,
-                    recommendationReason = recommendationReason,
-                    completedPlanCount = completedPlanCount,
-                    totalPlanCount = totalPlanCount,
-                    progressPercentage = progressPercentage,
-                    hasActiveTasks = totalPlanCount > 0 || nextPendingTask != null,
-                    onContinue = { onNavigateToTab(AppNavTab.STUDY) },
-                    isDark = isDark,
-                    currentTheme = currentTheme
-                )
-            }
-
-            // =========================================================================
-            // 7. SMART IMPORTANT UPDATES (Vacancies, Results, Admit Cards with NEW badges)
-            // =========================================================================
-            item {
-                LatestImportantUpdateSection(
-                    recruitmentFeedState = recruitmentFeedState,
-                    liveExamFeedState = liveExamFeedState,
-                    selectedExamName = selectedExamName,
-                    onOpenSmartVacancy = onOpenSmartVacancy,
-                    onOpenLiveExamUpdateDetail = onOpenLiveExamUpdateDetail,
-                    onOpenFullUpdates = onOpenFullLiveExamIntelligence,
-                    onRefreshUpdates = { onRefreshLiveExam() },
-                    isDark = isDark,
-                    currentTheme = currentTheme
-                )
-            }
-
-            item {
-                NeedsPracticeAndStrengthsSection(
-                    topicPerformances = topicPerformances,
-                    onPracticeTopic = { perf ->
-                        val config = MockTestConfig(
-                            exam = selectedExamName,
-                            testType = MockTestType.SUBJECT_PRACTICE,
-                            subject = perf.subject,
-                            chapter = perf.topic,
-                            topic = perf.topic,
-                            questionCount = 15,
-                            timeLimitMinutes = 15
-                        )
-                        onStartPracticeWithConfig(config)
-                    },
-                    onOpenPracticeTab = { onNavigateToTab(AppNavTab.PRACTICE) },
-                    isDark = isDark,
-                    currentTheme = currentTheme
-                )
-            }
-
-            // =========================================================================
-            // 8. ALL FEATURES (5 Categorized Sections: Learn, Practice, Updates, AI & Tools, Account)
-            // =========================================================================
-            item {
-                AllFeaturesGridSection(
+                Collapsible2x2FeatureGridSection(
                     onNavigateToTab = onNavigateToTab,
                     onOpenSmartVacancy = onOpenSmartVacancy,
                     onOpenExamReadinessCenter = onOpenExamReadinessCenter,
@@ -821,6 +750,58 @@ fun HomeScreen(
     // =========================================================================
     // MODAL DIALOGS
     // =========================================================================
+
+    // STRICT MODE CONFIRMATION DIALOG
+    if (showStrictModePromptDialog) {
+        AlertDialog(
+            onDismissRequest = { showStrictModePromptDialog = false },
+            containerColor = if (isDark) Color(0xFF1E293B) else Color.White,
+            shape = RoundedCornerShape(20.dp),
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Shield, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Enable Strict Mode?",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDark) Color.White else Color(0xFF0F172A)
+                    )
+                }
+            },
+            text = {
+                Text(
+                    text = "Enable Strict Mode for this focus session? This will activate app blocking to prevent distracting apps during your focus session.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        isStrictModeActive = true
+                        showStrictModePromptDialog = false
+                        onStartFocusSession(missionSubject, missionTopic)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Enable Strict Mode", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        isStrictModeActive = false
+                        showStrictModePromptDialog = false
+                        onStartFocusSession(missionSubject, missionTopic)
+                    }
+                ) {
+                    Text("Not Now", color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B))
+                }
+            }
+        )
+    }
 
     // 0. SHIELD SETTINGS MODAL DIALOG
     if (showShieldSettingsDialog) {
@@ -1343,23 +1324,182 @@ fun HomeScreen(
             onDismiss = { showTransparencyDialog = false }
         )
     }
+
+    if (showStrictModePromptDialog) {
+        AlertDialog(
+            onDismissRequest = { showStrictModePromptDialog = false },
+            containerColor = if (isDark) Color(0xFF111827) else Color.White,
+            shape = RoundedCornerShape(20.dp),
+            icon = {
+                Icon(
+                    imageVector = Icons.Filled.Shield,
+                    contentDescription = null,
+                    tint = NeonCyan,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Enable Strict Mode?",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDark) Color.White else Color(0xFF0F172A)
+                )
+            },
+            text = {
+                Text(
+                    text = "Strict Mode blocks distracting apps during your focus session to ensure 100% deep work without interruptions.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showStrictModePromptDialog = false
+                        isStrictModeActive = true
+                        onStartFocusSession(missionSubject, missionTopic)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ElectricIndigo),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Enable Strict Mode", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        showStrictModePromptDialog = false
+                        isStrictModeActive = false
+                        onStartFocusSession(missionSubject, missionTopic)
+                    },
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Not Now", fontWeight = FontWeight.Medium)
+                }
+            }
+        )
+    }
 }
 
 // =========================================================================
-// HERO SECTION COMPONENT: FOCUS MODE
+// HERO SECTION COMPONENT: CIRCULAR HOURGLASS FOCUS TIMER
 // =========================================================================
 
 @Composable
-private fun FocusModeHeroSection(
+private fun HourglassGraphic(
+    modifier: Modifier = Modifier,
+    isRunning: Boolean = false,
+    progress: Float = 0.5f,
+    accentColor: Color = NeonCyan
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "sand_stream")
+    val sandAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.95f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "sand_alpha"
+    )
+
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+        val cy = h / 2f
+
+        val glassPath = androidx.compose.ui.graphics.Path().apply {
+            moveTo(cx - w * 0.32f, cy - h * 0.38f)
+            lineTo(cx + w * 0.32f, cy - h * 0.38f)
+            lineTo(cx + w * 0.06f, cy)
+            lineTo(cx + w * 0.32f, cy + h * 0.38f)
+            lineTo(cx - w * 0.32f, cy + h * 0.38f)
+            lineTo(cx - w * 0.06f, cy)
+            close()
+        }
+
+        // Top Cap
+        drawLine(
+            color = accentColor,
+            start = Offset(cx - w * 0.38f, cy - h * 0.4f),
+            end = Offset(cx + w * 0.38f, cy - h * 0.4f),
+            strokeWidth = 3.dp.toPx(),
+            cap = StrokeCap.Round
+        )
+
+        // Bottom Cap
+        drawLine(
+            color = accentColor,
+            start = Offset(cx - w * 0.38f, cy + h * 0.4f),
+            end = Offset(cx + w * 0.38f, cy + h * 0.4f),
+            strokeWidth = 3.dp.toPx(),
+            cap = StrokeCap.Round
+        )
+
+        // Outline
+        drawPath(
+            path = glassPath,
+            color = accentColor.copy(alpha = 0.75f),
+            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+        )
+
+        // Top Sand Fill
+        val topSandLevel = (1f - progress).coerceIn(0f, 1f)
+        if (topSandLevel > 0.02f) {
+            val yTop = cy - (h * 0.36f) * topSandLevel
+            val topSandPath = androidx.compose.ui.graphics.Path().apply {
+                val factor = (cy - yTop) / (h * 0.38f)
+                val halfW = (w * 0.06f) + (w * 0.26f) * factor.coerceIn(0f, 1f)
+                moveTo(cx - halfW, yTop)
+                lineTo(cx + halfW, yTop)
+                lineTo(cx + w * 0.06f, cy)
+                lineTo(cx - w * 0.06f, cy)
+                close()
+            }
+            drawPath(path = topSandPath, color = accentColor.copy(alpha = 0.45f))
+        }
+
+        // Bottom Sand Fill
+        val bottomSandLevel = progress.coerceIn(0f, 1f)
+        if (bottomSandLevel > 0.02f) {
+            val yBottom = cy + (h * 0.38f) - (h * 0.36f) * bottomSandLevel
+            val bottomSandPath = androidx.compose.ui.graphics.Path().apply {
+                val factor = (cy + h * 0.38f - yBottom) / (h * 0.38f)
+                val halfW = (w * 0.06f) + (w * 0.26f) * factor.coerceIn(0f, 1f)
+                moveTo(cx - halfW, yBottom)
+                lineTo(cx + halfW, yBottom)
+                lineTo(cx + w * 0.32f, cy + h * 0.38f)
+                lineTo(cx - w * 0.32f, cy + h * 0.38f)
+                close()
+            }
+            drawPath(path = bottomSandPath, color = accentColor.copy(alpha = 0.65f))
+        }
+
+        // Falling stream
+        if (isRunning && progress < 0.99f) {
+            drawLine(
+                color = accentColor.copy(alpha = sandAlpha),
+                start = Offset(cx, cy - h * 0.05f),
+                end = Offset(cx, cy + h * 0.35f),
+                strokeWidth = 2.dp.toPx()
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactHourglassFocusTimerSection(
     focusTimerState: FocusTimerState?,
     missionSubject: String,
     missionTopic: String,
-    missionTargetMinutes: Int,
-    onStartFocus: () -> Unit,
-    onOpenFocusTab: () -> Unit,
+    isStrictModeActive: Boolean,
+    onStartFocusClick: () -> Unit,
     onPauseFocus: () -> Unit,
     onResumeFocus: () -> Unit,
     onStopFocus: () -> Unit,
+    onOpenShieldSettings: () -> Unit,
     isDark: Boolean,
     currentTheme: AppThemeMode
 ) {
@@ -1367,301 +1507,247 @@ private fun FocusModeHeroSection(
     val isPaused = focusTimerState?.isPaused == true
     val isCelebration = focusTimerState?.showCelebration == true
 
+    val totalSecs = ((focusTimerState?.initialMinutes ?: 25) * 60).coerceAtLeast(1)
+    val remainSecs = focusTimerState?.remainingSeconds ?: (25 * 60)
+    val elapsedSecs = (totalSecs - remainSecs).coerceAtLeast(0)
+    val progress = (elapsedSecs.toFloat() / totalSecs.toFloat()).coerceIn(0f, 1f)
+
+    val remMins = remainSecs / 60
+    val remSecsStr = remainSecs % 60
+    val formattedRemaining = String.format(Locale.getDefault(), "%02d:%02d", remMins, remSecsStr)
+
+    val elapMins = elapsedSecs / 60
+    val elapSecsStr = elapsedSecs % 60
+    val formattedElapsed = String.format(Locale.getDefault(), "%02d:%02d", elapMins, elapSecsStr)
+
     GlassCard(
         modifier = Modifier
             .fillMaxWidth()
-            .testTag("focus_mode_hero_card"),
+            .testTag("circular_focus_timer_module"),
         shape = RoundedCornerShape(22.dp),
-        elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 2.dp else 8.dp,
+        elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 2.dp else 6.dp,
         borderColor = if (isRunning) EmeraldSuccess.copy(alpha = 0.7f) else NeonCyan.copy(alpha = 0.5f),
         borderWidth = if (isRunning) 2.dp else 1.2.dp
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(18.dp),
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (isCelebration) {
-                // =============================================================
-                // STATE A: RECENTLY COMPLETED SESSION
-                // =============================================================
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text("🎉", fontSize = 20.sp)
-                        Text(
-                            text = "FOCUS SESSION COMPLETE",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Black,
-                            color = EmeraldSuccess,
-                            letterSpacing = 0.8.sp
-                        )
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = GoldenSpark.copy(alpha = 0.15f),
-                        border = androidx.compose.foundation.BorderStroke(0.5.dp, GoldenSpark.copy(alpha = 0.4f))
-                    ) {
-                        Text(
-                            text = "+${focusTimerState?.lastSessionXp ?: 50} XP",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = GoldenSpark,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
-                }
-
-                Text(
-                    text = "Outstanding deep work!",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isDark) Color.White else Color(0xFF0F172A)
-                )
-
-                Text(
-                    text = "You completed your session on $missionSubject • $missionTopic. Keep the momentum going!",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
-                )
-
-                Button(
-                    onClick = onStartFocus,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("hero_start_new_focus_btn"),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isDark) ElectricIndigo else DeepIndigo
+            // Header Row: Status Badge & Blocked Apps Chip
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(if (isRunning) EmeraldSuccess else if (isPaused) AmberWarning else NeonCyan)
                     )
-                ) {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("START NEW SESSION", fontWeight = FontWeight.ExtraBold, letterSpacing = 0.5.sp)
-                }
-
-            } else if (isRunning || isPaused) {
-                // =============================================================
-                // STATE B: LIVE FOCUS ACTIVE / PAUSED
-                // =============================================================
-                val totalSecs = (focusTimerState?.initialMinutes ?: 25) * 60
-                val remainSecs = focusTimerState?.remainingSeconds ?: (25 * 60)
-                val elapsedSecs = (totalSecs - remainSecs).coerceAtLeast(0)
-                val progress = (elapsedSecs.toFloat() / totalSecs.toFloat()).coerceIn(0f, 1f)
-
-                val mins = remainSecs / 60
-                val secs = remainSecs % 60
-                val formattedTime = String.format(Locale.getDefault(), "%02d:%02d", mins, secs)
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(if (isRunning) EmeraldSuccess else AmberWarning)
-                        )
-                        Text(
-                            text = if (isRunning) "FOCUS MODE ACTIVE" else "FOCUS PAUSED",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            color = if (isRunning) EmeraldSuccess else AmberWarning,
-                            letterSpacing = 1.sp
-                        )
-                    }
-
                     Text(
-                        text = "$formattedTime remaining",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDark) NeonCyan else DeepIndigo
+                        text = if (isRunning) "FOCUS SESSION" else if (isPaused) "SESSION PAUSED" else "FOCUS TIMER",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                        color = if (isRunning) EmeraldSuccess else if (isPaused) AmberWarning else (if (isDark) NeonCyan else DeepIndigo),
+                        letterSpacing = 0.8.sp
                     )
                 }
 
-                Text(
-                    text = "${focusTimerState?.subject ?: missionSubject} • ${focusTimerState?.topic ?: missionTopic}",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isDark) Color.White else Color(0xFF0F172A),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                // Progress Bar
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(6.dp)
-                        .clip(RoundedCornerShape(3.dp)),
-                    color = if (isRunning) EmeraldSuccess else AmberWarning,
-                    trackColor = if (isDark) Color(0x22FFFFFF) else Color(0x18000000)
-                )
-
-                // Controls Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Pause/Resume Button
-                    OutlinedButton(
-                        onClick = { if (isRunning) onPauseFocus() else onResumeFocus() },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .testTag("hero_pause_resume_btn"),
-                        shape = RoundedCornerShape(12.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0x40FFFFFF) else Color(0x30000000))
-                    ) {
-                        Icon(
-                            imageVector = if (isRunning) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            contentDescription = if (isRunning) "Pause" else "Resume",
-                            modifier = Modifier.size(16.dp),
-                            tint = if (isDark) Color.White else Color(0xFF0F172A)
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(if (isRunning) "Pause" else "Resume", fontWeight = FontWeight.Bold, color = if (isDark) Color.White else Color(0xFF0F172A))
-                    }
-
-                    // Open Full Focus Shield Button
-                    Button(
-                        onClick = onOpenFocusTab,
-                        modifier = Modifier
-                            .weight(1.3f)
-                            .height(48.dp)
-                            .testTag("hero_open_focus_shield_btn"),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isRunning) EmeraldSuccess else (if (isDark) ElectricIndigo else DeepIndigo)
-                        )
-                    ) {
-                        Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Open Shield", fontWeight = FontWeight.ExtraBold)
-                    }
-                }
-
-            } else {
-                // =============================================================
-                // STATE C: IDLE (READY TO STUDY) — HERO INVITATION
-                // =============================================================
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Shield,
-                            contentDescription = null,
-                            tint = NeonCyan,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "FOCUS MODE",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Black,
-                            color = if (isDark) NeonCyan else DeepIndigo,
-                            letterSpacing = 1.sp
-                        )
-                    }
-
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    // Strict Mode Pill
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = if (isDark) Color(0x1838BDF8) else Color(0x126366F1),
-                        border = androidx.compose.foundation.BorderStroke(0.5.dp, NeonCyan.copy(alpha = 0.4f))
+                        color = if (isStrictModeActive) EmeraldSuccess.copy(alpha = 0.15f) else Color(0x1564748B),
+                        border = androidx.compose.foundation.BorderStroke(0.5.dp, if (isStrictModeActive) EmeraldSuccess.copy(alpha = 0.5f) else Color(0x3064748B))
                     ) {
                         Text(
-                            text = "App Shield Active",
+                            text = if (isStrictModeActive) "Strict Mode: ON" else "Strict Mode: OFF",
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (isDark) NeonCyan else DeepIndigo,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
+                            color = if (isStrictModeActive) EmeraldSuccess else (if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)),
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
+
+                    // Blocked Apps Pill Button
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (isDark) Color(0x2038BDF8) else Color(0x156366F1),
+                        border = androidx.compose.foundation.BorderStroke(0.5.dp, NeonCyan.copy(alpha = 0.4f)),
+                        modifier = Modifier.clickable { onOpenShieldSettings() }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Icon(Icons.Filled.Shield, contentDescription = "Blocked Apps", tint = NeonCyan, modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(3.dp))
+                            Text(
+                                text = "Blocked Apps",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) NeonCyan else DeepIndigo
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Main Visual Timer Container
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Circular Hourglass Container
+                Box(
+                    modifier = Modifier
+                        .size(110.dp)
+                        .clip(CircleShape)
+                        .background(if (isDark) Color(0x221E293B) else Color(0x10000000))
+                        .border(1.5.dp, Brush.radialGradient(listOf(NeonCyan, ElectricIndigo)), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.size(106.dp),
+                        color = if (isRunning) EmeraldSuccess else NeonCyan,
+                        strokeWidth = 4.dp,
+                        trackColor = if (isDark) Color(0x20FFFFFF) else Color(0x15000000)
+                    )
+
+                    HourglassGraphic(
+                        modifier = Modifier.size(46.dp),
+                        isRunning = isRunning,
+                        progress = progress,
+                        accentColor = if (isRunning) EmeraldSuccess else NeonCyan
+                    )
                 }
 
-                Column {
+                // Digital Timer & Stats Column
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     Text(
-                        text = "Ready to study?",
-                        style = MaterialTheme.typography.headlineSmall,
+                        text = formattedRemaining,
+                        fontSize = 32.sp,
                         fontWeight = FontWeight.Black,
-                        color = if (isDark) Color.White else Color(0xFF0F172A)
+                        color = if (isDark) Color.White else Color(0xFF0F172A),
+                        letterSpacing = (-0.5).sp
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Column {
+                            Text(
+                                text = "Remaining",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 10.sp,
+                                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                            )
+                            Text(
+                                text = formattedRemaining,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) NeonCyan else DeepIndigo
+                            )
+                        }
+
+                        Column {
+                            Text(
+                                text = "Elapsed",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 10.sp,
+                                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                            )
+                            Text(
+                                text = formattedElapsed,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155)
+                            )
+                        }
+                    }
+
                     Text(
                         text = "$missionSubject • $missionTopic",
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155),
+                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+            }
 
-                // PRIMARY CALL TO ACTION BUTTON
+            // Controls Row
+            if (isCelebration) {
                 Button(
-                    onClick = onStartFocus,
+                    onClick = onStartFocusClick,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp)
-                        .testTag("hero_start_focus_button"),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isDark) ElectricIndigo else DeepIndigo
-                    ),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+                        .height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("START NEW SESSION", fontWeight = FontWeight.Bold)
+                }
+            } else if (isRunning || isPaused) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { if (isRunning) onPauseFocus() else onResumeFocus() },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0x40FFFFFF) else Color(0x30000000))
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.PlayArrow,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "START FOCUS",
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 1.sp
-                        )
+                        Icon(if (isRunning) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (isRunning) "Pause" else "Resume", fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = onStopFocus,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
+                    ) {
+                        Icon(Icons.Filled.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Stop", fontWeight = FontWeight.Bold)
                     }
                 }
-
-                // Subtext / Caption
-                Text(
-                    text = "Blocks distracting apps • 25 min deep study session",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                    fontSize = 11.sp
-                )
+            } else {
+                Button(
+                    onClick = onStartFocusClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp)
+                        .testTag("start_focus_btn"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (isDark) ElectricIndigo else DeepIndigo)
+                ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("START FOCUS", fontWeight = FontWeight.ExtraBold, letterSpacing = 0.5.sp)
+                }
             }
         }
     }
@@ -2955,11 +3041,11 @@ private fun BlockAppsCardSection(
 }
 
 // =========================================================================
-// ALL FEATURES CATEGORIZED SECTION (5 Categories: Learn, Practice, Updates, AI & Tools, Account)
+// ALL FEATURES COLLAPSIBLE 2X2 GRID SECTION (4 Categories: LEARN, PRACTICE, LATEST UPDATES, NOVA AI TOOLS)
 // =========================================================================
 
 @Composable
-private fun AllFeaturesGridSection(
+private fun Collapsible2x2FeatureGridSection(
     onNavigateToTab: (AppNavTab) -> Unit,
     onOpenSmartVacancy: (String?) -> Unit,
     onOpenExamReadinessCenter: () -> Unit,
@@ -2971,10 +3057,15 @@ private fun AllFeaturesGridSection(
     isDark: Boolean,
     currentTheme: AppThemeMode
 ) {
+    var expandedCategoryId by remember { mutableStateOf<String?>(null) }
+
     val categories = remember {
         listOf(
             FeatureCategory(
-                categoryTitle = "📚 LEARN",
+                id = "learn",
+                categoryTitle = "LEARN",
+                icon = Icons.AutoMirrored.Filled.MenuBook,
+                accentColor = DeepIndigo,
                 items = listOf(
                     FeatureGridItem("Study", "Learn subjects & chapters", Icons.AutoMirrored.Filled.MenuBook, DeepIndigo) { onNavigateToTab(AppNavTab.STUDY) },
                     FeatureGridItem("Notes", "Smart AI notes & summaries", Icons.Filled.Description, Color(0xFF8B5CF6)) { onNavigateToTab(AppNavTab.AI_TUTOR) },
@@ -2984,7 +3075,10 @@ private fun AllFeaturesGridSection(
                 )
             ),
             FeatureCategory(
-                categoryTitle = "📝 PRACTICE",
+                id = "practice",
+                categoryTitle = "PRACTICE",
+                icon = Icons.Filled.Quiz,
+                accentColor = EmeraldSuccess,
                 items = listOf(
                     FeatureGridItem("Practice", "Subject & topic practice", Icons.Filled.Quiz, EmeraldSuccess) { onNavigateToTab(AppNavTab.PRACTICE) },
                     FeatureGridItem("Mock Tests", "Full length test series", Icons.Filled.TaskAlt, ElectricViolet) { onNavigateToTab(AppNavTab.PRACTICE) },
@@ -2994,7 +3088,10 @@ private fun AllFeaturesGridSection(
                 )
             ),
             FeatureCategory(
-                categoryTitle = "📰 UPDATES",
+                id = "updates",
+                categoryTitle = "LATEST UPDATES",
+                icon = Icons.Outlined.Notifications,
+                accentColor = GoldenSpark,
                 items = listOf(
                     FeatureGridItem("Latest Vacancies", "Railway & sarkari jobs", Icons.Filled.Train, Color(0xFF3B82F6)) { onOpenSmartVacancy("VACANCIES") },
                     FeatureGridItem("Results", "Exam outcomes & cutoffs", Icons.Filled.Assignment, Color(0xFF8B5CF6)) { onOpenSmartVacancy("RESULTS") },
@@ -3004,7 +3101,10 @@ private fun AllFeaturesGridSection(
                 )
             ),
             FeatureCategory(
-                categoryTitle = "🤖 AI & TOOLS",
+                id = "ai_tools",
+                categoryTitle = "NOVA AI TOOLS",
+                icon = Icons.Filled.AutoAwesome,
+                accentColor = NeonCyan,
                 items = listOf(
                     FeatureGridItem("Nova AI", "AI tutor & doubt solver", Icons.Filled.AutoAwesome, NeonCyan) { onNavigateToTab(AppNavTab.AI_TUTOR) },
                     FeatureGridItem("Voice Assistant", "Ask Nova via Voice", Icons.Filled.Mic, ElectricViolet) { onNavigateToTab(AppNavTab.AI_TUTOR) },
@@ -3013,23 +3113,13 @@ private fun AllFeaturesGridSection(
                     FeatureGridItem("Focus Shield", "Block distracting apps", Icons.Filled.Shield, Color(0xFFEF4444)) { onOpenShieldSettings() },
                     FeatureGridItem("Smart Search", "Syllabus & formula finder", Icons.Filled.Search, Color(0xFF06B6D4)) { onOpenSearch() }
                 )
-            ),
-            FeatureCategory(
-                categoryTitle = "👤 ACCOUNT",
-                items = listOf(
-                    FeatureGridItem("Saved", "Bookmarks & saved items", Icons.Filled.Bookmark, Color(0xFF06B6D4)) { onNavigateToTab(AppNavTab.PRACTICE) },
-                    FeatureGridItem("Profile", "Student profile & target", Icons.Filled.Person, Color(0xFF3B82F6)) { onOpenProfileSettings() },
-                    FeatureGridItem("Settings", "App theme & preferences", Icons.Filled.Settings, Color(0xFF64748B)) { onOpenProfileSettings() },
-                    FeatureGridItem("Language", "UI & content language", Icons.Filled.Translate, GoldenSpark) { onOpenProfileSettings() },
-                    FeatureGridItem("Personalization", "Study goals & targets", Icons.Filled.Tune, EmeraldSuccess) { onOpenProfileSettings() }
-                )
             )
         )
     }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -3037,7 +3127,7 @@ private fun AllFeaturesGridSection(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "ALL FEATURES",
+                text = "FEATURE HUB",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Black,
                 color = if (isDark) Color(0xFFE2E8F0) else Color(0xFF334155),
@@ -3048,7 +3138,7 @@ private fun AllFeaturesGridSection(
                 color = if (isDark) Color(0x1A38BDF8) else Color(0x100284C7)
             ) {
                 Text(
-                    text = "COMPLETE ACCESS",
+                    text = "4 CATEGORIES",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.ExtraBold,
                     color = NeonCyan,
@@ -3058,40 +3148,147 @@ private fun AllFeaturesGridSection(
             }
         }
 
-        categories.forEach { category ->
-            Column(
+        // 2x2 Grid Layout
+        val categoryPairs = categories.chunked(2)
+        categoryPairs.forEach { pair ->
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = category.categoryTitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF475569),
-                    letterSpacing = 0.5.sp
-                )
+                pair.forEach { cat ->
+                    val isExpanded = expandedCategoryId == cat.id
+                    GlassCard(
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("category_card_${cat.id}"),
+                        shape = RoundedCornerShape(16.dp),
+                        elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 1.dp else 4.dp,
+                        borderColor = if (isExpanded) cat.accentColor.copy(alpha = 0.6f) else (if (isDark) Color(0x20FFFFFF) else Color(0x12000000)),
+                        onClick = {
+                            expandedCategoryId = if (isExpanded) null else cat.id
+                        }
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(cat.accentColor.copy(alpha = if (isDark) 0.2f else 0.12f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = cat.icon,
+                                            contentDescription = cat.categoryTitle,
+                                            tint = cat.accentColor,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Column {
+                                        Text(
+                                            text = cat.categoryTitle,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Black,
+                                            color = if (isDark) Color.White else Color(0xFF0F172A),
+                                            fontSize = 12.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "${cat.items.size} tools",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                            fontSize = 10.sp
+                                        )
+                                    }
+                                }
 
-                val chunked = category.items.chunked(2)
-                chunked.forEach { rowItems ->
+                                Icon(
+                                    imageVector = if (isExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                    contentDescription = if (isExpanded) "Collapse" else "Expand",
+                                    tint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+                if (pair.size < 2) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+
+        // Expanded Section Content Container
+        categories.find { it.id == expandedCategoryId }?.let { expandedCategory ->
+            GlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .animateContentSize()
+                    .testTag("expanded_category_${expandedCategory.id}"),
+                shape = RoundedCornerShape(16.dp),
+                elevation = if (currentTheme == AppThemeMode.AMOLED_BLACK) 2.dp else 6.dp,
+                borderColor = expandedCategory.accentColor.copy(alpha = 0.5f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        rowItems.forEach { item ->
-                            CompactFeatureCardItem(
-                                title = item.title,
-                                subtitle = item.subtitle,
-                                icon = item.icon,
-                                accentColor = item.accentColor,
-                                modifier = Modifier.weight(1f),
-                                testTag = "feature_card_${item.title.lowercase().replace(" ", "_").replace(Regex("[^a-z0-9_]"), "")}",
-                                isDark = isDark,
-                                currentTheme = currentTheme,
-                                onClick = item.onClick
-                            )
+                        Text(
+                            text = expandedCategory.categoryTitle,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Black,
+                            color = expandedCategory.accentColor
+                        )
+                        IconButton(
+                            onClick = { expandedCategoryId = null },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = "Close", tint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B), modifier = Modifier.size(16.dp))
                         }
-                        if (rowItems.size < 2) {
-                            Spacer(modifier = Modifier.weight(1f))
+                    }
+
+                    expandedCategory.items.chunked(2).forEach { rowItems ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            rowItems.forEach { item ->
+                                CompactFeatureCardItem(
+                                    title = item.title,
+                                    subtitle = item.subtitle,
+                                    icon = item.icon,
+                                    accentColor = item.accentColor,
+                                    modifier = Modifier.weight(1f),
+                                    testTag = "feature_card_${item.title.lowercase().replace(" ", "_").replace(Regex("[^a-z0-9_]"), "")}",
+                                    isDark = isDark,
+                                    currentTheme = currentTheme,
+                                    onClick = item.onClick
+                                )
+                            }
+                            if (rowItems.size < 2) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
                         }
                     }
                 }
@@ -3167,7 +3364,10 @@ private fun CompactFeatureCardItem(
 }
 
 private data class FeatureCategory(
+    val id: String,
     val categoryTitle: String,
+    val icon: ImageVector,
+    val accentColor: Color,
     val items: List<FeatureGridItem>
 )
 

@@ -170,16 +170,23 @@ data class CollectedContentItem(
 data class WeeklyCurrentAffairsPdf(
     val id: String,
     val title: String,
-    val dateRange: String,
-    val language: String = "Hindi",
-    val sourcePageUrl: String,
-    val pdfSourceUrl: String,
-    val publishedAt: String,
-    val detectedAt: Long = System.currentTimeMillis(),
+    val description: String = "साप्ताहिक करेंट अफेयर्स पीडीएफ संग्रह (UPSC, SSC, Railway, Banking, State Exams)",
+    val dateRange: String = "",
     val category: ContentCategory = ContentCategory.CURRENT_AFFAIRS_PDF,
-    val status: String = "AVAILABLE",
+    val language: String = "Hindi",
+    val sourceName: String = "GK Now Hindi",
+    val sourcePageUrl: String = "https://gknow.in/hi/weekly-current-affairs-pdf-in-hindi/",
+    val pdfSourceUrl: String = "",
     val storagePath: String? = null,
-    val fileSize: String? = null
+    val pdfPublicUrl: String? = null,
+    val publishedAt: String = "",
+    val detectedAt: Long = System.currentTimeMillis(),
+    val fileSize: String? = null,
+    val contentHash: String = "",
+    val isAvailable: Boolean = true,
+    val status: String = "AVAILABLE",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
 )
 
 /**

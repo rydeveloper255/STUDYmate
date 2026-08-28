@@ -33,6 +33,8 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.*
 import com.example.data.model.content.WeeklyCurrentAffairsPdf
 import com.example.service.collector.GkNowWeeklyPdfScraper
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.example.ui.components.*
 import com.example.ui.screens.home.openUrlInBrowser
 import com.example.ui.theme.*
@@ -76,44 +78,47 @@ fun LiveExamIntelligenceScreen(
     var activeDetailUpdate by remember { mutableStateOf<LiveExamUpdateEntity?>(null) }
     var activeDetailTrending by remember { mutableStateOf<TrendingExamTopicEntity?>(null) }
     var selectedPdfForViewer by remember { mutableStateOf<WeeklyCurrentAffairsPdf?>(null) }
+    var selectedPdfDateFilter by remember { mutableStateOf("All") }
+    var rawWeeklyPdfs by remember { mutableStateOf<List<WeeklyCurrentAffairsPdf>>(emptyList()) }
+    var isPdfsLoading by remember { mutableStateOf(false) }
 
-    // Sample / Discovered weekly Current Affairs PDFs
-    val weeklyPdfs = remember {
-        listOf(
-            WeeklyCurrentAffairsPdf(
-                id = "ca_pdf_2026_08_w3",
-                title = "Weekly Current Affairs 16–22 August 2026 (Hindi PDF)",
-                dateRange = "16 से 22 अगस्त 2026",
-                language = "Hindi",
-                sourcePageUrl = GkNowWeeklyPdfScraper.SOURCE_PAGE_URL,
-                pdfSourceUrl = "https://gknow.in/hi/weekly-current-affairs-pdf-in-hindi/#week-16-22-aug-2026",
-                publishedAt = "अगस्त 2026",
-                detectedAt = System.currentTimeMillis(),
-                status = "AVAILABLE"
-            ),
-            WeeklyCurrentAffairsPdf(
-                id = "ca_pdf_2026_08_w2",
-                title = "Weekly Current Affairs 09–15 August 2026 (Hindi PDF)",
-                dateRange = "09 से 15 अगस्त 2026",
-                language = "Hindi",
-                sourcePageUrl = GkNowWeeklyPdfScraper.SOURCE_PAGE_URL,
-                pdfSourceUrl = "https://gknow.in/hi/weekly-current-affairs-pdf-in-hindi/#week-09-15-aug-2026",
-                publishedAt = "अगस्त 2026",
-                detectedAt = System.currentTimeMillis(),
-                status = "AVAILABLE"
-            ),
-            WeeklyCurrentAffairsPdf(
-                id = "ca_pdf_2026_08_w1",
-                title = "Weekly Current Affairs 02–08 August 2026 (Hindi PDF)",
-                dateRange = "02 से 08 अगस्त 2026",
-                language = "Hindi",
-                sourcePageUrl = GkNowWeeklyPdfScraper.SOURCE_PAGE_URL,
-                pdfSourceUrl = "https://gknow.in/hi/weekly-current-affairs-pdf-in-hindi/#week-02-08-aug-2026",
-                publishedAt = "अगस्त 2026",
-                detectedAt = System.currentTimeMillis(),
-                status = "AVAILABLE"
-            )
-        )
+    // Fetch Weekly Current Affairs PDFs from Supabase / Scraper
+    LaunchedEffect(Unit) {
+        isPdfsLoading = true
+        withContext(Dispatchers.IO) {
+            try {
+                val supabaseHub = com.example.data.remote.supabase.SupabaseContentHubService()
+                val remotePdfs = supabaseHub.fetchWeeklyPdfs(30)
+                val pdfList = if (remotePdfs.isNotEmpty()) {
+                    remotePdfs
+                } else {
+                    GkNowWeeklyPdfScraper().discoverWeeklyPdfs()
+                }
+                withContext(Dispatchers.Main) {
+                    rawWeeklyPdfs = pdfList
+                    isPdfsLoading = false
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    isPdfsLoading = false
+                }
+            }
+        }
+    }
+
+    // Extract available date filters
+    val pdfDateFilters = remember(rawWeeklyPdfs) {
+        val dates = rawWeeklyPdfs.map { it.dateRange.ifBlank { it.publishedAt } }.filter { it.isNotBlank() }.distinct()
+        listOf("All") + dates
+    }
+
+    // Filter PDFs by selected date
+    val filteredWeeklyPdfs = remember(rawWeeklyPdfs, selectedPdfDateFilter) {
+        if (selectedPdfDateFilter == "All") {
+            rawWeeklyPdfs
+        } else {
+            rawWeeklyPdfs.filter { (it.dateRange.ifBlank { it.publishedAt }) == selectedPdfDateFilter }
+        }
     }
 
     // Filter items
@@ -389,86 +394,146 @@ fun LiveExamIntelligenceScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            items(weeklyPdfs, key = { it.id }) { pdf ->
-                                Surface(
-                                    modifier = Modifier
-                                        .width(260.dp)
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .border(
-                                            1.dp,
-                                            if (isDark) Color(0x3338BDF8) else Color(0x2038BDF8),
-                                            RoundedCornerShape(14.dp)
-                                        )
-                                        .clickable { selectedPdfForViewer = pdf },
-                                    color = if (isDark) Color(0xFF0F172A) else Color.White,
-                                    shape = RoundedCornerShape(14.dp)
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
+                        // Reactive Date Range Filter Chips
+                        if (pdfDateFilters.size > 1) {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                            ) {
+                                items(pdfDateFilters) { dateOption ->
+                                    val isSelected = selectedPdfDateFilter == dateOption
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = { selectedPdfDateFilter = dateOption },
+                                        label = {
                                             Text(
-                                                text = "GK Now • Weekly",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = Color(0xFF38BDF8),
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 10.sp
-                                            )
-                                            Icon(
-                                                imageVector = Icons.Filled.PictureAsPdf,
-                                                contentDescription = null,
-                                                tint = Color(0xFFEF4444),
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-
-                                        Text(
-                                            text = pdf.dateRange,
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (isDark) Color.White else Color(0xFF0F172A),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-
-                                        Text(
-                                            text = "UPSC, SSC, Railway & All State Exams",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-                                            fontSize = 11.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-
-                                        Button(
-                                            onClick = { selectedPdfForViewer = pdf },
-                                            modifier = Modifier.fillMaxWidth().height(32.dp),
-                                            shape = RoundedCornerShape(8.dp),
-                                            colors = ButtonDefaults.buttonColors(
-                                                containerColor = if (isDark) Color(0xFF0284C7) else Color(0xFF0369A1)
-                                            ),
-                                            contentPadding = PaddingValues(0.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Filled.Visibility,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                            Spacer(Modifier.width(4.dp))
-                                            Text(
-                                                text = "Read PDF",
+                                                text = if (dateOption == "All") "All Dates" else dateOption,
                                                 fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                             )
+                                        },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = if (isDark) Color(0xFF0284C7) else Color(0xFF0369A1),
+                                            selectedLabelColor = Color.White,
+                                            containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9),
+                                            labelColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF475569)
+                                        ),
+                                        shape = RoundedCornerShape(20.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        if (isPdfsLoading && filteredWeeklyPdfs.isEmpty()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    color = Color(0xFF38BDF8),
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "Loading Current Affairs PDFs...",
+                                    fontSize = 12.sp,
+                                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                                )
+                            }
+                        } else if (filteredWeeklyPdfs.isEmpty()) {
+                            Text(
+                                text = "No PDFs available for selected date.",
+                                fontSize = 12.sp,
+                                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        } else {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                items(filteredWeeklyPdfs, key = { it.id }) { pdf ->
+                                    Surface(
+                                        modifier = Modifier
+                                            .width(260.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .border(
+                                                1.dp,
+                                                if (isDark) Color(0x3338BDF8) else Color(0x2038BDF8),
+                                                RoundedCornerShape(14.dp)
+                                            )
+                                            .clickable { selectedPdfForViewer = pdf },
+                                        color = if (isDark) Color(0xFF0F172A) else Color.White,
+                                        shape = RoundedCornerShape(14.dp)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "${pdf.sourceName} • Weekly",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color(0xFF38BDF8),
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 10.sp
+                                                )
+                                                Icon(
+                                                    imageVector = Icons.Filled.PictureAsPdf,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFFEF4444),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+
+                                            Text(
+                                                text = pdf.dateRange.ifBlank { pdf.publishedAt },
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isDark) Color.White else Color(0xFF0F172A),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+
+                                            Text(
+                                                text = "UPSC, SSC, Railway & All State Exams",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                                fontSize = 11.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+
+                                            Button(
+                                                onClick = { selectedPdfForViewer = pdf },
+                                                modifier = Modifier.fillMaxWidth().height(32.dp).testTag("read_pdf_button"),
+                                                shape = RoundedCornerShape(8.dp),
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = if (isDark) Color(0xFF0284C7) else Color(0xFF0369A1)
+                                                ),
+                                                contentPadding = PaddingValues(0.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Visibility,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(
+                                                    text = "Read PDF",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
                                         }
                                     }
                                 }

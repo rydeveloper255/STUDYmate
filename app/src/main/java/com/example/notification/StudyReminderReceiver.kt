@@ -171,6 +171,34 @@ class StudyReminderReceiver : BroadcastReceiver() {
                         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
                         nm?.cancel(2001)
                     }
+
+                    StudyNotificationManager.ACTION_SCHEDULED_STUDY_PRE_15_MIN -> {
+                        val sSubject = intent.getStringExtra("EXTRA_SUBJECT") ?: subject
+                        val sTopic = intent.getStringExtra("EXTRA_TOPIC") ?: topic
+                        val sTaskId = intent.getStringExtra("EXTRA_TASK_ID") ?: ""
+                        StudyNotificationManager.sendScheduledStudyPre15MinNotification(
+                            context = context,
+                            subject = sSubject,
+                            topic = sTopic,
+                            taskId = sTaskId
+                        )
+                    }
+
+                    StudyNotificationManager.ACTION_SCHEDULED_STUDY_EXACT_START -> {
+                        val sSubject = intent.getStringExtra("EXTRA_SUBJECT") ?: subject
+                        val sTopic = intent.getStringExtra("EXTRA_TOPIC") ?: topic
+                        val sDuration = intent.getIntExtra("EXTRA_DURATION", 45)
+                        val sStrict = intent.getBooleanExtra("EXTRA_STRICT", false)
+                        val sTaskId = intent.getStringExtra("EXTRA_TASK_ID") ?: ""
+                        StudyNotificationManager.sendScheduledStudyExactNotification(
+                            context = context,
+                            subject = sSubject,
+                            topic = sTopic,
+                            durationMinutes = sDuration,
+                            isStrict = sStrict,
+                            taskId = sTaskId
+                        )
+                    }
                 }
             } catch (e: Exception) {
                 // Handled gracefully

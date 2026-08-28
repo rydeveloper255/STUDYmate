@@ -33,7 +33,7 @@ import java.util.*
  */
 class SupabaseContentHubService(
     private val supabaseClient: SupabaseClient = SupabaseClient.instance,
-    private val database: StudyMateDatabase,
+    private val database: StudyMateDatabase? = null,
     private val coroutineScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) {
     companion object {
@@ -50,8 +50,8 @@ class SupabaseContentHubService(
         const val TABLE_SOURCE_REFERENCES = "content_source_references"
     }
 
-    private val contentDao: ContentIntelligenceDao = database.contentIntelligenceDao()
-    private val recruitmentDao: RecruitmentDao = database.recruitmentDao()
+    private val contentDao: ContentIntelligenceDao? = database?.contentIntelligenceDao()
+    private val recruitmentDao: RecruitmentDao? = database?.recruitmentDao()
 
     private val _hubSyncStatus = MutableStateFlow<SupabaseSyncStatus>(SupabaseSyncStatus.Idle)
     val hubSyncStatus: StateFlow<SupabaseSyncStatus> = _hubSyncStatus.asStateFlow()
@@ -82,8 +82,8 @@ class SupabaseContentHubService(
     fun refreshOptimizationStats() {
         coroutineScope.launch {
             try {
-                val skipped = contentDao.getSkippedAiCallsCount()
-                val success = contentDao.getSuccessfulAiCallsCount()
+                val skipped = contentDao?.getSkippedAiCallsCount() ?: 0
+                val success = contentDao?.getSuccessfulAiCallsCount() ?: 0
                 _aiOptimizationStats.value = _aiOptimizationStats.value.copy(
                     aiCallsExecuted = success,
                     aiCallsSavedUnchanged = skipped,
@@ -145,7 +145,7 @@ class SupabaseContentHubService(
                 }
 
                 if (items.isNotEmpty()) {
-                    recruitmentDao.insertOrUpdateAll(items)
+                    recruitmentDao?.insertOrUpdateAll(items)
                 }
 
                 _hubSyncStatus.value = SupabaseSyncStatus.Success("Loaded ${items.size} verified items from Content Hub")
@@ -153,14 +153,14 @@ class SupabaseContentHubService(
                 Result.success(items)
             } else {
                 // Fallback gracefully to Room local database
-                val localItems = recruitmentDao.getAllOnce()
+                val localItems = recruitmentDao?.getAllOnce() ?: emptyList()
                 _hubSyncStatus.value = SupabaseSyncStatus.Success("Serving ${localItems.size} local cached items")
                 PersistenceMonitor.updateStatus(PersistenceStatus.Offline(message = "Offline — using local database"))
                 Result.success(localItems)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Error fetching from Supabase Content Hub: ${e.message}")
-            val localItems = recruitmentDao.getAllOnce()
+            val localItems = recruitmentDao?.getAllOnce() ?: emptyList()
             _hubSyncStatus.value = SupabaseSyncStatus.Error("Error connecting to Supabase: ${e.message}", e)
             Result.success(localItems)
         }
@@ -172,27 +172,37 @@ class SupabaseContentHubService(
     suspend fun fetchWeeklyPdfs(limit: Int = 30): List<WeeklyCurrentAffairsPdf> = withContext(Dispatchers.IO) {
         try {
             val result = supabaseClient.from(TABLE_PDF_DOCUMENTS).select(
-                mapOf("select" to "*", "order" to "detected_at.desc", "limit" to limit.toString())
+                mapOf("select" to "*", "order" to "created_at.desc", "limit" to limit.toString())
             )
             if (result is SupabaseResult.Success) {
                 val array = JSONArray(result.data)
                 val list = mutableListOf<WeeklyCurrentAffairsPdf>()
                 for (i in 0 until array.length()) {
                     val obj = array.getJSONObject(i)
+                    val storagePath = if (obj.has("pdf_storage_path")) obj.optString("pdf_storage_path", null) else obj.optString("storage_path", null)
+                    val pdfPublicUrl = if (obj.has("pdf_public_url")) obj.optString("pdf_public_url", null) else if (!storagePath.isNullOrBlank()) supabaseClient.getPublicUrl("current-affairs-pdfs", storagePath) else null
+                    
                     list.add(
                         WeeklyCurrentAffairsPdf(
                             id = obj.optString("id", UUID.randomUUID().toString()),
                             title = obj.optString("title", "Weekly Current Affairs PDF"),
-                            dateRange = obj.optString("date_range", ""),
-                            language = obj.optString("language", "Hindi"),
-                            sourcePageUrl = obj.optString("source_page_url", ""),
-                            pdfSourceUrl = obj.optString("pdf_source_url", ""),
-                            publishedAt = obj.optString("published_at", ""),
-                            detectedAt = obj.optLong("detected_at", System.currentTimeMillis()),
+                            description = obj.optString("description", "साप्ताहिक करेंट अफेयर्स पीडीएफ संग्रह"),
+                            dateRange = if (obj.has("date_range")) obj.optString("date_range", "") else obj.optString("published_date", ""),
                             category = ContentCategory.CURRENT_AFFAIRS_PDF,
+                            language = obj.optString("language", "Hindi"),
+                            sourceName = obj.optString("source_name", "GK Now Hindi"),
+                            sourcePageUrl = if (obj.has("source_url")) obj.optString("source_url", "") else obj.optString("source_page_url", "https://gknow.in/hi/weekly-current-affairs-pdf-in-hindi/"),
+                            pdfSourceUrl = obj.optString("pdf_source_url", ""),
+                            storagePath = storagePath,
+                            pdfPublicUrl = pdfPublicUrl,
+                            publishedAt = if (obj.has("published_date")) obj.optString("published_date", "") else obj.optString("published_at", ""),
+                            detectedAt = if (obj.has("fetched_at")) obj.optLong("fetched_at", System.currentTimeMillis()) else obj.optLong("detected_at", System.currentTimeMillis()),
+                            fileSize = obj.optString("file_size", null),
+                            contentHash = obj.optString("content_hash", ""),
+                            isAvailable = obj.optBoolean("is_available", true),
                             status = obj.optString("status", "AVAILABLE"),
-                            storagePath = obj.optString("storage_path", null),
-                            fileSize = obj.optString("file_size", null)
+                            createdAt = obj.optLong("created_at", System.currentTimeMillis()),
+                            updatedAt = obj.optLong("updated_at", System.currentTimeMillis())
                         )
                     )
                 }
@@ -223,7 +233,7 @@ class SupabaseContentHubService(
         val rawHash = computeSha256(sourceUrl, rawTitle, rawSnippet, publishedDate ?: "")
 
         // 1. Check local Room database
-        val existingRecord = contentDao.getRawRecordByHash(rawHash)
+        val existingRecord = contentDao?.getRawRecordByHash(rawHash)
         if (existingRecord != null) {
             return@withContext ContentDifferenceCheck(
                 resultType = DetectionResultType.UNCHANGED,
@@ -234,7 +244,7 @@ class SupabaseContentHubService(
         }
 
         // 2. Check by canonical source URL for updates
-        val existingByUrl = contentDao.getRawRecordById("raw_${computeSha256(sourceUrl)}")
+        val existingByUrl = contentDao?.getRawRecordById("raw_${computeSha256(sourceUrl)}")
         if (existingByUrl != null && existingByUrl.contentHash != rawHash) {
             return@withContext ContentDifferenceCheck(
                 resultType = DetectionResultType.UPDATED,
@@ -313,7 +323,7 @@ class SupabaseContentHubService(
 
             // 2. Mirror into Room
             val entity = parseCollectedItemToRecruitmentEntity(item)
-            recruitmentDao.insertOrUpdate(entity)
+            recruitmentDao?.insertOrUpdate(entity)
 
             true
         } catch (e: Exception) {
@@ -332,16 +342,26 @@ class SupabaseContentHubService(
             val pdfJson = JSONObject().apply {
                 put("id", pdf.id)
                 put("title", pdf.title)
-                put("date_range", pdf.dateRange)
+                put("description", pdf.description)
+                put("category", pdf.category.name)
                 put("language", pdf.language)
+                put("source_name", pdf.sourceName)
+                put("source_url", pdf.sourcePageUrl)
                 put("source_page_url", pdf.sourcePageUrl)
                 put("pdf_source_url", pdf.pdfSourceUrl)
-                put("published_at", pdf.publishedAt)
-                put("detected_at", pdf.detectedAt)
-                put("category", pdf.category.name)
-                put("status", pdf.status)
+                put("pdf_storage_path", pdf.storagePath ?: JSONObject.NULL)
                 put("storage_path", pdf.storagePath ?: JSONObject.NULL)
+                put("pdf_public_url", pdf.pdfPublicUrl ?: JSONObject.NULL)
+                put("published_date", pdf.publishedAt.ifBlank { pdf.dateRange })
+                put("published_at", pdf.publishedAt.ifBlank { pdf.dateRange })
+                put("date_range", pdf.dateRange)
+                put("fetched_at", pdf.detectedAt)
+                put("detected_at", pdf.detectedAt)
                 put("file_size", pdf.fileSize ?: JSONObject.NULL)
+                put("content_hash", pdf.contentHash)
+                put("is_available", pdf.isAvailable)
+                put("status", pdf.status)
+                put("created_at", pdf.createdAt)
                 put("updated_at", isoNow)
             }
 
@@ -362,7 +382,7 @@ class SupabaseContentHubService(
      */
     suspend fun logAiProcessing(log: AiProcessingLogEntity) = withContext(Dispatchers.IO) {
         try {
-            contentDao.insertAiProcessingLog(log)
+            contentDao?.insertAiProcessingLog(log)
 
             val logJson = JSONObject().apply {
                 put("id", log.id)
@@ -393,7 +413,7 @@ class SupabaseContentHubService(
      */
     suspend fun recordTelegramPublication(pub: TelegramPublicationEntity) = withContext(Dispatchers.IO) {
         try {
-            contentDao.insertTelegramPublication(pub)
+            contentDao?.insertTelegramPublication(pub)
 
             val pubJson = JSONObject().apply {
                 put("id", pub.id)
@@ -421,7 +441,7 @@ class SupabaseContentHubService(
      */
     suspend fun updateSourceStatus(source: ContentSourceConfig) = withContext(Dispatchers.IO) {
         try {
-            contentDao.insertContentSource(source)
+            contentDao?.insertContentSource(source)
             val isoNow = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
 
             val sourceJson = JSONObject().apply {
@@ -455,7 +475,7 @@ class SupabaseContentHubService(
      */
     suspend fun publishRawSourceItem(record: RawSourceRecordEntity) = withContext(Dispatchers.IO) {
         try {
-            contentDao.insertRawSourceRecord(record)
+            contentDao?.insertRawSourceRecord(record)
             val isoNow = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
 
             val json = JSONObject().apply {
@@ -489,7 +509,7 @@ class SupabaseContentHubService(
      */
     suspend fun publishContentVersion(version: ContentVersionEntity) = withContext(Dispatchers.IO) {
         try {
-            contentDao.insertContentVersion(version)
+            contentDao?.insertContentVersion(version)
             val isoNow = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
 
             val json = JSONObject().apply {
@@ -517,7 +537,7 @@ class SupabaseContentHubService(
      */
     suspend fun logProcessingJob(job: ContentCollectionJobLogEntity) = withContext(Dispatchers.IO) {
         try {
-            contentDao.insertJobLog(job)
+            contentDao?.insertJobLog(job)
             val isoNow = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date())
 
             val json = JSONObject().apply {
@@ -553,7 +573,7 @@ class SupabaseContentHubService(
      */
     suspend fun publishSourceReference(ref: ContentSourceReferenceEntity) = withContext(Dispatchers.IO) {
         try {
-            contentDao.insertSourceReference(ref)
+            contentDao?.insertSourceReference(ref)
 
             val json = JSONObject().apply {
                 put("id", ref.id)
@@ -578,7 +598,7 @@ class SupabaseContentHubService(
      */
     suspend fun publishReviewQueueItem(item: ReviewQueueItemEntity) = withContext(Dispatchers.IO) {
         try {
-            contentDao.insertReviewQueueItem(item)
+            contentDao?.insertReviewQueueItem(item)
 
             val json = JSONObject().apply {
                 put("id", item.id)
@@ -609,7 +629,7 @@ class SupabaseContentHubService(
      */
     suspend fun fetchContentItemById(id: String): Result<RecruitmentEntity?> = withContext(Dispatchers.IO) {
         try {
-            val local = recruitmentDao.getItemById(id)
+            val local = recruitmentDao?.getItemById(id)
             if (local != null) {
                 return@withContext Result.success(local)
             }
@@ -625,7 +645,7 @@ class SupabaseContentHubService(
                 if (jsonArray.length() > 0) {
                     val obj = jsonArray.getJSONObject(0)
                     val entity = parseJsonToRecruitmentEntity(obj)
-                    recruitmentDao.insertOrUpdate(entity)
+                    recruitmentDao?.insertOrUpdate(entity)
                     Result.success(entity)
                 } else {
                     Result.success(null)
@@ -635,7 +655,7 @@ class SupabaseContentHubService(
             }
         } catch (e: Exception) {
             Log.w(TAG, "Error fetching content item by ID: ${e.message}")
-            Result.success(recruitmentDao.getItemById(id))
+            Result.success(recruitmentDao?.getItemById(id))
         }
     }
 

@@ -60,6 +60,8 @@ object StudyNotificationManager {
     const val ACTION_BREAK_REMINDER = "com.example.studymate.ACTION_BREAK_REMINDER"
     const val ACTION_SNOOZE_STUDY = "com.example.studymate.ACTION_SNOOZE_STUDY"
     const val ACTION_SNOOZED_REMINDER = "com.example.studymate.ACTION_SNOOZED_REMINDER"
+    const val ACTION_SCHEDULED_STUDY_PRE_15_MIN = "com.example.studymate.ACTION_SCHEDULED_STUDY_PRE_15_MIN"
+    const val ACTION_SCHEDULED_STUDY_EXACT_START = "com.example.studymate.ACTION_SCHEDULED_STUDY_EXACT_START"
 
     // Notification IDs
     private const val NOTIF_ID_STUDY_SESSION = 1001
@@ -72,6 +74,7 @@ object StudyNotificationManager {
     private const val NOTIF_ID_MOTIVATION = 1008
     private const val NOTIF_ID_STUDY_REMINDER = 1009
     private const val NOTIF_ID_APP_USAGE = 1010
+    private const val NOTIF_ID_SCHEDULED_STUDY = 1011
 
     private const val PREFS_NAME = "studymate_notifications_prefs"
     private const val SPAM_PREFS = "studymate_spam_cooldown_prefs"
@@ -1132,6 +1135,147 @@ object StudyNotificationManager {
             markNotificationSent(context, "nova_excessive_usage")
         } catch (e: SecurityException) {
             // Handled
+        }
+    }
+
+    fun sendScheduledStudyPre15MinNotification(
+        context: Context,
+        subject: String,
+        topic: String,
+        taskId: String = ""
+    ) {
+        val title = "StudyMate Reminder"
+        val body = "Your $subject session starts in 15 minutes."
+
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("NAVIGATE_TO", "STUDY_SCHEDULE")
+            putExtra("FOCUS_SUBJECT", subject)
+            putExtra("FOCUS_TOPIC", topic)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            (taskId.hashCode() and 0xFFFF) + 3000,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_STUDY_REMINDERS)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().setBigContentTitle(title).bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+
+        try {
+            NotificationManagerCompat.from(context).notify(NOTIF_ID_SCHEDULED_STUDY + (taskId.hashCode() and 0x7FFF), builder.build())
+        } catch (e: SecurityException) {
+            // Handled
+        }
+    }
+
+    fun sendScheduledStudyExactNotification(
+        context: Context,
+        subject: String,
+        topic: String,
+        durationMinutes: Int = 45,
+        isStrict: Boolean = false,
+        taskId: String = ""
+    ) {
+        val title = "Study session starting now"
+        val body = "$subject — $topic"
+
+        val startFocusIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("NAVIGATE_TO", "FOCUS")
+            putExtra("AUTO_START_FOCUS", true)
+            putExtra("FOCUS_SUBJECT", subject)
+            putExtra("FOCUS_TOPIC", topic)
+            putExtra("FOCUS_DURATION", durationMinutes)
+            putExtra("FOCUS_STRICT", isStrict)
+        }
+        val startFocusPendingIntent = PendingIntent.getActivity(
+            context,
+            (taskId.hashCode() and 0xFFFF) + 4000,
+            startFocusIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_STUDY_REMINDERS)
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().setBigContentTitle(title).bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setContentIntent(startFocusPendingIntent)
+            .setAutoCancel(true)
+            .addAction(android.R.drawable.ic_media_play, "Start Focus ($durationMinutes m)", startFocusPendingIntent)
+
+        try {
+            NotificationManagerCompat.from(context).notify(NOTIF_ID_SCHEDULED_STUDY + 10000 + (taskId.hashCode() and 0x7FFF), builder.build())
+        } catch (e: SecurityException) {
+            // Handled
+        }
+    }
+
+    fun scheduleStudyTaskNotifications(
+        context: Context,
+        taskId: String,
+        subject: String,
+        topic: String,
+        startTimeMillis: Long,
+        durationMinutes: Int,
+        isStrict: Boolean
+    ) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val now = System.currentTimeMillis()
+
+        // 15 min prior reminder
+        val pre15MinMillis = startTimeMillis - (15 * 60 * 1000L)
+        if (pre15MinMillis > now) {
+            val preIntent = Intent(context, StudyReminderReceiver::class.java).apply {
+                action = ACTION_SCHEDULED_STUDY_PRE_15_MIN
+                putExtra("EXTRA_TASK_ID", taskId)
+                putExtra("EXTRA_SUBJECT", subject)
+                putExtra("EXTRA_TOPIC", topic)
+            }
+            val prePendingIntent = PendingIntent.getBroadcast(
+                context,
+                (taskId.hashCode() and 0xFFFF) + 10000,
+                preIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, pre15MinMillis, prePendingIntent)
+            } else {
+                alarmManager.set(AlarmManager.RTC_WAKEUP, pre15MinMillis, prePendingIntent)
+            }
+        }
+
+        // Exact start time
+        if (startTimeMillis > now) {
+            val exactIntent = Intent(context, StudyReminderReceiver::class.java).apply {
+                action = ACTION_SCHEDULED_STUDY_EXACT_START
+                putExtra("EXTRA_TASK_ID", taskId)
+                putExtra("EXTRA_SUBJECT", subject)
+                putExtra("EXTRA_TOPIC", topic)
+                putExtra("EXTRA_DURATION", durationMinutes)
+                putExtra("EXTRA_STRICT", isStrict)
+            }
+            val exactPendingIntent = PendingIntent.getBroadcast(
+                context,
+                (taskId.hashCode() and 0xFFFF) + 20000,
+                exactIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, startTimeMillis, exactPendingIntent)
+            } else {
+                alarmManager.set(AlarmManager.RTC_WAKEUP, startTimeMillis, exactPendingIntent)
+            }
         }
     }
 }

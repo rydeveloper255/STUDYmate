@@ -230,22 +230,67 @@ class AutomatedContentCollectorEngine(
             }
 
             processedFingerprints.add(fingerprint)
-            newPdfs.add(pdf)
 
-            val item = gkNowPdfScraper.toCollectedContentItem(pdf)
+            // Attempt storage upload & metadata enrichment
+            var storagePath: String? = pdf.storagePath
+            var pdfPublicUrl: String? = pdf.pdfPublicUrl
+            var fileSizeStr: String? = pdf.fileSize
+
+            if (pdf.pdfSourceUrl.isNotBlank() && !pdf.pdfSourceUrl.contains("#week-")) {
+                try {
+                    val req = okhttp3.Request.Builder()
+                        .url(pdf.pdfSourceUrl)
+                        .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) StudyMate/1.0")
+                        .build()
+                    val resp = okhttp3.OkHttpClient().newCall(req).execute()
+                    if (resp.isSuccessful) {
+                        val bytes = resp.body?.bytes()
+                        if (bytes != null && bytes.size > 100 && bytes[0] == 0x25.toByte() && bytes[1] == 0x50.toByte()) { // %PDF
+                            val uploadPath = "current-affairs-pdfs/${pdf.id}.pdf"
+                            val uploadResult = com.example.data.remote.supabase.SupabaseClient.instance.uploadFile(
+                                bucket = "current-affairs-pdfs",
+                                path = "${pdf.id}.pdf",
+                                mimeType = "application/pdf",
+                                fileBytes = bytes
+                            )
+                            if (uploadResult is com.example.data.remote.supabase.SupabaseResult.Success) {
+                                storagePath = uploadPath
+                                pdfPublicUrl = uploadResult.data
+                                fileSizeStr = "${bytes.size / 1024} KB"
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Storage upload attempt skipped for ${pdf.id}: ${e.message}")
+                }
+            }
+
+            val enrichedPdf = pdf.copy(
+                storagePath = storagePath,
+                pdfPublicUrl = pdfPublicUrl ?: pdf.pdfSourceUrl,
+                fileSize = fileSizeStr,
+                contentHash = fingerprint
+            )
+
+            newPdfs.add(enrichedPdf)
+
+            // Publish to Supabase DB pdf_documents table
+            supabaseContentHub.publishWeeklyPdf(enrichedPdf)
+
+            val item = gkNowPdfScraper.toCollectedContentItem(enrichedPdf)
             collectedItems.add(item)
 
             // 1. Raw Source Record
             val rawRecord = RawSourceRecordEntity(
-                id = "raw_pdf_${pdf.id}",
+                id = "raw_pdf_${enrichedPdf.id}",
                 sourceId = source.sourceId,
                 sourceName = source.sourceName,
                 sourceUrl = source.sourceUrl,
-                discoveredUrl = pdf.pdfSourceUrl,
-                rawTitle = pdf.title,
-                rawText = "Weekly Hindi Current Affairs PDF for date range ${pdf.dateRange}. Source: ${pdf.sourcePageUrl}",
+                discoveredUrl = enrichedPdf.pdfSourceUrl,
+                rawTitle = enrichedPdf.title,
+                rawText = "Weekly Hindi Current Affairs PDF for date range ${enrichedPdf.dateRange}. Source: ${enrichedPdf.sourcePageUrl}",
                 discoveredAt = System.currentTimeMillis(),
-                publishedAt = pdf.publishedAt,
+                publishedAt = enrichedPdf.publishedAt,
                 contentHash = fingerprint,
                 contentType = "CURRENT_AFFAIRS_PDF",
                 language = "Hindi",
@@ -255,24 +300,24 @@ class AutomatedContentCollectorEngine(
 
             // 2. Room Database Save for CurrentAffairs
             val caItem = CurrentAffairsItem(
-                title = pdf.title,
-                summary = "साप्ताहिक करेंट अफेयर्स पीडीएफ (${pdf.dateRange})। यूपीएससी, एसएससी, रेलवे व राज्य परीक्षाओं के लिए प्रामाणिक समसामयिकी पीडीएफ संग्रह।",
+                title = enrichedPdf.title,
+                summary = "साप्ताहिक करेंट अफेयर्स पीडीएफ (${enrichedPdf.dateRange})। यूपीएससी, एसएससी, रेलवे व राज्य परीक्षाओं के लिए प्रामाणिक समसामयिकी पीडीएफ संग्रह।",
                 examRelevance = "High",
                 category = "Weekly Current Affairs (Hindi PDF)",
                 targetExams = listOf("UPSC", "SSC", "Railway", "State PSC", "Banking"),
                 subject = "Current Affairs",
                 sourceName = GkNowWeeklyPdfScraper.SOURCE_NAME,
-                sourceUrl = pdf.sourcePageUrl,
-                publishedDate = pdf.publishedAt,
+                sourceUrl = enrichedPdf.sourcePageUrl,
+                publishedDate = enrichedPdf.publishedAt,
                 language = "hi",
-                canonicalUrl = pdf.pdfSourceUrl,
+                canonicalUrl = enrichedPdf.pdfPublicUrl ?: enrichedPdf.pdfSourceUrl,
                 fetchedDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
             )
             database.currentAffairsDao().insertCurrentAffairs(listOf(caItem))
 
             // 3. Telegram Bot Publishing
             if (!telegramPostedFingerprints.contains(fingerprint)) {
-                val telegramMessage = buildWeeklyCaTelegramMessage(pdf)
+                val telegramMessage = buildWeeklyCaTelegramMessage(enrichedPdf)
                 val publishResult = telegramBotService.sendStudyMatePost(
                     chatId = TELEGRAM_TEST_CHAT_ID,
                     text = telegramMessage,

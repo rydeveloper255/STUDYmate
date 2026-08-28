@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.DailyMissionTask
@@ -40,129 +41,146 @@ fun TodayMissionHomeWidget(
 ) {
     GlassCard(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        borderColor = PrimaryCyan.copy(alpha = 0.5f),
-        fillAlpha = 0.6f
+        shape = RoundedCornerShape(16.dp),
+        borderColor = PrimaryCyan.copy(alpha = 0.4f),
+        fillAlpha = 0.5f
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     Text(
                         text = "🎯 TODAY'S MISSION",
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.ExtraBold,
+                            color = TextPrimary,
+                            letterSpacing = 0.5.sp
                         )
                     )
-                }
-
-                TextButton(onClick = onOpenPlan) {
-                    Text(
-                        text = "View Plan",
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            color = PrimaryCyan,
-                            fontWeight = FontWeight.Bold
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = PrimaryCyan.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = "$completedCount/$totalCount Done",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = PrimaryCyan,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp
+                            ),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = "View Plan",
-                        tint = PrimaryCyan,
-                        modifier = Modifier.size(16.dp)
-                    )
+                    }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // Compact Progress Bar
-            val progress = if (totalCount > 0) completedCount.toFloat() / totalCount else 0f
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                LinearProgressIndicator(
-                    progress = { progress },
+                Surface(
                     modifier = Modifier
-                        .weight(1f)
-                        .height(6.dp)
-                        .clip(CircleShape),
-                    color = PrimaryCyan,
-                    trackColor = ElectricBlue.copy(alpha = 0.3f)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "$completedCount/$totalCount",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        color = TextSecondary,
-                        fontWeight = FontWeight.Bold
-                    )
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Show top 3 tasks
-            missions.take(3).forEach { task ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onOpenPlan() },
+                    color = Color.Transparent
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable { onToggleMission(task.id, !task.isCompleted) }
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        Icon(
-                            imageVector = if (task.isCompleted) Icons.Default.CheckCircle else Icons.Outlined.Circle,
-                            contentDescription = null,
-                            tint = if (task.isCompleted) EmeraldGreen else TextSecondary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = task.title,
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontWeight = FontWeight.Medium,
-                                color = if (task.isCompleted) TextSecondary else TextPrimary
+                            text = "View Plan",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = PrimaryCyan,
+                                fontWeight = FontWeight.Bold
                             )
+                        )
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "View Plan",
+                            tint = PrimaryCyan,
+                            modifier = Modifier.size(14.dp)
                         )
                     }
+                }
+            }
 
-                    if (!task.isCompleted) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = PrimaryCyan.copy(alpha = 0.15f),
-                            modifier = Modifier.clickable {
-                                onStartAction(task.actionType, task.subject, task.topic, task.targetMinutes)
-                            }
+            // Compact Progress Bar
+            val progress = if (totalCount > 0) completedCount.toFloat() / totalCount else 0f
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(CircleShape),
+                color = PrimaryCyan,
+                trackColor = ElectricBlue.copy(alpha = 0.2f)
+            )
+
+            // Show top 2 tasks max to keep card compact
+            if (missions.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    missions.take(2).forEach { task ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(
-                                text = when (task.actionType) {
-                                    "FOCUS" -> "Focus"
-                                    "PRACTICE" -> "Practice"
-                                    "CURRENT_AFFAIRS" -> "CA"
-                                    else -> "Start"
-                                },
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = PrimaryCyan,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { onToggleMission(task.id, !task.isCompleted) }
+                            ) {
+                                Icon(
+                                    imageVector = if (task.isCompleted) Icons.Default.CheckCircle else Icons.Outlined.Circle,
+                                    contentDescription = null,
+                                    tint = if (task.isCompleted) EmeraldGreen else TextSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = task.title,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (task.isCompleted) TextSecondary else TextPrimary,
+                                        fontSize = 12.sp
+                                    ),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            if (!task.isCompleted) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = PrimaryCyan.copy(alpha = 0.15f),
+                                    modifier = Modifier.clickable {
+                                        onStartAction(task.actionType, task.subject, task.topic, task.targetMinutes)
+                                    }
+                                ) {
+                                    Text(
+                                        text = when (task.actionType) {
+                                            "FOCUS" -> "Focus"
+                                            "PRACTICE" -> "Practice"
+                                            "CURRENT_AFFAIRS" -> "CA"
+                                            else -> "Start"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = PrimaryCyan,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 10.sp
+                                        ),
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
