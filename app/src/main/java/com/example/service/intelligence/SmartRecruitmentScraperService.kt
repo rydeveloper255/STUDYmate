@@ -32,7 +32,12 @@ class SmartRecruitmentScraperService(
 ) {
     companion object {
         private const val TAG = "SmartRecruitmentScraper"
-        const val PRIMARY_BASE_URL = "https://sarkariresult.com.cm"
+        const val PRIMARY_BASE_URL = "https://www.sarkariresult.com"
+        val MIRROR_BASE_URLS = listOf(
+            "https://www.sarkariresult.com",
+            "https://sarkariresult.com",
+            "https://sarkariresult.com.cm"
+        )
         const val USER_AGENT = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36 StudyMateApp/1.0"
         
         // India Standard Timezone
@@ -44,11 +49,11 @@ class SmartRecruitmentScraperService(
      */
     data class SourceEndpoints(
         val baseUrl: String = PRIMARY_BASE_URL,
-        val latestJobsPath: String = "/latest-jobs/",
-        val resultsPath: String = "/result/",
-        val admitCardsPath: String = "/admit-card/",
-        val answerKeysPath: String = "/answer-key/",
-        val syllabusUpdatesPath: String = "/syllabus/"
+        val latestJobsPath: String = "/latestjobs.php",
+        val resultsPath: String = "/result.php",
+        val admitCardsPath: String = "/admitcard.php",
+        val answerKeysPath: String = "/answerkey.php",
+        val syllabusUpdatesPath: String = "/syllabus.php"
     )
 
     private val endpoints = SourceEndpoints()
@@ -87,44 +92,54 @@ class SmartRecruitmentScraperService(
     )
 
     /**
-     * Primary entry point: Fetches, parses, normalizes, validates, and classifies items from sarkariresult.com.cm
+     * Primary entry point: Fetches, parses, normalizes, validates, and classifies items from recruitment portals.
      */
     suspend fun discoverAndProcessAllSections(): List<RecruitmentEntity> = withContext(Dispatchers.IO) {
         val discoveredEntities = mutableListOf<RecruitmentEntity>()
 
-        // 1. Fetch Main Page / Sections
-        val homeHtml = fetchHtmlSafely(endpoints.baseUrl)
-        if (homeHtml.isNotBlank() && isValidHtmlPayload(homeHtml)) {
-            val parsedHomeItems = parseSectionHtml(homeHtml, endpoints.baseUrl)
-            discoveredEntities.addAll(parsedHomeItems)
-        }
+        for (activeBaseUrl in MIRROR_BASE_URLS) {
+            try {
+                // 1. Fetch Main Page / Sections
+                val homeHtml = fetchHtmlSafely(activeBaseUrl)
+                if (homeHtml.isNotBlank() && isValidHtmlPayload(homeHtml)) {
+                    val parsedHomeItems = parseSectionHtml(homeHtml, activeBaseUrl)
+                    discoveredEntities.addAll(parsedHomeItems)
+                }
 
-        // 2. Fetch Latest Jobs section if home yielded few items
-        if (discoveredEntities.count { it.contentType == RecruitmentContentType.VACANCY.name } < 4) {
-            val jobsHtml = fetchHtmlSafely("${endpoints.baseUrl}${endpoints.latestJobsPath}")
-            if (jobsHtml.isNotBlank() && isValidHtmlPayload(jobsHtml)) {
-                val jobItems = parseListingTable(jobsHtml, RecruitmentContentType.VACANCY, endpoints.baseUrl)
-                discoveredEntities.addAll(jobItems)
+                // 2. Fetch Latest Jobs section if home yielded few items
+                if (discoveredEntities.count { it.contentType == RecruitmentContentType.VACANCY.name } < 4) {
+                    val jobsHtml = fetchHtmlSafely("$activeBaseUrl${endpoints.latestJobsPath}")
+                    if (jobsHtml.isNotBlank() && isValidHtmlPayload(jobsHtml)) {
+                        val jobItems = parseListingTable(jobsHtml, RecruitmentContentType.VACANCY, activeBaseUrl)
+                        discoveredEntities.addAll(jobItems)
+                    }
+                }
+
+                // 3. Fetch Results section
+                val resultsHtml = fetchHtmlSafely("$activeBaseUrl${endpoints.resultsPath}")
+                if (resultsHtml.isNotBlank() && isValidHtmlPayload(resultsHtml)) {
+                    val resultItems = parseListingTable(resultsHtml, RecruitmentContentType.RESULT, activeBaseUrl)
+                    discoveredEntities.addAll(resultItems)
+                }
+
+                // 4. Fetch Admit Cards section
+                val admitCardsHtml = fetchHtmlSafely("$activeBaseUrl${endpoints.admitCardsPath}")
+                if (admitCardsHtml.isNotBlank() && isValidHtmlPayload(admitCardsHtml)) {
+                    val admitCardItems = parseListingTable(admitCardsHtml, RecruitmentContentType.ADMIT_CARD, activeBaseUrl)
+                    discoveredEntities.addAll(admitCardItems)
+                }
+
+                if (discoveredEntities.isNotEmpty()) {
+                    break // Successfully fetched from mirror
+                }
+            } catch (_: Exception) {
+                // Try next mirror
             }
-        }
-
-        // 3. Fetch Results section
-        val resultsHtml = fetchHtmlSafely("${endpoints.baseUrl}${endpoints.resultsPath}")
-        if (resultsHtml.isNotBlank() && isValidHtmlPayload(resultsHtml)) {
-            val resultItems = parseListingTable(resultsHtml, RecruitmentContentType.RESULT, endpoints.baseUrl)
-            discoveredEntities.addAll(resultItems)
-        }
-
-        // 4. Fetch Admit Cards section
-        val admitCardsHtml = fetchHtmlSafely("${endpoints.baseUrl}${endpoints.admitCardsPath}")
-        if (admitCardsHtml.isNotBlank() && isValidHtmlPayload(admitCardsHtml)) {
-            val admitCardItems = parseListingTable(admitCardsHtml, RecruitmentContentType.ADMIT_CARD, endpoints.baseUrl)
-            discoveredEntities.addAll(admitCardItems)
         }
 
         // If network fetch failed or returned nothing (e.g. offline/mock environment), return high quality verified fallback
         if (discoveredEntities.isEmpty()) {
-            Log.w(TAG, "Web scraper received empty response or offline. Returning verified seed dataset.")
+            Log.d(TAG, "Network scraper received empty response or offline. Returning verified seed dataset.")
             return@withContext getVerifiedSeedDataset()
         }
 
@@ -150,12 +165,21 @@ class SmartRecruitmentScraperService(
                 if (response.isSuccessful) {
                     response.body?.string() ?: ""
                 } else {
-                    Log.w(TAG, "HTTP error fetching $url: code ${response.code}")
+                    Log.d(TAG, "HTTP response fetching $url: code ${response.code}")
                     ""
                 }
             }
+        } catch (e: java.net.UnknownHostException) {
+            Log.d(TAG, "Host offline or unresolved: ${e.message}")
+            ""
+        } catch (e: java.net.SocketTimeoutException) {
+            Log.d(TAG, "Socket timeout fetching $url")
+            ""
+        } catch (e: java.io.IOException) {
+            Log.d(TAG, "IO exception fetching $url: ${e.message}")
+            ""
         } catch (e: Exception) {
-            Log.e(TAG, "Network exception fetching $url: ${e.message}")
+            Log.d(TAG, "Network exception fetching $url: ${e.message}")
             ""
         }
     }

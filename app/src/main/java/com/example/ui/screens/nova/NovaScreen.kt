@@ -130,7 +130,7 @@ fun NovaScreen(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            if (currentTab != NovaScreenTab.DASHBOARD && currentTab != NovaScreenTab.ASSISTANT_CHAT && currentTab != NovaScreenTab.SMART_SEARCH && currentTab != NovaScreenTab.SMART_NOTES) {
+            if (currentTab != NovaScreenTab.DASHBOARD && currentTab != NovaScreenTab.ASSISTANT_CHAT && currentTab != NovaScreenTab.SMART_NOTES) {
                 NovaSubScreenTopBar(
                     currentTab = currentTab,
                     isDark = isDark,
@@ -143,7 +143,7 @@ fun NovaScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(if (currentTab == NovaScreenTab.DASHBOARD || currentTab == NovaScreenTab.ASSISTANT_CHAT || currentTab == NovaScreenTab.SMART_SEARCH || currentTab == NovaScreenTab.SMART_NOTES) PaddingValues(0.dp) else paddingValues)
+                .padding(if (currentTab == NovaScreenTab.DASHBOARD || currentTab == NovaScreenTab.ASSISTANT_CHAT || currentTab == NovaScreenTab.SMART_NOTES) PaddingValues(0.dp) else paddingValues)
         ) {
             when (currentTab) {
                 NovaScreenTab.DASHBOARD -> {
@@ -159,14 +159,6 @@ fun NovaScreen(
                         viewModel = viewModel,
                         onRequestMicPermission = { startListeningWithPermission() },
                         onBackToHub = { viewModel.setTab(NovaScreenTab.DASHBOARD) }
-                    )
-                }
-                NovaScreenTab.SMART_SEARCH -> {
-                    NovaSmartSearchTab(
-                        viewModel = viewModel,
-                        onNavigateToFocus = onNavigateToFocus,
-                        onBackToHub = { viewModel.setTab(NovaScreenTab.DASHBOARD) },
-                        onRequestMicPermission = { startListeningWithPermission() }
                     )
                 }
                 NovaScreenTab.SMART_NOTES -> {

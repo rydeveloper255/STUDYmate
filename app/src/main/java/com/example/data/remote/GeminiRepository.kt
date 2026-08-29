@@ -173,12 +173,8 @@ class GeminiRepository(
                 append("- Avoid robotic boilerplate phrases like 'Certainly! I can assist you with...' or 'As an AI language model...'.\n")
                 append("- Prefer natural, encouraging responses like 'Ha, ye karte hain.', 'Iske liye 10 questions ka practice kar sakte ho.', or 'Chalo isko aasaan bhasha me samajhte hain.'\n")
                 val lang = studyContext.preferredLanguage
-                append("- LANGUAGE PREFERENCE: $lang. ")
-                when (lang) {
-                    "Hindi" -> append("Respond primarily in clean Hindi script or clear Hindi text.\n")
-                    "Hinglish" -> append("Respond naturally in Hinglish (conversational mix of Hindi & English).\n")
-                    else -> append("Respond in clear, encouraging, student-friendly English.\n")
-                }
+                append("- DEFAULT LANGUAGE SETTING: $lang.\n")
+                append("- DYNAMIC CONVERSATION LANGUAGE RULE (MANDATORY): Always respond in the exact language style the user is currently using in their latest message. If the user asks in Hindi, answer in Hindi. If the user asks in Hinglish (Hindi in Roman script), answer in natural Hinglish. If the user asks in English, answer in English. If the user changes language mid-conversation, seamlessly match their new language.\n")
                 if (settings.useBossGreeting) {
                     append("- Casually address the user as 'Boss' naturally and occasionally.\n")
                 }
@@ -3620,6 +3616,31 @@ class GeminiRepository(
             Result.failure(e)
         }
     }
+
+    suspend fun askNovaSimple(prompt: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            if (apiKey.isNotBlank()) {
+                val response = apiService.generateContent(
+                    model = "gemini-2.5-flash",
+                    apiKey = apiKey,
+                    request = GenerateContentRequest(
+                        contents = listOf(
+                            Content(role = "user", parts = listOf(Part(text = prompt)))
+                        ),
+                        generationConfig = GenerationConfig(temperature = 0.2f)
+                    )
+                )
+                val rawText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                if (!rawText.isNullOrBlank()) {
+                    return@withContext Result.success(rawText.trim())
+                }
+            }
+            Result.failure(IllegalStateException("API key missing or empty response"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }
+
 
 

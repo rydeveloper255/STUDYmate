@@ -302,7 +302,7 @@ data class RecruitmentEntity(
     val experienceRequired: String = "Not specified",
     val selectionProcess: List<String> = emptyList(),
     val documentsRequired: List<String> = emptyList(),
-    val sourceUrl: String = "https://sarkariresult.com.cm/",
+    val sourceUrl: String = "https://www.sarkariresult.com/",
     val officialSourceUrl: String = "",
     val applicationUrl: String = "",
     val officialPdfUrl: String = "",

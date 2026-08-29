@@ -29,6 +29,16 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Restore
+import com.example.localization.AppLanguage
+import com.example.localization.AppStrings
+import com.example.localization.GlobalLanguageSwitcher
+import com.example.localization.LanguageManager
+import com.example.localization.LocalAppLanguage
+import com.example.localization.LocalLanguageManager
+import com.example.localization.appString
+import com.example.navigation.AppBackStackManager
+import com.example.navigation.AppDestination
+import com.example.navigation.LocalBackStackManager
 import com.example.ui.theme.*
 import com.example.ui.components.AppNavTab
 import com.example.ui.components.FloatingGlassNavBar
@@ -36,6 +46,10 @@ import com.example.ui.screens.learning.*
 import com.example.ui.screens.study.StudyHubScreen
 import com.example.ui.screens.practice.PracticeHubScreen
 import com.example.ui.screens.updates.UpdatesHubScreen
+import com.example.ui.screens.updates.UpdatesLauncherHomeScreen
+import com.example.ui.screens.updates.CategoryUpdateListScreen
+import com.example.ui.screens.updates.UpdateDetailScreen
+import com.example.data.model.updates.*
 import com.example.ui.screens.auth.AuthScreenHost
 import com.example.ui.screens.auth.LoginScreen
 
@@ -45,6 +59,8 @@ import com.example.ui.screens.auth.SplashScreen
 import com.example.ui.screens.document.DocumentSummarizerScreen
 import com.example.ui.screens.focus.FocusModeScreen
 import com.example.ui.screens.home.HomeScreen
+import com.example.ui.screens.learn.LearnScreen
+import com.example.ui.screens.learn.DailyCurrentAffairsScreen
 import com.example.ui.screens.intelligence.LiveExamIntelligenceScreen
 import com.example.ui.screens.nova.NovaScreen
 import com.example.ui.screens.nova.NovaFloatingAssistant
@@ -80,46 +96,47 @@ class MainActivity : ComponentActivity() {
         setContent {
             val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
             val isDarkTheme by viewModel.isDarkTheme.collectAsStateWithLifecycle()
+            val languageManager = remember { LanguageManager.getInstance() }
+            val currentLanguage by (languageManager?.currentLanguage ?: kotlinx.coroutines.flow.MutableStateFlow(AppLanguage.ENGLISH)).collectAsStateWithLifecycle()
+            val backStackManager = com.example.navigation.rememberAppBackStackManager()
 
-            StudyMateTheme(
-                darkTheme = isDarkTheme,
-                themeMode = themeMode,
-                onToggleTheme = { viewModel.updateTheme(!isDarkTheme) },
-                onSetTheme = { viewModel.updateTheme(it) },
-                onSetThemeMode = { viewModel.updateThemeMode(it) }
+            CompositionLocalProvider(
+                LocalAppLanguage provides currentLanguage,
+                LocalLanguageManager provides languageManager,
+                LocalBackStackManager provides backStackManager
             ) {
-                StudyMateAppContent(viewModel = viewModel)
+                StudyMateTheme(
+                    darkTheme = isDarkTheme,
+                    themeMode = themeMode,
+                    onToggleTheme = { viewModel.updateTheme(!isDarkTheme) },
+                    onSetTheme = { viewModel.updateTheme(it) },
+                    onSetThemeMode = { viewModel.updateThemeMode(it) }
+                ) {
+                    StudyMateAppContent(viewModel = viewModel, backStackManager = backStackManager)
+                }
             }
         }
     }
 }
 
 @Composable
-fun StudyMateAppContent(viewModel: MainViewModel) {
+fun StudyMateAppContent(
+    viewModel: MainViewModel,
+    backStackManager: AppBackStackManager = com.example.navigation.rememberAppBackStackManager()
+) {
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     val isAuthLoading by viewModel.isAuthLoading.collectAsStateWithLifecycle()
     val authErrorMessage by viewModel.authErrorMessage.collectAsStateWithLifecycle()
 
     var isSplashFinished by remember { mutableStateOf(false) }
-    var tabNames by rememberSaveable { mutableStateOf(listOf(AppNavTab.HOME.name)) }
-    val tabStack = remember(tabNames) {
-        tabNames.mapNotNull { name -> runCatching { AppNavTab.valueOf(name) }.getOrNull() }.ifEmpty { listOf(AppNavTab.HOME) }
+    val currentTab = when (val dest = backStackManager.currentDestination) {
+        is AppDestination.MainTab -> dest.tab
+        else -> AppNavTab.HOME
     }
-    val currentTab = tabStack.lastOrNull() ?: AppNavTab.HOME
-    var showProfileSettings by remember { mutableStateOf(false) }
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
 
     val onSelectTab: (AppNavTab) -> Unit = { selected ->
-        if (selected == AppNavTab.HOME) {
-            tabNames = listOf(AppNavTab.HOME.name)
-        } else {
-            val idx = tabNames.indexOf(selected.name)
-            tabNames = if (idx >= 0) {
-                tabNames.subList(0, idx + 1)
-            } else {
-                tabNames + selected.name
-            }
-        }
+        backStackManager.navigateTo(AppDestination.MainTab(selected))
     }
 
     // Dynamic Notification Permission Request (Android 13+)
@@ -231,8 +248,6 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val documentAnalysis by viewModel.documentAnalysisState.collectAsStateWithLifecycle()
     val isDocumentParsing by viewModel.isDocumentParsing.collectAsStateWithLifecycle()
     val documentError by viewModel.documentError.collectAsStateWithLifecycle()
-    var showDocumentSummarizer by remember { mutableStateOf(false) }
-    var showExamReadinessCenter by remember { mutableStateOf(false) }
 
     val aiCoachRecommendation by viewModel.aiCoachRecommendation.collectAsStateWithLifecycle()
     val studyNowRecommendation by viewModel.studyNowRecommendation.collectAsStateWithLifecycle()
@@ -260,30 +275,33 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     // Step 21 Live Exam Intelligence State
     val liveExamFeedState by viewModel.liveExamFeedState.collectAsStateWithLifecycle()
     val isRefreshingLiveExam by viewModel.isRefreshingLiveExam.collectAsStateWithLifecycle()
-    val showLiveExamIntelligenceScreen by viewModel.showLiveExamIntelligenceScreen.collectAsStateWithLifecycle()
 
     // Step 40 Smart Vacancy, Results & Admit Card Intelligence State
     val recruitmentFeedState by viewModel.recruitmentFeedState.collectAsStateWithLifecycle()
     val isRefreshingRecruitment by viewModel.isRefreshingRecruitment.collectAsStateWithLifecycle()
-    val showSmartVacancyScreen by viewModel.showSmartVacancyScreen.collectAsStateWithLifecycle()
     val selectedRecruitmentDetail by viewModel.selectedRecruitmentDetail.collectAsStateWithLifecycle()
     val recruitmentNotificationSettings by viewModel.recruitmentNotificationSettings.collectAsStateWithLifecycle()
     val recruitmentOutbox by viewModel.recruitmentOutbox.collectAsStateWithLifecycle()
     val recruitmentDailyDigest by viewModel.recruitmentDailyDigest.collectAsStateWithLifecycle()
     val recruitmentDiagnostics by viewModel.recruitmentDiagnostics.collectAsStateWithLifecycle()
 
+    // Step 71 Dedicated Latest Updates Category State
+    val vacancyState by viewModel.vacancyFeedState.collectAsStateWithLifecycle()
+    val admitCardState by viewModel.admitCardFeedState.collectAsStateWithLifecycle()
+    val resultState by viewModel.resultFeedState.collectAsStateWithLifecycle()
+    val answerKeyState by viewModel.answerKeyFeedState.collectAsStateWithLifecycle()
+    val admissionState by viewModel.admissionFeedState.collectAsStateWithLifecycle()
+    val selectedUpdateDetailItem by viewModel.selectedUpdateDetail.collectAsStateWithLifecycle()
+
     // Step 30 Notification Center & Daily Briefing State
     val appNotifications by viewModel.appNotifications.collectAsStateWithLifecycle()
     val activeInAppBanner by viewModel.activeInAppBanner.collectAsStateWithLifecycle()
     val dailyBriefingData by viewModel.dailyBriefingData.collectAsStateWithLifecycle()
-    var showNotificationCenter by remember { mutableStateOf(false) }
-    var showDailyBriefingScreen by remember { mutableStateOf(false) }
 
     // Step 49 Smart Focus & Study Schedule State
     val studyScheduleItems by viewModel.studyScheduleList.collectAsStateWithLifecycle()
     val studyScheduleLogs by viewModel.studyScheduleLogs.collectAsStateWithLifecycle()
     val isSchedulePaused by viewModel.isSchedulePaused.collectAsStateWithLifecycle()
-    var showStudyScheduleScreen by remember { mutableStateOf(false) }
 
     // Step 50 Nova Smart Study Intelligence State
     val dailyMissionTasks by viewModel.dailyMissionTasks.collectAsStateWithLifecycle()
@@ -292,8 +310,6 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val weeklyReviewStats by viewModel.weeklyReviewStats.collectAsStateWithLifecycle()
     val weeklyStudyGoalHours by viewModel.weeklyStudyGoalHours.collectAsStateWithLifecycle()
     val studyStreakDays by viewModel.studyStreakDays.collectAsStateWithLifecycle()
-    var showSmartPlannerScreen by remember { mutableStateOf(false) }
-    var showRevisionHubScreen by remember { mutableStateOf(false) }
 
     // Step 57 Exam Prep & Planner State
     val primaryExamSummary by viewModel.primaryExamSummary.collectAsStateWithLifecycle()
@@ -301,73 +317,71 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
     val dailyPlanPreview by viewModel.dailyPlanPreview.collectAsStateWithLifecycle()
 
     val handleDeepLink: (String, String) -> Unit = { link, payload ->
-        showNotificationCenter = false
-        showDailyBriefingScreen = false
         when {
             link.startsWith("recruitment://vacancy/") -> {
                 val vId = link.removePrefix("recruitment://vacancy/")
-                viewModel.setShowSmartVacancyScreen(true, initialTab = "VACANCY")
+                backStackManager.navigateTo(AppDestination.SmartVacancy("VACANCY"))
                 val item = recruitmentFeedState.allActiveVacancies.find { it.id == vId }
                     ?: recruitmentFeedState.latestForYouVacancies.find { it.id == vId }
                 if (item != null) viewModel.selectRecruitmentDetail(item)
             }
             link.startsWith("recruitment://result/") -> {
                 val rId = link.removePrefix("recruitment://result/")
-                viewModel.setShowSmartVacancyScreen(true, initialTab = "RESULT")
+                backStackManager.navigateTo(AppDestination.SmartVacancy("RESULT"))
                 val item = recruitmentFeedState.resultsList.find { it.id == rId }
                 if (item != null) viewModel.selectRecruitmentDetail(item)
             }
             link.startsWith("recruitment://admit_card/") -> {
                 val aId = link.removePrefix("recruitment://admit_card/")
-                viewModel.setShowSmartVacancyScreen(true, initialTab = "ADMIT_CARD")
+                backStackManager.navigateTo(AppDestination.SmartVacancy("ADMIT_CARD"))
                 val item = recruitmentFeedState.admitCardsList.find { it.id == aId }
                 if (item != null) viewModel.selectRecruitmentDetail(item)
             }
             link.startsWith("recruitment://alerts") || link == "RECRUITMENT_ALERTS" -> {
-                viewModel.setShowSmartVacancyScreen(true, initialTab = "ALERTS")
+                backStackManager.navigateTo(AppDestination.SmartVacancy("ALERTS"))
             }
             link.startsWith("recruitment://tracker") -> {
-                viewModel.setShowSmartVacancyScreen(true, initialTab = "SAVED")
+                backStackManager.navigateTo(AppDestination.SmartVacancy("SAVED"))
             }
             link == "CURRENT_AFFAIRS" || link == "EXAM_UPDATES" -> {
-                viewModel.setShowLiveExamIntelligenceScreen(true)
+                backStackManager.navigateTo(AppDestination.LiveExamIntelligence)
             }
             link in listOf("VACANCY", "VACANCIES", "JOBS") -> {
-                viewModel.setShowSmartVacancyScreen(true, initialTab = "VACANCY")
+                backStackManager.navigateTo(AppDestination.SmartVacancy("VACANCY"))
             }
             link in listOf("RESULTS", "RESULT") -> {
-                viewModel.setShowSmartVacancyScreen(true, initialTab = "RESULT")
+                backStackManager.navigateTo(AppDestination.SmartVacancy("RESULT"))
             }
             link in listOf("ADMIT_CARD", "ADMIT_CARDS", "HALL_TICKET") -> {
-                viewModel.setShowSmartVacancyScreen(true, initialTab = "ADMIT_CARD")
+                backStackManager.navigateTo(AppDestination.SmartVacancy("ADMIT_CARD"))
             }
             link in listOf("NOTICES", "CORRECTION") -> {
-                viewModel.setShowSmartVacancyScreen(true, initialTab = "NOTIFICATION")
+                backStackManager.navigateTo(AppDestination.SmartVacancy("NOTIFICATION"))
             }
             link == "DAILY_BRIEFING" -> {
-                showDailyBriefingScreen = true
+                backStackManager.navigateTo(AppDestination.DailyBriefing)
             }
             link == "MOCK_TEST" -> {
                 if (pendingResumeSession != null) {
                     viewModel.resumePendingTestSession()
                 } else {
-                    onSelectTab(AppNavTab.PROGRESS)
+                    backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.PROGRESS))
                 }
             }
             link == "REVISION" -> {
-                onSelectTab(AppNavTab.PROGRESS)
+                backStackManager.navigateTo(AppDestination.RevisionHub)
             }
             link == "FOCUS" -> {
-                onSelectTab(AppNavTab.FOCUS)
+                backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.FOCUS))
             }
             link == "NOVA" -> {
                 if (payload.isNotBlank()) {
                     novaViewModel.sendMessage(payload)
                 }
-                onSelectTab(AppNavTab.AI_TUTOR)
+                backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.AI_TUTOR))
             }
             else -> {
-                onSelectTab(AppNavTab.HOME)
+                backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.HOME))
             }
         }
     }
@@ -392,12 +406,12 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
         novaViewModel.navigationEvent.collect { (event, data) ->
             when (event) {
                 "NAVIGATE_TO_LIVE_EXAM_INTELLIGENCE" -> {
-                    viewModel.setShowLiveExamIntelligenceScreen(true)
+                    backStackManager.navigateTo(AppDestination.LiveExamIntelligence)
                 }
                 "NAVIGATE_TO_SMART_VACANCIES" -> {
-                    val tab = data["tab"] as? String
+                    val tab = data["tab"] as? String ?: "VACANCY"
                     val itemId = data["item_id"] as? String
-                    viewModel.setShowSmartVacancyScreen(true, initialTab = tab)
+                    backStackManager.navigateTo(AppDestination.SmartVacancy(tab))
                     if (!itemId.isNullOrBlank()) {
                         val item = recruitmentFeedState.allActiveVacancies.find { it.id == itemId }
                             ?: recruitmentFeedState.latestForYouVacancies.find { it.id == itemId }
@@ -413,31 +427,31 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     val topic = data["topic"] as? String ?: "Core Revision"
                     val duration = (data["duration"] as? Int) ?: 25
                     viewModel.startFocusSession(subject, topic, duration)
-                    onSelectTab(AppNavTab.FOCUS)
+                    backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.FOCUS))
                 }
                 "NAVIGATE_TO_PLANNER" -> {
-                    onSelectTab(AppNavTab.STUDY)
+                    backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.STUDY))
                 }
                 "NAVIGATE_TO_MOCK_TEST" -> {
-                    onSelectTab(AppNavTab.PROGRESS)
+                    backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.PROGRESS))
                 }
                 "NAVIGATE_TO_SUBJECT", "NAVIGATE_TO_TOPIC" -> {
-                    onSelectTab(AppNavTab.STUDY)
+                    backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.STUDY))
                 }
                 "NAVIGATE_TO_SUMMARIZER" -> {
-                    showDocumentSummarizer = true
+                    backStackManager.navigateTo(AppDestination.DocumentSummarizer)
                 }
                 "NAVIGATE_TO_READINESS" -> {
-                    showExamReadinessCenter = true
+                    backStackManager.navigateTo(AppDestination.ExamReadinessCenter)
                 }
                 "NAVIGATE_TO_REVISION_HUB", "NAVIGATE_TO_REVISION" -> {
-                    showRevisionHubScreen = true
+                    backStackManager.navigateTo(AppDestination.RevisionHub)
                 }
                 "NAVIGATE_TO_NOTIFICATIONS" -> {
-                    showNotificationCenter = true
+                    backStackManager.navigateTo(AppDestination.NotificationCenter)
                 }
                 "NAVIGATE_TO_PROFILE" -> {
-                    showProfileSettings = true
+                    backStackManager.navigateTo(AppDestination.ProfileSettings)
                 }
             }
         }
@@ -445,73 +459,56 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
 
     val activity = context as? Activity
     var lastBackPressTime by remember { mutableLongStateOf(0L) }
+    val currentAppLanguage = LocalAppLanguage.current
 
     BackHandler(enabled = true) {
-        when {
-            showNotificationCenter -> {
-                showNotificationCenter = false
+        if (activeTestState.isTestInProgress) {
+            if (activeTestState.isSubmitConfirmOpen) {
+                viewModel.setSubmitConfirmOpen(false)
+            } else if (activeTestState.isPaletteOpen) {
+                viewModel.setPaletteOpen(false)
+            } else {
+                viewModel.setSubmitConfirmOpen(true)
             }
-            showDailyBriefingScreen -> {
-                showDailyBriefingScreen = false
-            }
-            showSavedLearning -> {
-                showSavedLearning = false
-            }
-            selectedLearningTopic != null -> {
-                selectedLearningTopic = null
-            }
-            selectedLearningSubject != null -> {
-                selectedLearningSubject = null
-            }
-            showProfileSettings -> {
-                showProfileSettings = false
-            }
-            showLiveExamIntelligenceScreen -> {
-                viewModel.setShowLiveExamIntelligenceScreen(false)
-            }
-            showSmartVacancyScreen -> {
-                viewModel.setShowSmartVacancyScreen(false)
-            }
-            showRevisionHubScreen -> {
-                showRevisionHubScreen = false
-            }
-            showDocumentSummarizer -> {
-                showDocumentSummarizer = false
-            }
-            activeTestState.isTestInProgress -> {
-                if (activeTestState.isSubmitConfirmOpen) {
-                    viewModel.setSubmitConfirmOpen(false)
-                } else if (activeTestState.isPaletteOpen) {
-                    viewModel.setPaletteOpen(false)
-                } else {
-                    viewModel.setSubmitConfirmOpen(true)
-                }
-            }
-            activeTestState.isCompleted -> {
-                viewModel.exitTest()
-            }
-            tabNames.size > 1 -> {
-                tabNames = tabNames.dropLast(1)
-            }
-            else -> {
-                val currentTime = System.currentTimeMillis()
-                if (currentTime - lastBackPressTime < 2000L) {
-                    activity?.finish()
-                } else {
-                    lastBackPressTime = currentTime
-                    Toast.makeText(context, "Press back again to exit", Toast.LENGTH_SHORT).show()
-                }
+            return@BackHandler
+        }
+        if (activeTestState.isCompleted) {
+            viewModel.exitTest()
+            return@BackHandler
+        }
+        if (showSavedLearning) {
+            showSavedLearning = false
+            return@BackHandler
+        }
+        if (selectedLearningTopic != null) {
+            selectedLearningTopic = null
+            return@BackHandler
+        }
+        if (selectedLearningSubject != null) {
+            selectedLearningSubject = null
+            return@BackHandler
+        }
+        val handled = backStackManager.popBackStack()
+        if (!handled) {
+            val currentTime = System.currentTimeMillis()
+            if (currentTime - lastBackPressTime < 2000L) {
+                activity?.finish()
+            } else {
+                lastBackPressTime = currentTime
+                Toast.makeText(context, AppStrings.get("toast_back_exit", currentAppLanguage), Toast.LENGTH_SHORT).show()
             }
         }
     }
+
+    val currentDestination = backStackManager.currentDestination
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
         contentWindowInsets = WindowInsets.safeDrawing,
         bottomBar = {
-            // Hide bottom bar during active fullscreen mock test, document summarizer, profile settings, or notification screens
-            if (!activeTestState.isTestInProgress && !activeTestState.isCompleted && !showDocumentSummarizer && !showProfileSettings && !showLiveExamIntelligenceScreen && !showSmartVacancyScreen && !showNotificationCenter && !showDailyBriefingScreen) {
+            // Hide bottom bar during active fullscreen mock test, or secondary screens
+            if (!activeTestState.isTestInProgress && !activeTestState.isCompleted && currentDestination is AppDestination.MainTab) {
                 FloatingGlassNavBar(
                     currentTab = currentTab,
                     onTabSelected = { onSelectTab(it) }
@@ -525,7 +522,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                 .background(appBackgroundGradient(isDarkTheme, themeMode))
                 .padding(innerPadding)
         ) {
-            if (activeTestState.isTestInProgress || activeTestState.isCompleted) {
+            if (activeTestState.isTestInProgress || activeTestState.isCompleted || currentDestination is AppDestination.ActiveMockTest) {
                 ActiveMockTestScreen(
                     state = activeTestState,
                     onSelectAnswer = { qIdx, optIdx -> viewModel.selectTestAnswer(qIdx, optIdx) },
@@ -536,7 +533,10 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     onSetPaletteOpen = { isOpen -> viewModel.setPaletteOpen(isOpen) },
                     onSetSubmitConfirmOpen = { isOpen -> viewModel.setSubmitConfirmOpen(isOpen) },
                     onSubmitTest = { viewModel.submitMockTest() },
-                    onExitTest = { viewModel.saveAndExitActiveTest() },
+                    onExitTest = {
+                        viewModel.saveAndExitActiveTest()
+                        backStackManager.popBackStack()
+                    },
                     onRetakeTest = {
                         activeTestState.completedAttempt?.let { viewModel.retakeMockTest(it) }
                     },
@@ -545,9 +545,10 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     onStartPractice = { rec -> viewModel.startTargetedPractice(rec) },
                     onSaveAndNext = { viewModel.saveAndNext() },
                     onMarkForReviewAndNext = { viewModel.markForReviewAndNext() },
-                    onPreviousQuestion = { viewModel.previousQuestion() }
+                    onPreviousQuestion = { viewModel.previousQuestion() },
+                    onConfirmOrientation = { viewModel.confirmTestOrientationAndStartTimer() }
                 )
-            } else if (showLiveExamIntelligenceScreen) {
+            } else if (currentDestination is AppDestination.LiveExamIntelligence) {
                 LiveExamIntelligenceScreen(
                     feedState = liveExamFeedState,
                     isRefreshing = isRefreshingLiveExam,
@@ -556,17 +557,57 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     onToggleSaveTrending = { id, s -> viewModel.toggleSaveTrendingTopic(id, s) },
                     onStartQuizForTopic = { category, topic ->
                         viewModel.startInteractiveStudyQuiz(category, topic)
-                        viewModel.setShowLiveExamIntelligenceScreen(false)
-                        onSelectTab(AppNavTab.AI_TUTOR)
+                        backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.AI_TUTOR))
                     },
                     onAskNovaAboutUpdate = { prompt ->
                         novaViewModel.sendMessage(prompt)
-                        viewModel.setShowLiveExamIntelligenceScreen(false)
-                        onSelectTab(AppNavTab.AI_TUTOR)
+                        backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.AI_TUTOR))
                     },
-                    onBack = { viewModel.setShowLiveExamIntelligenceScreen(false) }
+                    onBack = { backStackManager.popBackStack() }
                 )
-            } else if (showSmartVacancyScreen) {
+            } else if (currentDestination is AppDestination.UpdatesCategory) {
+                val cat = currentDestination.category
+                val feedState = when (cat) {
+                    UpdateCategory.VACANCY -> vacancyState
+                    UpdateCategory.ADMIT_CARD -> admitCardState
+                    UpdateCategory.RESULT -> resultState
+                    UpdateCategory.ANSWER_KEY -> answerKeyState
+                    UpdateCategory.ADMISSION -> admissionState
+                }
+
+                LaunchedEffect(cat) {
+                    viewModel.loadUpdatesForCategory(cat, refresh = false, page = 0)
+                }
+
+                CategoryUpdateListScreen(
+                    category = cat,
+                    items = feedState.items,
+                    isLoading = feedState.isLoading,
+                    errorMessage = feedState.errorMessage,
+                    searchQuery = feedState.searchQuery,
+                    selectedOrg = feedState.selectedOrg,
+                    selectedExam = feedState.selectedExam,
+                    selectedSort = feedState.selectedSort,
+                    onSearchChange = { viewModel.setCategorySearch(cat, it) },
+                    onOrgFilterChange = { viewModel.setCategoryOrgFilter(cat, it) },
+                    onExamFilterChange = { viewModel.setCategoryExamFilter(cat, it) },
+                    onSortChange = { viewModel.setCategorySort(cat, it) },
+                    onRefresh = { viewModel.loadUpdatesForCategory(cat, refresh = true, page = 0) },
+                    onSelectDetail = { item ->
+                        viewModel.selectUpdateDetail(item)
+                        backStackManager.navigateTo(AppDestination.UpdateDetail(item))
+                    },
+                    onToggleSave = { id, saved -> viewModel.toggleSaveLatestUpdate(id, saved) },
+                    onBackToLauncher = { backStackManager.popBackStack() }
+                )
+            } else if (currentDestination is AppDestination.UpdateDetail) {
+                UpdateDetailScreen(
+                    item = currentDestination.item,
+                    onBack = { backStackManager.popBackStack() },
+                    onToggleSave = { id, saved -> viewModel.toggleSaveLatestUpdate(id, saved) },
+                    onSetReminder = { id, set, days -> viewModel.setLatestUpdateDeadlineReminder(id, set, days) }
+                )
+            } else if (currentDestination is AppDestination.SmartVacancy) {
                 SmartVacancyScreen(
                     feedState = recruitmentFeedState,
                     isRefreshing = isRefreshingRecruitment,
@@ -609,19 +650,19 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                         viewModel.handleNovaRecruitmentQuery(query) { action ->
                             when (action) {
                                 NovaRecruitmentActionType.OPEN_VACANCIES -> {
-                                    viewModel.setShowSmartVacancyScreen(true, initialTab = "VACANCY")
+                                    backStackManager.navigateTo(AppDestination.SmartVacancy("VACANCY"))
                                 }
                                 NovaRecruitmentActionType.OPEN_RESULTS -> {
-                                    viewModel.setShowSmartVacancyScreen(true, initialTab = "RESULT")
+                                    backStackManager.navigateTo(AppDestination.SmartVacancy("RESULT"))
                                 }
                                 NovaRecruitmentActionType.OPEN_ADMIT_CARDS -> {
-                                    viewModel.setShowSmartVacancyScreen(true, initialTab = "ADMIT_CARD")
+                                    backStackManager.navigateTo(AppDestination.SmartVacancy("ADMIT_CARD"))
                                 }
                                 NovaRecruitmentActionType.OPEN_SAVED_RECRUITMENTS -> {
-                                    viewModel.setShowSmartVacancyScreen(true, initialTab = "SAVED")
+                                    backStackManager.navigateTo(AppDestination.SmartVacancy("SAVED"))
                                 }
                                 NovaRecruitmentActionType.OPEN_RECRUITMENT -> {
-                                    viewModel.setShowSmartVacancyScreen(true, initialTab = "VACANCY")
+                                    backStackManager.navigateTo(AppDestination.SmartVacancy("VACANCY"))
                                 }
                                 NovaRecruitmentActionType.ENABLE_DEADLINE_ALERTS -> {
                                     viewModel.updateRecruitmentNotificationSettings(
@@ -630,14 +671,14 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                                     Toast.makeText(context, "Deadline closing alerts enabled", Toast.LENGTH_SHORT).show()
                                 }
                                 NovaRecruitmentActionType.OPEN_NOTIFICATION_SETTINGS -> {
-                                    viewModel.setShowSmartVacancyScreen(true)
+                                    backStackManager.navigateTo(AppDestination.SmartVacancy("ALERTS"))
                                 }
                             }
                         }
                     },
-                    onBack = { viewModel.setShowSmartVacancyScreen(false) }
+                    onBack = { backStackManager.popBackStack() }
                 )
-            } else if (showNotificationCenter) {
+            } else if (currentDestination is AppDestination.NotificationCenter) {
                 NotificationCenterScreen(
                     notifications = appNotifications,
                     onMarkAsRead = { viewModel.markNotificationAsRead(it) },
@@ -646,47 +687,41 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     onClearAll = { viewModel.clearAllNotifications() },
                     onNavigateDeepLink = handleDeepLink,
                     onOpenSettings = {
-                        showNotificationCenter = false
-                        showProfileSettings = true
+                        backStackManager.navigateTo(AppDestination.ProfileSettings)
                     },
-                    onBack = { showNotificationCenter = false }
+                    onBack = { backStackManager.popBackStack() }
                 )
-            } else if (showDailyBriefingScreen) {
+            } else if (currentDestination is AppDestination.DailyBriefing) {
                 DailyBriefingScreen(
                     briefingData = dailyBriefingData,
                     onStartPractice = { sub, top ->
                         viewModel.startFocusSession(sub, top, 25)
-                        showDailyBriefingScreen = false
-                        onSelectTab(AppNavTab.FOCUS)
+                        backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.FOCUS))
                     },
                     onReadCurrentAffairs = {
-                        showDailyBriefingScreen = false
-                        viewModel.setShowLiveExamIntelligenceScreen(true)
+                        backStackManager.navigateTo(AppDestination.LiveExamIntelligence)
                     },
                     onResumeTest = {
-                        showDailyBriefingScreen = false
                         if (pendingResumeSession != null) {
                             viewModel.resumePendingTestSession()
                         } else {
-                            onSelectTab(AppNavTab.PROGRESS)
+                            backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.PROGRESS))
                         }
                     },
                     onStartRevision = {
-                        showDailyBriefingScreen = false
-                        onSelectTab(AppNavTab.PROGRESS)
+                        backStackManager.navigateTo(AppDestination.RevisionHub)
                     },
                     onAskNova = { prompt ->
-                        showDailyBriefingScreen = false
                         novaViewModel.sendMessage(prompt)
-                        onSelectTab(AppNavTab.AI_TUTOR)
+                        backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.AI_TUTOR))
                     },
                     onChangeLanguage = { lang ->
                         viewModel.updateNotificationPrefs(notifPrefs.copy(language = lang))
                         viewModel.computeDailyBriefingData()
                     },
-                    onBack = { showDailyBriefingScreen = false }
+                    onBack = { backStackManager.popBackStack() }
                 )
-            } else if (showProfileSettings) {
+            } else if (currentDestination is AppDestination.ProfileSettings) {
                 ProfileSettingsScreen(
                     user = userProfile,
                     themeMode = themeMode,
@@ -698,7 +733,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     onUpdateProfile = { viewModel.updateUserProfile(it, refreshStudyPlan = true) },
                     onSignOut = { viewModel.signOut(context) },
                     onDeleteAccount = { viewModel.deleteAccount() },
-                    onBack = { showProfileSettings = false },
+                    onBack = { backStackManager.popBackStack() },
                     onTestStudyReminder = { viewModel.testStudySessionReminder() },
                     onTestExamCountdown = { viewModel.testExamCountdownReminder() },
                     onTestDailyGoal = { viewModel.testDailyGoalReminder() },
@@ -712,8 +747,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                         viewModel.changeSelectedExam(examId = examId, refreshStudyPlan = true)
                     },
                     onOpenStudyPlanner = {
-                        showProfileSettings = false
-                        onSelectTab(AppNavTab.STUDY)
+                        backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.STUDY))
                     },
                     onResetActiveExamData = {
                         viewModel.resetActiveExamPreparationData()
@@ -729,7 +763,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     onResetPersonalization = { viewModel.resetPersonalization {} },
                     onClearCache = { viewModel.clearAllLocalStudyData {} }
                 )
-            } else if (showExamReadinessCenter) {
+            } else if (currentDestination is AppDestination.ExamReadinessCenter) {
                 ExamReadinessCenterScreen(
                     user = userProfile,
                     examReadiness = examReadinessScore,
@@ -738,20 +772,17 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     mockAttempts = mockAttempts,
                     onStartFocusSession = { sub, top ->
                         viewModel.startFocusSession(sub, top, 25)
-                        showExamReadinessCenter = false
-                        onSelectTab(AppNavTab.FOCUS)
+                        backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.FOCUS))
                     },
                     onNavigateToMocks = {
-                        showExamReadinessCenter = false
-                        onSelectTab(AppNavTab.PROGRESS)
+                        backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.PROGRESS))
                     },
                     onNavigateToRevision = {
-                        showExamReadinessCenter = false
-                        onSelectTab(AppNavTab.STUDY)
+                        backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.STUDY))
                     },
-                    onBack = { showExamReadinessCenter = false }
+                    onBack = { backStackManager.popBackStack() }
                 )
-            } else if (showStudyScheduleScreen) {
+            } else if (currentDestination is AppDestination.StudySchedule) {
                 com.example.ui.screens.planner.StudyScheduleScreen(
                     scheduleItems = studyScheduleItems,
                     scheduleLogs = studyScheduleLogs,
@@ -763,12 +794,11 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     onSkipMissed = { logId -> viewModel.skipMissedSession(logId) },
                     onStartFocusSession = { sub, top, mins, strict ->
                         viewModel.startFocusSession(sub, top, mins, isStrictMode = strict)
-                        showStudyScheduleScreen = false
-                        onSelectTab(AppNavTab.FOCUS)
+                        backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.FOCUS))
                     },
-                    onBack = { showStudyScheduleScreen = false }
+                    onBack = { backStackManager.popBackStack() }
                 )
-            } else if (showSmartPlannerScreen) {
+            } else if (currentDestination is AppDestination.SmartPlanner) {
                 com.example.ui.screens.planner.SmartStudyPlannerScreen(
                     dailyMissions = dailyMissionTasks,
                     weakTopicInsights = weakTopicInsights,
@@ -782,23 +812,22 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     onDismissScheduleShift = { viewModel.dismissAdaptiveScheduleShift() },
                     onUpdateWeeklyGoal = { goal -> viewModel.updateWeeklyStudyGoal(goal) },
                     onStartAction = { actionType, subject, topic, minutes ->
-                        showSmartPlannerScreen = false
                         when (actionType) {
                             "FOCUS" -> {
                                 viewModel.startFocusSession(subject, topic, minutes)
-                                onSelectTab(AppNavTab.FOCUS)
+                                backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.FOCUS))
                             }
-                            "PRACTICE" -> onSelectTab(AppNavTab.PRACTICE)
-                            "CURRENT_AFFAIRS" -> onSelectTab(AppNavTab.UPDATES)
+                            "PRACTICE" -> backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.PRACTICE))
+                            "CURRENT_AFFAIRS" -> backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.UPDATES))
                             else -> {
                                 viewModel.startFocusSession(subject, topic, minutes)
-                                onSelectTab(AppNavTab.FOCUS)
+                                backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.FOCUS))
                             }
                         }
                     },
-                    onBack = { showSmartPlannerScreen = false }
+                    onBack = { backStackManager.popBackStack() }
                 )
-            } else if (showDocumentSummarizer) {
+            } else if (currentDestination is AppDestination.DocumentSummarizer) {
                 DocumentSummarizerScreen(
                     analysisResult = documentAnalysis,
                     isLoading = isDocumentParsing,
@@ -809,29 +838,124 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                     onSaveQuestionAsFlashcard = { q ->
                         viewModel.convertStudyQuestionToFlashcard(userProfile?.subjects?.firstOrNull() ?: "General", q)
                     },
-                    onBack = { showDocumentSummarizer = false },
+                    onBack = { backStackManager.popBackStack() },
                     completeStudyKit = completeStudyKit,
                     isStudyKitGenerating = isStudyKitGenerating,
                     onGenerateStudyKit = { uri -> viewModel.generateCompleteStudyKit(uri, userProfile?.subjects?.firstOrNull() ?: "General", context) }
                 )
-            } else if (showRevisionHubScreen) {
+            } else if (currentDestination is AppDestination.RevisionHub) {
                 com.example.ui.screens.revision.RevisionHubScreen(
                     mainViewModel = viewModel,
-                    onBack = { showRevisionHubScreen = false },
+                    onBack = { backStackManager.popBackStack() },
                     onStartFocus = { sub, top, mins ->
                         viewModel.startFocusSession(sub, top, mins)
-                        showRevisionHubScreen = false
-                        onSelectTab(AppNavTab.FOCUS)
+                        backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.FOCUS))
                     },
                     onStartPractice = { mode, sub, top ->
                         viewModel.launchPracticeSession(mode, sub, top, 10)
-                        showRevisionHubScreen = false
-                        onSelectTab(AppNavTab.PRACTICE)
+                        backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.PRACTICE))
                     },
                     onOpenResources = { _ ->
-                        showRevisionHubScreen = false
-                        onSelectTab(AppNavTab.STUDY)
+                        backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.STUDY))
                     }
+                )
+            } else if (currentDestination is AppDestination.LearnHub) {
+                LearnScreen(
+                    user = userProfile,
+                    initialSubModule = (currentDestination as AppDestination.LearnHub).initialSubModule,
+                    onBackToHome = { backStackManager.popBackStack() },
+                    onAskNova = { prompt ->
+                        novaViewModel.sendMessage(prompt)
+                        backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.AI_TUTOR))
+                    }
+                )
+            } else if (currentDestination is AppDestination.PracticeHub) {
+                PracticeHubScreen(
+                    user = userProfile,
+                    attempts = mockAttempts,
+                    mistakes = mistakes,
+                    userMaterials = userQuestionMaterials,
+                    examObjective = activeExamObjective,
+                    topicMasteries = allTopicMasteries,
+                    sessionHistory = studentSessionHistory,
+                    allFocusSessions = allFocusSessions,
+                    snapshot = latestIntelligenceSnapshot,
+                    activeTestState = activeTestState,
+                    isTestGenerating = isTestGenerating,
+                    generationError = generationError,
+                    insufficientPyqNotice = insufficientPyqNotice,
+                    mistakeDiagnosis = mistakeDiagnosis,
+                    savedQuestionsList = savedQuestionsList,
+                    onOpenRevisionHub = { backStackManager.navigateTo(AppDestination.RevisionHub) },
+                    onLaunchPracticeMode = { mode, sub, top, qCount ->
+                        viewModel.launchPracticeSession(mode, sub, top, qCount)
+                    },
+                    onSaveQuestion = { q -> viewModel.saveQuestion(q) },
+                    onUnsaveQuestion = { qId -> viewModel.unsaveQuestion(qId) },
+                    onReportQuestion = { qId, reason, notes -> viewModel.reportQuestion(qId, reason, notes) },
+                    onStartTestWithConfig = { config -> viewModel.startMockTestWithConfig(config) },
+                    onSelectAnswer = { qIdx, optIdx -> viewModel.selectTestAnswer(qIdx, optIdx) },
+                    onClearAnswer = { qIdx -> viewModel.clearTestAnswer(qIdx) },
+                    onToggleMarkForReview = { qIdx -> viewModel.toggleMarkForReview(qIdx) },
+                    onSkipQuestion = { qIdx -> viewModel.skipQuestion(qIdx) },
+                    onNavigateQuestion = { idx -> viewModel.navigateTestQuestion(idx) },
+                    onSetPaletteOpen = { isOpen -> viewModel.setPaletteOpen(isOpen) },
+                    onSetSubmitConfirmOpen = { isOpen -> viewModel.setSubmitConfirmOpen(isOpen) },
+                    onSubmitTest = { viewModel.submitMockTest() },
+                    onExitTest = { viewModel.exitTest() },
+                    onReviewPastTest = { attempt -> viewModel.reviewPastTest(attempt) },
+                    onRetakeTest = { attempt -> viewModel.retakeMockTest(attempt) },
+                    onRetakeWrongQuestions = { viewModel.retryWrongQuestions() },
+                    onRetryUnanswered = { viewModel.retrySkippedQuestions() },
+                    onStartPractice = { rec -> viewModel.startTargetedPractice(rec) },
+                    onDeletePastTest = { id -> viewModel.deletePastTest(id) },
+                    onClearGenerationError = { viewModel.clearGenerationError() },
+                    onConfirmStartWithAvailablePyqs = { viewModel.confirmStartWithAvailablePyqs() },
+                    onConfirmAddAiToPyqs = { viewModel.confirmAddAiToPyqs() },
+                    onDismissInsufficientPyqNotice = { viewModel.dismissInsufficientPyqNotice() },
+                    onCancelTestGeneration = { viewModel.cancelTestGeneration() },
+                    onSaveAndNext = { viewModel.saveAndNext() },
+                    onMarkForReviewAndNext = { viewModel.markForReviewAndNext() },
+                    onPreviousQuestion = { viewModel.previousQuestion() },
+                    onConfirmOrientation = { viewModel.confirmTestOrientationAndStartTimer() },
+                    pendingResumeSession = pendingResumeSession,
+                    onResumePendingTest = { viewModel.resumePendingTestSession() },
+                    onDiscardPendingTest = { viewModel.discardPendingTestSession() },
+                    onSaveUserMaterial = { title, exam, subject, topic, rawText ->
+                        viewModel.saveUserQuestionMaterial(title, exam, subject, topic, rawText)
+                    },
+                    onDeleteUserMaterial = { id -> viewModel.deleteUserQuestionMaterial(id) },
+                    onDiagnoseMistakes = { subject -> viewModel.diagnoseMistakes(subject) },
+                    onMarkMistakeMastered = { id, mastered -> viewModel.markMistakeMastered(id, mastered) },
+                    onSaveExamObjective = { obj -> viewModel.saveExamObjective(obj) },
+                    onStartFocusOnTopic = { sub, top ->
+                        viewModel.startFocusSession(sub, top, 25)
+                        backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.FOCUS))
+                    },
+                    examReadiness = examReadinessScore,
+                    subjectSummaries = subjectProgressSummaries,
+                    recommendations = studyRecommendations,
+                    dailyPlan = dailyStudyPlan,
+                    onSetManualTopicOverride = { sub, top, override -> viewModel.setUserManualTopicOverride(sub, top, override) },
+                    onResetPreparationData = { viewModel.resetActiveExamPreparationData() },
+                    onOpenReadinessCenter = { backStackManager.navigateTo(AppDestination.ExamReadinessCenter) },
+                    userPreferences = userStudyPreferences,
+                    onUpdatePersonalizationSettings = { settings -> viewModel.updatePersonalizationSettings(settings) },
+                    onResetPersonalizationSignals = { viewModel.resetPersonalizationSignals() },
+                    onRecordSpacedRevisionFeedback = { sub, top, fb -> viewModel.recordSpacedRevisionFeedback(sub, top, fb) },
+                    onBack = { backStackManager.popBackStack() },
+                    onNavigateToStudy = { backStackManager.navigateTo(AppDestination.MainTab(AppNavTab.STUDY)) },
+                    activeExamContext = activeExamContext,
+                    novaProgressAnalysis = novaProgressAnalysis,
+                    isNovaProgressAnalyzing = isNovaProgressAnalyzing,
+                    onGenerateNovaProgressAnalysis = { exam, summary, lang ->
+                        viewModel.generateNovaProgressAnalysis(exam, summary, lang)
+                    },
+                    initialSubModule = (currentDestination as AppDestination.PracticeHub).initialSubModule
+                )
+            } else if (currentDestination is AppDestination.DailyCurrentAffairs) {
+                DailyCurrentAffairsScreen(
+                    onBack = { backStackManager.popBackStack() }
                 )
             } else {
                 Crossfade(
@@ -866,22 +990,22 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                                         onSelectTab(AppNavTab.UPDATES)
                                     }
                                     lower.contains("vacancy") || lower.contains("vacancies") || lower.contains("job") || lower.contains("recruitment") || lower.contains("bharti") -> {
-                                        viewModel.setShowSmartVacancyScreen(true, initialTab = "VACANCIES")
+                                        backStackManager.navigateTo(AppDestination.SmartVacancy("VACANCY"))
                                     }
                                     lower.contains("result") || lower.contains("cutoff") || lower.contains("scorecard") -> {
-                                        viewModel.setShowSmartVacancyScreen(true, initialTab = "RESULTS")
+                                        backStackManager.navigateTo(AppDestination.SmartVacancy("RESULT"))
                                     }
                                     lower.contains("admit card") || lower.contains("hall ticket") || lower.contains("city intimation") -> {
-                                        viewModel.setShowSmartVacancyScreen(true, initialTab = "ADMIT_CARDS")
+                                        backStackManager.navigateTo(AppDestination.SmartVacancy("ADMIT_CARD"))
                                     }
                                     lower.contains("setting") || lower.contains("profile") || lower.contains("account") || lower.contains("language") || lower.contains("preference") -> {
-                                        showProfileSettings = true
+                                        backStackManager.navigateTo(AppDestination.ProfileSettings)
                                     }
                                     lower.contains("pdf") || lower.contains("summariz") || lower.contains("document") || lower.contains("material") -> {
-                                        showDocumentSummarizer = true
+                                        backStackManager.navigateTo(AppDestination.DocumentSummarizer)
                                     }
                                     lower.contains("progress") || lower.contains("readiness") || lower.contains("analytics") -> {
-                                        showExamReadinessCenter = true
+                                        backStackManager.navigateTo(AppDestination.ExamReadinessCenter)
                                     }
                                     lower.contains("shield") || lower.contains("block") -> {
                                         onSelectTab(AppNavTab.FOCUS)
@@ -890,7 +1014,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                                         onSelectTab(AppNavTab.AI_TUTOR)
                                     }
                                     lower.contains("notification") || lower.contains("alert") -> {
-                                        showNotificationCenter = true
+                                        backStackManager.navigateTo(AppDestination.NotificationCenter)
                                     }
                                     lower.contains("saved") || lower.contains("bookmark") -> {
                                         onSelectTab(AppNavTab.PRACTICE)
@@ -907,11 +1031,11 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                                 onSelectTab(AppNavTab.FOCUS)
                             },
                             onNavigateToTab = { onSelectTab(it) },
-                            onOpenProfileSettings = { showProfileSettings = true },
-                            onOpenExamReadinessCenter = { showExamReadinessCenter = true },
+                            onOpenProfileSettings = { backStackManager.navigateTo(AppDestination.ProfileSettings) },
+                            onOpenExamReadinessCenter = { backStackManager.navigateTo(AppDestination.ExamReadinessCenter) },
                             onSignOut = { viewModel.signOut(context) },
                             onScanQuestion = { onSelectTab(AppNavTab.AI_TUTOR) },
-                            onOpenDocumentSummarizer = { showDocumentSummarizer = true },
+                            onOpenDocumentSummarizer = { backStackManager.navigateTo(AppDestination.DocumentSummarizer) },
                             onUpdateUserProfile = { updatedProfile -> viewModel.updateUserProfile(updatedProfile) },
                             novaViewModel = novaViewModel,
                             liveExamFeedState = liveExamFeedState,
@@ -919,7 +1043,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onRefreshLiveExam = { viewModel.refreshLiveExamIntelligence(force = true) },
                             onOpenLiveExamUpdateDetail = { update ->
                                 viewModel.selectLiveUpdateForDetail(update)
-                                viewModel.setShowLiveExamIntelligenceScreen(true)
+                                backStackManager.navigateTo(AppDestination.LiveExamIntelligence)
                             },
                             onToggleSaveLiveExamUpdate = { id, s -> viewModel.toggleSaveLiveExamUpdate(id, s) },
                             onToggleSaveTrendingTopic = { id, s -> viewModel.toggleSaveTrendingTopic(id, s) },
@@ -928,19 +1052,19 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                                 onSelectTab(AppNavTab.AI_TUTOR)
                             },
                             onOpenFullLiveExamIntelligence = {
-                                viewModel.setShowLiveExamIntelligenceScreen(true)
+                                backStackManager.navigateTo(AppDestination.LiveExamIntelligence)
                             },
                             recruitmentFeedState = recruitmentFeedState,
                             onOpenSmartVacancy = { tab ->
-                                viewModel.setShowSmartVacancyScreen(true, initialTab = tab)
+                                backStackManager.navigateTo(AppDestination.SmartVacancy(tab ?: "VACANCY"))
                             },
                             pendingResumeSession = pendingResumeSession,
                             onResumePendingTest = { viewModel.resumePendingTestSession() },
                             onDiscardPendingTest = { viewModel.discardPendingTestSession() },
                             unreadNotificationCount = appNotifications.count { !it.isRead },
-                            onOpenNotificationCenter = { showNotificationCenter = true },
+                            onOpenNotificationCenter = { backStackManager.navigateTo(AppDestination.NotificationCenter) },
                             dailyBriefingData = dailyBriefingData,
-                            onOpenDailyBriefing = { showDailyBriefingScreen = true },
+                            onOpenDailyBriefing = { backStackManager.navigateTo(AppDestination.DailyBriefing) },
                             userStudyPreferences = userStudyPreferences,
                             allTopicMasteries = allTopicMasteries,
                             mockAttempts = mockAttempts,
@@ -957,7 +1081,13 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             dailyMissionTasks = dailyMissionTasks,
                             weakTopicInsights = weakTopicInsights,
                             onToggleDailyMissionTask = { id, done -> viewModel.toggleDailyMissionTask(id, done) },
-                            onOpenSmartPlanner = { showSmartPlannerScreen = true }
+                            onOpenSmartPlanner = { backStackManager.navigateTo(AppDestination.SmartPlanner) },
+                            onOpenLearn = { subModule ->
+                                backStackManager.navigateTo(AppDestination.LearnHub(subModule))
+                            },
+                            onOpenPractice = { subModule ->
+                                backStackManager.navigateTo(AppDestination.PracticeHub(subModule))
+                            }
                         )
 
                         AppNavTab.AI_TUTOR -> {
@@ -968,7 +1098,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                                     onSelectTab(AppNavTab.FOCUS)
                                 },
                                 onNavigateToPlanner = { onSelectTab(AppNavTab.STUDY) },
-                                onOpenDocumentSummarizer = { showDocumentSummarizer = true }
+                                onOpenDocumentSummarizer = { backStackManager.navigateTo(AppDestination.DocumentSummarizer) }
                             )
                         }
 
@@ -976,7 +1106,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             user = userProfile,
                             examContext = activeExamContext ?: ExamContext(),
                             mainViewModel = viewModel,
-                            onOpenRevisionHub = { showRevisionHubScreen = true },
+                            onOpenRevisionHub = { backStackManager.navigateTo(AppDestination.RevisionHub) },
                             subjectSummaries = subjectProgressSummaries,
                             allMasteries = allTopicMasteries,
                             bookmarks = allLearningBookmarks,
@@ -1040,7 +1170,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onSpeakTts = { text -> viewModel.speakText(text) },
                             onDeleteBookmark = { viewModel.deleteLearningBookmark(it) },
                             onDeleteNote = { viewModel.deleteTopicNote(it) },
-                            onOpenDocumentSummarizer = { showDocumentSummarizer = true },
+                            onOpenDocumentSummarizer = { backStackManager.navigateTo(AppDestination.DocumentSummarizer) },
                             onOpenSearch = { query ->
                                 viewModel.performSmartSearch(query)
                                 onSelectTab(AppNavTab.AI_TUTOR)
@@ -1096,7 +1226,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             isNovaDoubtThinking = isNovaDoubtThinking,
                             onToggleStrictModeEnabled = { viewModel.setStrictModeEnabled(it) },
                             onEmergencyExit = { viewModel.emergencyExitFocusSession() },
-                            onOpenSchedule = { showStudyScheduleScreen = true }
+                            onOpenSchedule = { backStackManager.navigateTo(AppDestination.StudySchedule) }
                         )
 
                         AppNavTab.PRACTICE, AppNavTab.PROGRESS -> PracticeHubScreen(
@@ -1115,7 +1245,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             insufficientPyqNotice = insufficientPyqNotice,
                             mistakeDiagnosis = mistakeDiagnosis,
                             savedQuestionsList = savedQuestionsList,
-                            onOpenRevisionHub = { showRevisionHubScreen = true },
+                            onOpenRevisionHub = { backStackManager.navigateTo(AppDestination.RevisionHub) },
                             onLaunchPracticeMode = { mode, sub, top, qCount ->
                                 viewModel.launchPracticeSession(mode, sub, top, qCount)
                             },
@@ -1146,6 +1276,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             onSaveAndNext = { viewModel.saveAndNext() },
                             onMarkForReviewAndNext = { viewModel.markForReviewAndNext() },
                             onPreviousQuestion = { viewModel.previousQuestion() },
+                            onConfirmOrientation = { viewModel.confirmTestOrientationAndStartTimer() },
                             pendingResumeSession = pendingResumeSession,
                             onResumePendingTest = { viewModel.resumePendingTestSession() },
                             onDiscardPendingTest = { viewModel.discardPendingTestSession() },
@@ -1166,7 +1297,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             dailyPlan = dailyStudyPlan,
                             onSetManualTopicOverride = { sub, top, override -> viewModel.setUserManualTopicOverride(sub, top, override) },
                             onResetPreparationData = { viewModel.resetActiveExamPreparationData() },
-                            onOpenReadinessCenter = { showExamReadinessCenter = true },
+                            onOpenReadinessCenter = { backStackManager.navigateTo(AppDestination.ExamReadinessCenter) },
                             userPreferences = userStudyPreferences,
                             onUpdatePersonalizationSettings = { settings -> viewModel.updatePersonalizationSettings(settings) },
                             onResetPersonalizationSignals = { viewModel.resetPersonalizationSignals() },
@@ -1181,63 +1312,21 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
                             }
                         )
 
-                        AppNavTab.UPDATES -> UpdatesHubScreen(
-                            recruitmentFeedState = recruitmentFeedState,
-                            isRefreshingRecruitment = isRefreshingRecruitment,
-                            onRefreshRecruitment = { viewModel.refreshRecruitmentCatalog(force = true) },
-                            onCategorySelected = { viewModel.setRecruitmentCategory(it) },
-                            onStateSelected = { viewModel.setRecruitmentState(it) },
-                            onTabSelected = { viewModel.setRecruitmentTab(it) },
-                            onSearchQueryChanged = { viewModel.setRecruitmentSearch(it) },
-                            onSortOptionSelected = { viewModel.setRecruitmentSort(it) },
-                            onToggleSaveRecruitment = { id, saved -> viewModel.toggleSaveRecruitment(id, saved) },
-                            onSetReminder = { id, set, hours -> viewModel.setDeadlineReminder(id, set, hours) },
-                            selectedDetailItem = selectedRecruitmentDetail,
-                            onSelectDetailItem = { viewModel.selectRecruitmentDetail(it) },
-                            onUpdateProfile = { viewModel.updateRecruitmentProfile(it) },
-                            onUpdateApplicationStatus = { id, st, appNo, rollNo, post, notes ->
-                                viewModel.updateUserApplicationStatus(id, st, appNo, rollNo, post, notes)
+                        AppNavTab.UPDATES -> UpdatesLauncherHomeScreen(
+                            onNavigateToCategory = { category ->
+                                viewModel.loadUpdatesForCategory(category, refresh = false, page = 0)
+                                backStackManager.navigateTo(AppDestination.UpdatesCategory(category))
                             },
-                            onUpdateDocumentsReady = { id, docs -> viewModel.updateDocumentReadyStatus(id, docs) },
-                            onUpdateChecklistChecked = { id, items -> viewModel.updateChecklistChecked(id, items) },
-                            onFindJobsForMe = { qual, cat, st, age -> viewModel.findJobsForMe(qual ?: "", cat ?: "", st ?: "", age ?: 0) },
-                            recruitmentNotificationSettings = recruitmentNotificationSettings,
-                            onUpdateNotificationSettings = { viewModel.updateRecruitmentNotificationSettings(it) },
-                            recruitmentOutbox = recruitmentOutbox,
-                            recruitmentDailyDigest = recruitmentDailyDigest,
-                            recruitmentDiagnostics = recruitmentDiagnostics,
-                            onMuteRecruitment = { viewModel.muteRecruitment(it) },
-                            onUnmuteRecruitment = { viewModel.unmuteRecruitment(it) },
-                            onMuteCategory = { viewModel.muteRecruitmentCategory(it) },
-                            onUnmuteCategory = { viewModel.unmuteRecruitmentCategory(it) },
-                            onMarkOutboxRead = { viewModel.markRecruitmentOutboxItemRead(it) },
-                            onMarkAllOutboxRead = { viewModel.markAllRecruitmentOutboxItemsRead() },
-                            onDeleteOutboxItem = { viewModel.deleteRecruitmentOutboxItem(it) },
-                            onClearAllOutbox = { viewModel.clearAllRecruitmentOutbox() },
-                            onNovaQuery = { q ->
-                                viewModel.performSmartSearch(q)
-                                onSelectTab(AppNavTab.AI_TUTOR)
+                            onOpenSearch = {
+                                viewModel.loadUpdatesForCategory(UpdateCategory.VACANCY, refresh = false, page = 0)
+                                backStackManager.navigateTo(AppDestination.UpdatesCategory(UpdateCategory.VACANCY))
                             },
-                            liveExamFeedState = liveExamFeedState,
-                            isRefreshingLiveExam = isRefreshingLiveExam,
-                            onRefreshLiveExam = { viewModel.refreshLiveExamIntelligence(force = true) },
-                            onToggleSaveLiveUpdate = { id, s -> viewModel.toggleSaveLiveExamUpdate(id, s) },
-                            onToggleSaveTrending = { id, s -> viewModel.toggleSaveTrendingTopic(id, s) },
-                            onStartQuizForTopic = { cat, top ->
-                                viewModel.startInteractiveStudyQuiz(cat, top)
-                                onSelectTab(AppNavTab.AI_TUTOR)
+                            onOpenBookmarks = {
+                                backStackManager.navigateTo(AppDestination.SmartVacancy("SAVED"))
                             },
-                            onAskNovaAboutUpdate = { q ->
-                                viewModel.performSmartSearch(q)
-                                onSelectTab(AppNavTab.AI_TUTOR)
-                            },
-                            notifications = appNotifications,
-                            onMarkNotificationAsRead = { viewModel.markNotificationAsRead(it) },
-                            onMarkAllNotificationsAsRead = { viewModel.markAllNotificationsAsRead() },
-                            onDeleteNotification = { viewModel.deleteNotification(it) },
-                            onClearAllNotifications = { viewModel.clearAllNotifications() },
-                            onNavigateDeepLink = { link, payload -> handleDeepLink(link, payload ?: "") },
-                            onOpenNotificationSettings = { onSelectTab(AppNavTab.PROFILE) }
+                            onOpenNotifications = {
+                                backStackManager.navigateTo(AppDestination.NotificationCenter)
+                            }
                         )
 
                         AppNavTab.PROFILE -> ProfileSettingsScreen(
@@ -1280,7 +1369,7 @@ fun StudyMateAppContent(viewModel: MainViewModel) {
             }
 
             // Floating In-Context Assistant on secondary screens (except Home, AI Tutor, and active Mock Test)
-            if (currentTab != AppNavTab.HOME && currentTab != AppNavTab.AI_TUTOR && !activeTestState.isTestInProgress && !showProfileSettings && !showDocumentSummarizer && !showExamReadinessCenter) {
+            if (currentTab != AppNavTab.HOME && currentTab != AppNavTab.AI_TUTOR && !activeTestState.isTestInProgress && currentDestination is AppDestination.MainTab) {
                 NovaFloatingAssistant(
                     viewModel = novaViewModel,
                     onNavigateToTab = { onSelectTab(it) },

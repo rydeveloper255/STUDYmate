@@ -69,11 +69,16 @@ fun NovaAssistantChatTab(
     val settings by viewModel.settings.collectAsState()
     val studyContext by viewModel.studyContext.collectAsState()
     val savedConversations by viewModel.savedConversations.collectAsState()
+    val allConversations by viewModel.allNovaConversations.collectAsState()
+    val activeSessionId by viewModel.activeSessionId.collectAsState()
+    val activeSessionTitle by viewModel.activeSessionTitle.collectAsState()
+    val memories by viewModel.memories.collectAsState()
     val pendingSensitiveAction by viewModel.pendingSensitiveAction.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
     var showMoreMenu by remember { mutableStateOf(false) }
     var showHistoryDialog by remember { mutableStateOf(false) }
+    var showPersonalizationDialog by remember { mutableStateOf(false) }
     var showAttachmentMenu by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
@@ -192,8 +197,37 @@ fun NovaAssistantChatTab(
                     }
                 }
 
-                // Right: Conversation History & More Options
+                // Right: New Chat + History + More Options
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    // New Chat Button
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = ElectricIndigo.copy(alpha = 0.25f),
+                        border = BorderStroke(1.dp, ElectricIndigo.copy(alpha = 0.5f)),
+                        modifier = Modifier.springClickable { viewModel.startNewChat() }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "New Chat",
+                                tint = NeonCyan,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "New",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
                     // History Button
                     IconButton(
                         onClick = { showHistoryDialog = true },
@@ -203,6 +237,19 @@ fun NovaAssistantChatTab(
                             imageVector = Icons.Default.History,
                             contentDescription = "Conversation History",
                             tint = NeonCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    // Memory & Personalization Button
+                    IconButton(
+                        onClick = { showPersonalizationDialog = true },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Psychology,
+                            contentDescription = "Nova Memory & Personalization",
+                            tint = AmberGold,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -231,6 +278,13 @@ fun NovaAssistantChatTab(
                                 onClick = {
                                     showMoreMenu = false
                                     viewModel.startNewChat()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("🧠 Nova Memory & Personalization", color = AmberGold, fontSize = 13.sp) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    showPersonalizationDialog = true
                                 }
                             )
                             DropdownMenuItem(
@@ -669,22 +723,49 @@ fun NovaAssistantChatTab(
     }
 
     // =========================================================================
-    // 7. CONVERSATION HISTORY DIALOG
+    // 7. CONVERSATION HISTORY DIALOG (LOCAL-FIRST ROOM DATABASE)
     // =========================================================================
     if (showHistoryDialog) {
         NovaConversationHistoryDialog(
-            sessions = savedConversations,
+            conversations = allConversations,
+            activeSessionId = activeSessionId,
             onDismiss = { showHistoryDialog = false },
-            onLoadSession = { session ->
-                viewModel.loadConversation(session)
+            onLoadConversation = { entity ->
+                viewModel.loadConversationEntity(entity)
                 showHistoryDialog = false
             },
-            onDeleteSession = { sessionId ->
-                viewModel.deleteConversation(sessionId)
+            onRenameConversation = { id, title ->
+                viewModel.renameConversation(id, title)
+            },
+            onDeleteConversation = { id ->
+                viewModel.deleteConversation(id)
+            },
+            onClearAllConversations = {
+                viewModel.clearAllConversations()
             },
             onStartNewChat = {
                 viewModel.startNewChat()
                 showHistoryDialog = false
+            }
+        )
+    }
+
+    // =========================================================================
+    // 7B. PERSONALIZATION & USER-APPROVED MEMORY DIALOG
+    // =========================================================================
+    if (showPersonalizationDialog) {
+        NovaPersonalizationMemoryDialog(
+            memories = memories,
+            settings = settings,
+            onDismiss = { showPersonalizationDialog = false },
+            onTogglePersonalization = {
+                viewModel.updateSettings(settings.copy(memoryEnabled = !settings.memoryEnabled))
+            },
+            onDeleteMemory = { id ->
+                viewModel.deleteMemory(id)
+            },
+            onClearAllMemories = {
+                viewModel.clearAllMemories()
             }
         )
     }
@@ -1499,23 +1580,45 @@ private fun NovaActionTriggerButton(
 }
 
 // =============================================================================
-// CONVERSATION HISTORY DIALOG
+// CONVERSATION HISTORY DIALOG (LOCAL ROOM DATABASE WITH SEARCH & ACTIONS)
 // =============================================================================
 @Composable
 private fun NovaConversationHistoryDialog(
-    sessions: List<NovaConversationSession>,
+    conversations: List<NovaConversationEntity>,
+    activeSessionId: String,
     onDismiss: () -> Unit,
-    onLoadSession: (NovaConversationSession) -> Unit,
-    onDeleteSession: (String) -> Unit,
+    onLoadConversation: (NovaConversationEntity) -> Unit,
+    onRenameConversation: (String, String) -> Unit,
+    onDeleteConversation: (String) -> Unit,
+    onClearAllConversations: () -> Unit,
     onStartNewChat: () -> Unit
 ) {
+    var searchQuery by remember { mutableStateOf("") }
+    var conversationToRename by remember { mutableStateOf<NovaConversationEntity?>(null) }
+    var renameInputText by remember { mutableStateOf("") }
+    var conversationToDelete by remember { mutableStateOf<NovaConversationEntity?>(null) }
+    var showClearAllConfirm by remember { mutableStateOf(false) }
+
+    val filteredList = remember(conversations, searchQuery) {
+        if (searchQuery.isBlank()) {
+            conversations
+        } else {
+            val q = searchQuery.trim().lowercase()
+            conversations.filter {
+                it.title.lowercase().contains(q) ||
+                it.lastMessagePreview.lowercase().contains(q) ||
+                it.examContext.lowercase().contains(q)
+            }
+        }
+    }
+
     Dialog(onDismissRequest = onDismiss) {
         GlassCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.75f),
-            backgroundColor = DarkSurfaceElevated.copy(alpha = 0.95f),
-            borderColor = NeonCyan.copy(alpha = 0.4f),
+                .fillMaxHeight(0.85f),
+            backgroundColor = DarkSurfaceElevated.copy(alpha = 0.96f),
+            borderColor = NeonCyan.copy(alpha = 0.45f),
             contentPadding = PaddingValues(16.dp)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
@@ -1526,37 +1629,92 @@ private fun NovaConversationHistoryDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.History, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.History, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(22.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Chat History",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+                        Column {
+                            Text(
+                                text = "Nova Chat History",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "${conversations.size} saved conversations • Local Room DB",
+                                fontSize = 11.sp,
+                                color = TextSecondary
+                            )
+                        }
                     }
                     IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary, modifier = Modifier.size(18.dp))
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // Start New Chat Button
-                Button(
-                    onClick = onStartNewChat,
-                    colors = ButtonDefaults.buttonColors(containerColor = ElectricIndigo),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                // Search Bar
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Search chat discussions...", fontSize = 12.sp, color = TextSecondary) },
+                    leadingIcon = {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(18.dp))
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = TextSecondary, modifier = Modifier.size(14.dp))
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NeonCyan,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
+                        focusedContainerColor = DarkSurface,
+                        unfocusedContainerColor = DarkSurface,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    singleLine = true
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Action Row: Start Fresh Chat & Clear All
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Start Fresh Chat", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Button(
+                        onClick = onStartNewChat,
+                        colors = ButtonDefaults.buttonColors(containerColor = ElectricIndigo),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Start Fresh Chat", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    if (conversations.isNotEmpty()) {
+                        OutlinedButton(
+                            onClick = { showClearAllConfirm = true },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = CoralPink),
+                            border = BorderStroke(1.dp, CoralPink.copy(alpha = 0.4f)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                if (sessions.isEmpty()) {
+                if (filteredList.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -1564,7 +1722,7 @@ private fun NovaConversationHistoryDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "No saved conversation history yet.\nChats are automatically saved when you start a new one.",
+                            text = if (searchQuery.isNotBlank()) "No discussions found matching \"$searchQuery\"" else "No saved chat history yet.\nAll your study questions & discussions with Nova are automatically saved locally on this device.",
                             fontSize = 12.sp,
                             color = TextSecondary,
                             textAlign = TextAlign.Center,
@@ -1576,15 +1734,17 @@ private fun NovaConversationHistoryDialog(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(sessions, key = { it.id }) { session ->
-                            val dateStr = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(session.timestamp))
+                        items(filteredList, key = { it.id }) { item ->
+                            val isCurrent = item.id == activeSessionId
+                            val dateStr = SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(item.updatedAt))
+
                             Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = DarkSurface,
-                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isCurrent) ElectricIndigo.copy(alpha = 0.2f) else DarkSurface,
+                                border = BorderStroke(1.dp, if (isCurrent) NeonCyan.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.1f)),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .springClickable { onLoadSession(session) }
+                                    .springClickable { onLoadConversation(item) }
                             ) {
                                 Row(
                                     modifier = Modifier.padding(12.dp),
@@ -1592,31 +1752,389 @@ private fun NovaConversationHistoryDialog(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (isCurrent) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    color = NeonCyan.copy(alpha = 0.2f),
+                                                    border = BorderStroke(0.5.dp, NeonCyan)
+                                                ) {
+                                                    Text(
+                                                        text = "Active",
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = NeonCyan,
+                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                            }
+                                            Text(
+                                                text = item.title,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+
+                                        if (item.lastMessagePreview.isNotBlank()) {
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = item.lastMessagePreview,
+                                                fontSize = 11.sp,
+                                                color = TextSecondary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(3.dp))
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = "$dateStr • ${item.messageCount} msgs",
+                                                fontSize = 10.sp,
+                                                color = TextSecondary.copy(alpha = 0.8f)
+                                            )
+                                            if (item.examContext.isNotBlank()) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "• ${item.examContext}",
+                                                    fontSize = 10.sp,
+                                                    color = AmberGold
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        // Rename Button
+                                        IconButton(
+                                            onClick = {
+                                                conversationToRename = item
+                                                renameInputText = item.title
+                                            },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Edit,
+                                                contentDescription = "Rename chat",
+                                                tint = TextSecondary,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                        }
+
+                                        // Delete Button
+                                        IconButton(
+                                            onClick = { conversationToDelete = item },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.DeleteOutline,
+                                                contentDescription = "Delete chat",
+                                                tint = CoralPink.copy(alpha = 0.8f),
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Rename Dialog
+    conversationToRename?.let { target ->
+        AlertDialog(
+            onDismissRequest = { conversationToRename = null },
+            title = { Text("Rename Chat", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                OutlinedTextField(
+                    value = renameInputText,
+                    onValueChange = { renameInputText = it },
+                    placeholder = { Text("Enter chat title...") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NeonCyan,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (renameInputText.isNotBlank()) {
+                            onRenameConversation(target.id, renameInputText.trim())
+                        }
+                        conversationToRename = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
+                ) {
+                    Text("Save", color = DarkCanvas, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { conversationToRename = null }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
+            containerColor = DarkSurfaceElevated
+        )
+    }
+
+    // Delete Single Confirmation
+    conversationToDelete?.let { target ->
+        AlertDialog(
+            onDismissRequest = { conversationToDelete = null },
+            title = { Text("Delete Conversation?", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = { Text("Delete \"${target.title}\"? This action cannot be undone.", color = TextSecondary) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteConversation(target.id)
+                        conversationToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CoralPink)
+                ) {
+                    Text("Delete", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { conversationToDelete = null }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
+            containerColor = DarkSurfaceElevated
+        )
+    }
+
+    // Clear All Confirmation
+    if (showClearAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearAllConfirm = false },
+            title = { Text("Clear All Chat History?", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to permanently delete all ${conversations.size} saved chats on this device?", color = TextSecondary) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onClearAllConversations()
+                        showClearAllConfirm = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CoralPink)
+                ) {
+                    Text("Clear All", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearAllConfirm = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
+            containerColor = DarkSurfaceElevated
+        )
+    }
+}
+
+// =============================================================================
+// USER-APPROVED PERSONALIZATION & NOVA MEMORY MODAL
+// =============================================================================
+@Composable
+private fun NovaPersonalizationMemoryDialog(
+    memories: List<NovaMemoryItem>,
+    settings: NovaSettings,
+    onDismiss: () -> Unit,
+    onTogglePersonalization: () -> Unit,
+    onDeleteMemory: (Long) -> Unit,
+    onClearAllMemories: () -> Unit
+) {
+    var showClearAllConfirm by remember { mutableStateOf(false) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        GlassCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.8f),
+            backgroundColor = DarkSurfaceElevated.copy(alpha = 0.96f),
+            borderColor = AmberGold.copy(alpha = 0.45f),
+            contentPadding = PaddingValues(16.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Psychology, contentDescription = null, tint = AmberGold, modifier = Modifier.size(22.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Nova Memory & Personalization",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "User-Approved Local Context",
+                                fontSize = 11.sp,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary, modifier = Modifier.size(18.dp))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Privacy & User Control Banner
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = AmberGold.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, AmberGold.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Security, contentDescription = null, tint = AmberGold, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Nova only remembers learning preferences you explicitly approve. No automatic model retraining or cloud selling.",
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.9f),
+                            lineHeight = 15.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Personalization Toggle
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = DarkSurface,
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Enable Nova Memory",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = if (settings.memoryEnabled) "Nova adapts explanations to your exam and pace" else "Nova operates without memory",
+                                fontSize = 11.sp,
+                                color = TextSecondary
+                            )
+                        }
+                        Switch(
+                            checked = settings.memoryEnabled,
+                            onCheckedChange = { onTogglePersonalization() },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = AmberGold
+                            )
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Approved Memories (${memories.size})",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    if (memories.isNotEmpty()) {
+                        TextButton(
+                            onClick = { showClearAllConfirm = true },
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Text("Clear All", fontSize = 11.sp, color = CoralPink)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                if (memories.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No saved memories yet.\nWhen you tell Nova things like 'I struggle with Trigonometry formulas', you can approve Nova remembering it.",
+                            fontSize = 12.sp,
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 18.sp
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(memories, key = { it.id }) { mem ->
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = DarkSurface,
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = session.title,
-                                            fontSize = 13.sp,
+                                            text = mem.key,
+                                            fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            color = AmberGold
                                         )
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text(
-                                            text = "$dateStr • ${session.messages.size} messages",
+                                            text = mem.value,
                                             fontSize = 11.sp,
-                                            color = TextSecondary
+                                            color = Color.White.copy(alpha = 0.85f)
                                         )
                                     }
 
                                     IconButton(
-                                        onClick = { onDeleteSession(session.id) },
-                                        modifier = Modifier.size(32.dp)
+                                        onClick = { onDeleteMemory(mem.id) },
+                                        modifier = Modifier.size(28.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.DeleteOutline,
-                                            contentDescription = "Delete chat",
+                                            contentDescription = "Delete memory",
                                             tint = CoralPink.copy(alpha = 0.8f),
-                                            modifier = Modifier.size(16.dp)
+                                            modifier = Modifier.size(15.dp)
                                         )
                                     }
                                 }
@@ -1626,5 +2144,30 @@ private fun NovaConversationHistoryDialog(
                 }
             }
         }
+    }
+
+    if (showClearAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearAllConfirm = false },
+            title = { Text("Clear All Nova Memory?", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = { Text("Permanently delete all user-approved study memories? Nova will start fresh.", color = TextSecondary) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onClearAllMemories()
+                        showClearAllConfirm = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CoralPink)
+                ) {
+                    Text("Clear All", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearAllConfirm = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
+            containerColor = DarkSurfaceElevated
+        )
     }
 }

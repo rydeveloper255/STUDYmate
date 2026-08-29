@@ -233,7 +233,7 @@ class ExamIntelligenceService(
             1. Extract the exact official subjects, chapters, and high-yield topics for this SPECIFIC exam.
             2. Do NOT invent or list unrelated subjects (e.g. do not add Physics/Chemistry to Railway unless official).
             3. Extract exact pattern details: duration_minutes, total_questions, total_marks, negative_marking rule, conducting_body, official_website.
-            4. Return strict JSON matching this exact structure:
+            4. Output ONLY valid JSON, without any conversational preamble or markdown commentary:
             {
               "examName": "$examName",
               "category": "$category",
@@ -313,12 +313,10 @@ class ExamIntelligenceService(
         fallbackCategory: String
     ): ParsedExamIntelligenceResponse {
         return try {
-            val jsonStart = rawText.indexOf("{")
-            val jsonEnd = rawText.lastIndexOf("}")
-            val cleanJson = if (jsonStart >= 0 && jsonEnd > jsonStart) {
-                rawText.substring(jsonStart, jsonEnd + 1)
-            } else {
-                rawText.trim()
+            val cleanJson = extractJsonFromText(rawText)
+            if (cleanJson.isBlank()) {
+                Log.d(TAG, "No valid JSON object found in Gemini response, utilizing structured syllabus fallback.")
+                return buildFallbackSyllabus(fallbackExamName.lowercase().replace(" ", "_"), fallbackExamName, fallbackCategory)
             }
             val obj = JSONObject(cleanJson)
 
@@ -405,9 +403,32 @@ class ExamIntelligenceService(
                 confidence = obj.optDouble("confidence", 0.95).toFloat()
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Failed parsing Gemini JSON syllabus, returning structured fallback", e)
+            Log.w(TAG, "Notice parsing Gemini JSON syllabus: ${e.message}. Using structured fallback.")
             buildFallbackSyllabus(fallbackExamName.lowercase().replace(" ", "_"), fallbackExamName, fallbackCategory)
         }
+    }
+
+    private fun extractJsonFromText(rawText: String): String {
+        if (rawText.isBlank()) return ""
+        val trimmed = rawText.trim()
+        
+        // Check for markdown code blocks first
+        val codeBlockMatch = Regex("```(?:json)?\\s*([\\s\\S]*?)\\s*```").find(trimmed)
+        val candidate = codeBlockMatch?.groupValues?.getOrNull(1)?.trim() ?: trimmed
+
+        val firstBrace = candidate.indexOf('{')
+        val lastBrace = candidate.lastIndexOf('}')
+        if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
+            return candidate.substring(firstBrace, lastBrace + 1).trim()
+        }
+
+        val firstBracket = candidate.indexOf('[')
+        val lastBracket = candidate.lastIndexOf(']')
+        if (firstBracket != -1 && lastBracket != -1 && lastBracket > firstBracket) {
+            return candidate.substring(firstBracket, lastBracket + 1).trim()
+        }
+
+        return ""
     }
 
     private fun validateAndConstructContext(

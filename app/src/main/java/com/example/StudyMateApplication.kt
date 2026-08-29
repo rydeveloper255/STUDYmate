@@ -156,7 +156,8 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
         )
         automatedContentScheduler.startScheduler()
 
-        // Initialize Focus Shield & Offline Notification System
+        // Initialize Focus Shield & Offline Notification System & Language Manager
+        com.example.localization.LanguageManager.init(this)
         com.example.service.FocusShieldManager.init(this)
         com.example.notification.StudyNotificationManager.initNotificationChannels(this)
         com.example.notification.StudyNotificationManager.scheduleAllReminders(this)

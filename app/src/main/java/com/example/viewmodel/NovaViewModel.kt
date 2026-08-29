@@ -27,7 +27,6 @@ import java.util.Calendar
 enum class NovaScreenTab(val title: String, val icon: String) {
     DASHBOARD("Dashboard", "⚡"),
     ASSISTANT_CHAT("NOVA Voice & Chat", "🤖"),
-    SMART_SEARCH("Smart Search", "🔍"),
     SMART_NOTES("Smart Notes", "📝"),
     CURRENT_AFFAIRS("Current Affairs & Exams", "📰"),
     VOICE_NOTES("Voice Notes & Lectures", "🎙️"),
@@ -151,6 +150,18 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _savedConversations = MutableStateFlow<List<NovaConversationSession>>(emptyList())
     val savedConversations: StateFlow<List<NovaConversationSession>> = _savedConversations.asStateFlow()
+
+    val allNovaConversations: StateFlow<List<com.example.data.model.NovaConversationEntity>> = studyRepository.allNovaConversations
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _activeSessionId = MutableStateFlow(java.util.UUID.randomUUID().toString())
+    val activeSessionId: StateFlow<String> = _activeSessionId.asStateFlow()
+
+    private val _activeSessionTitle = MutableStateFlow("New Chat")
+    val activeSessionTitle: StateFlow<String> = _activeSessionTitle.asStateFlow()
+
+    private val _conversationSearchQuery = MutableStateFlow("")
+    val conversationSearchQuery: StateFlow<String> = _conversationSearchQuery.asStateFlow()
 
     private val _settings = MutableStateFlow(NovaSettings())
     val settings: StateFlow<NovaSettings> = _settings.asStateFlow()
@@ -609,6 +620,7 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
             attachedImageUri = _attachedImageUri.value?.toString()
         )
         _messages.update { it + userMessage }
+        persistActiveConversation()
 
         val imageToSend = _attachedImageBitmap.value
         _attachedImageBitmap.value = null
@@ -1866,6 +1878,7 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                     actionButtons = dynamicActions.take(3)
                 )
                 _messages.update { it + novaMessage }
+                persistActiveConversation()
 
                 // Auto speak if enabled
                 if (_settings.value.ttsAutoSpeak && _settings.value.voiceEnabled) {
@@ -1894,6 +1907,7 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
                 _messages.update { it + fallbackMessage }
+                persistActiveConversation()
             }
         }
     }
@@ -1943,7 +1957,7 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
                     setTab(NovaScreenTab.SMART_NOTES)
                 }
                 NovaActionType.OPEN_SMART_SEARCH -> {
-                    setTab(NovaScreenTab.SMART_SEARCH)
+                    setTab(NovaScreenTab.ASSISTANT_CHAT)
                 }
                 NovaActionType.OPEN_SAVED_QUESTIONS -> {
                     setTab(NovaScreenTab.INTERACTIVE_STUDY_QUIZ)
@@ -3782,6 +3796,12 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         _attachedImageBitmap.value = null
     }
 
+    fun submitMessageFeedback(messageId: String, isHelpful: Boolean) {
+        viewModelScope.launch {
+            _snackbarMessage.emit(if (isHelpful) "Thanks for the feedback! 👍" else "Feedback recorded. We'll improve this explanation. 💡")
+        }
+    }
+
     // --- Memory Operations ---
     fun addManualMemory(category: NovaMemoryCategory, key: String, value: String) {
         viewModelScope.launch {
@@ -3892,20 +3912,67 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         sendMessage(prompt)
     }
 
-    fun startNewChat() {
-        val currentMsgs = _messages.value
-        val hasUserMsg = currentMsgs.any { it.sender == NovaSender.USER }
-        if (hasUserMsg) {
-            val firstUserMsg = currentMsgs.firstOrNull { it.sender == NovaSender.USER }?.text ?: "Study Discussion"
-            val title = firstUserMsg.take(40).ifBlank { "Study Session" }
-            val session = NovaConversationSession(
-                title = title,
-                messages = currentMsgs,
-                examContext = _studyContext.value.targetExam
-            )
-            _savedConversations.update { listOf(session) + it }
-        }
+    fun persistActiveConversation() {
+        val msgs = _messages.value
+        if (msgs.isEmpty()) return
+        val hasUserMsg = msgs.any { it.sender == NovaSender.USER }
+        if (!hasUserMsg) return
 
+        val firstUserMsg = msgs.firstOrNull { it.sender == NovaSender.USER }?.text ?: "Study Discussion"
+        val cleanTitle = if (_activeSessionTitle.value == "New Chat" || _activeSessionTitle.value.isBlank()) {
+            generateLocalTitle(firstUserMsg)
+        } else {
+            _activeSessionTitle.value
+        }
+        _activeSessionTitle.value = cleanTitle
+
+        val lastMsg = msgs.lastOrNull()?.text ?: ""
+        val preview = lastMsg.take(80).replace("\n", " ")
+
+        val entity = com.example.data.model.NovaConversationEntity(
+            id = _activeSessionId.value,
+            title = cleanTitle,
+            createdAt = msgs.firstOrNull()?.timestamp ?: System.currentTimeMillis(),
+            updatedAt = System.currentTimeMillis(),
+            examContext = _studyContext.value.targetExam,
+            language = detectLanguage(firstUserMsg),
+            messagesJson = com.example.data.local.NovaConversationSerializer.serializeMessages(msgs),
+            lastMessagePreview = preview,
+            messageCount = msgs.size
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            studyRepository.saveNovaConversation(entity)
+        }
+    }
+
+    fun generateLocalTitle(userText: String): String {
+        val trimmed = userText.trim().replace(Regex("[\\n\\r]+"), " ")
+        val words = trimmed.split(" ").filter { it.isNotBlank() }
+        val titleCandidate = if (words.size <= 5) {
+            trimmed.take(36)
+        } else {
+            words.take(5).joinToString(" ").take(36)
+        }
+        return titleCandidate.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() }
+    }
+
+    fun detectLanguage(text: String): String {
+        if (text.any { it in '\u0900'..'\u097F' }) return "Hindi"
+        val lower = text.lowercase()
+        val hinglishTokens = listOf("kya", "kaise", "batao", "bataye", "samjhao", "hai", "hain", "karna", "hoga", "chahiye", "mera", "meri", "mujhe", "karo", "padhna", "tayari")
+        if (hinglishTokens.any { lower.contains(it) }) return "Hinglish"
+        return "English"
+    }
+
+    fun setConversationSearchQuery(query: String) {
+        _conversationSearchQuery.value = query
+    }
+
+    fun startNewChat() {
+        persistActiveConversation()
+        val newId = java.util.UUID.randomUUID().toString()
+        _activeSessionId.value = newId
+        _activeSessionTitle.value = "New Chat"
         val greeting = getProactiveGreeting()
         _messages.value = listOf(
             NovaChatMessage(
@@ -3921,6 +3988,29 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun loadConversationEntity(entity: com.example.data.model.NovaConversationEntity) {
+        persistActiveConversation()
+        _activeSessionId.value = entity.id
+        _activeSessionTitle.value = entity.title
+        val deserialized = com.example.data.local.NovaConversationSerializer.deserializeMessages(entity.messagesJson)
+        _messages.value = if (deserialized.isEmpty()) {
+            listOf(
+                NovaChatMessage(
+                    sender = NovaSender.NOVA,
+                    text = getProactiveGreeting()
+                )
+            )
+        } else {
+            deserialized
+        }
+        _attachedImageUri.value = null
+        _attachedImageBitmap.value = null
+        _currentTab.value = NovaScreenTab.ASSISTANT_CHAT
+        viewModelScope.launch {
+            _snackbarMessage.emit("Loaded chat: ${entity.title}")
+        }
+    }
+
     fun loadConversation(session: NovaConversationSession) {
         _messages.value = session.messages
         _attachedImageUri.value = null
@@ -3930,23 +4020,36 @@ class NovaViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun submitMessageFeedback(messageId: String, isHelpful: Boolean) {
-        _messages.update { list ->
-            list.map { msg ->
-                if (msg.id == messageId) {
-                    msg.copy(userFeedback = if (isHelpful) "HELPFUL" else "NOT_HELPFUL")
-                } else msg
-            }
+    fun renameConversation(sessionId: String, newTitle: String) {
+        if (newTitle.isBlank()) return
+        if (_activeSessionId.value == sessionId) {
+            _activeSessionTitle.value = newTitle.trim()
         }
-        viewModelScope.launch {
-            _snackbarMessage.emit(if (isHelpful) "👍 Feedback saved! Thanks." else "👎 Feedback noted. NOVA will improve!")
+        viewModelScope.launch(Dispatchers.IO) {
+            studyRepository.renameNovaConversation(sessionId, newTitle.trim())
+            _snackbarMessage.emit("Renamed to \"${newTitle.trim()}\"")
         }
     }
 
     fun deleteConversation(sessionId: String) {
-        _savedConversations.update { it.filter { sess -> sess.id != sessionId } }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
+            studyRepository.deleteNovaConversation(sessionId)
+            if (_activeSessionId.value == sessionId) {
+                withContext(Dispatchers.Main) {
+                    startNewChat()
+                }
+            }
             _snackbarMessage.emit("Deleted saved chat")
+        }
+    }
+
+    fun clearAllConversations() {
+        viewModelScope.launch(Dispatchers.IO) {
+            studyRepository.clearAllNovaConversations()
+            withContext(Dispatchers.Main) {
+                startNewChat()
+            }
+            _snackbarMessage.emit("Cleared all chat history")
         }
     }
 

@@ -24,7 +24,7 @@ class RecruitmentIntelligenceEngine(
 ) {
     companion object {
         private const val TAG = "RecruitmentEngine3.0"
-        private const val PRIMARY_SOURCE_DOMAIN = "https://sarkariresult.com.cm/"
+        private const val PRIMARY_SOURCE_DOMAIN = "https://www.sarkariresult.com/"
     }
 
     val allRecruitmentItems: Flow<List<RecruitmentEntity>> = recruitmentDao.getAllRecruitmentItems()
@@ -44,7 +44,7 @@ class RecruitmentIntelligenceEngine(
     private val _adminDiagnostics = MutableStateFlow(
         AdminRecruitmentDiagnostics(
             sourceHealthList = listOf(
-                SourceHealthStatus("SarkariResult Hub", "https://sarkariresult.com.cm", isOnline = true, httpStatus = 200, latencyMs = 140),
+                SourceHealthStatus("SarkariResult Hub", "https://www.sarkariresult.com", isOnline = true, httpStatus = 200, latencyMs = 140),
                 SourceHealthStatus("Railway Recruitment Control Board", "https://indianrailways.gov.in", isOnline = true, httpStatus = 200, latencyMs = 210),
                 SourceHealthStatus("Staff Selection Commission", "https://ssc.gov.in", isOnline = true, httpStatus = 200, latencyMs = 190),
                 SourceHealthStatus("Union Public Service Commission", "https://upsc.gov.in", isOnline = true, httpStatus = 200, latencyMs = 230),
@@ -167,8 +167,11 @@ class RecruitmentIntelligenceEngine(
             generateDailyDigest(updatedItems, profile)
             
             Result.success(updatedItems.size)
+        } catch (e: java.net.UnknownHostException) {
+            Log.d(TAG, "Offline or host unresolved when refreshing recruitment catalog: ${e.message}")
+            Result.success(0)
         } catch (e: Exception) {
-            Log.e(TAG, "Error refreshing recruitment catalog", e)
+            Log.w(TAG, "Notice when refreshing recruitment catalog: ${e.message}")
             Result.failure(e)
         }
     }

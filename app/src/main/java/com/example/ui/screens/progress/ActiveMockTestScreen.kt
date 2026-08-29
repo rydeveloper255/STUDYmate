@@ -47,6 +47,7 @@ import com.example.ui.components.springClickable
 import com.example.ui.theme.*
 import com.example.viewmodel.ActiveTestState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.components.test.TestOrientationGate
 import com.example.data.persistence.PersistenceMonitor
 import com.example.data.persistence.PersistenceStatus
 import com.example.data.model.MockTestType
@@ -69,32 +70,33 @@ fun ActiveMockTestScreen(
     onStartPractice: ((com.example.service.intelligence.SmartPracticeRecommendation) -> Unit)? = null,
     onSaveAndNext: (() -> Unit)? = null,
     onMarkForReviewAndNext: (() -> Unit)? = null,
-    onPreviousQuestion: (() -> Unit)? = null
+    onPreviousQuestion: (() -> Unit)? = null,
+    onConfirmOrientation: () -> Unit = {}
 ) {
     var showExitWarningDialog by remember { mutableStateOf(false) }
     var isRightPaletteExpanded by remember { mutableStateOf(true) }
 
-    // Request Landscape mode for live CBT exam when active; restore default when disposed
+    // Lock Landscape mode for live CBT exam when active and orientation confirmed; restore default when disposed
     val context = LocalContext.current
-    DisposableEffect(state.isTestInProgress, state.isCompleted) {
+    DisposableEffect(state.isTestInProgress, state.isCompleted, state.isOrientationConfirmed) {
         val activity = context as? Activity
-        if (state.isTestInProgress && !state.isCompleted) {
-            val originalOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        val originalOrientation = activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        if (state.isTestInProgress && !state.isCompleted && state.isOrientationConfirmed) {
             try {
                 activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             } catch (_: Exception) { }
-            onDispose {
-                try {
-                    activity?.requestedOrientation = originalOrientation
-                } catch (_: Exception) { }
-            }
-        } else {
-            onDispose { }
+        }
+        onDispose {
+            try {
+                activity?.requestedOrientation = originalOrientation
+            } catch (_: Exception) { }
         }
     }
 
     BackHandler(enabled = true) {
         if (state.isCompleted) {
+            onExitTest()
+        } else if (!state.isOrientationConfirmed) {
             onExitTest()
         } else if (state.isSubmitConfirmOpen) {
             onSetSubmitConfirmOpen(false)
@@ -144,6 +146,17 @@ fun ActiveMockTestScreen(
                 onRetryIncorrect = onRetakeWrongQuestions,
                 onRetryUnanswered = onRetryUnanswered,
                 onStartPractice = onStartPractice
+            )
+        } else if (!state.isOrientationConfirmed || !isLandscape) {
+            // STEP 70: SMART PRE-TEST ROTATION SCREEN GATE
+            TestOrientationGate(
+                testTitle = state.title,
+                totalQuestions = state.questions.size,
+                durationMinutes = (state.totalDurationSeconds / 60).coerceAtLeast(1),
+                examName = state.config.exam,
+                subjectName = state.subject,
+                onOrientationConfirmed = onConfirmOrientation,
+                onCancel = onExitTest
             )
         } else if (currentQ != null) {
             if (isLandscape) {

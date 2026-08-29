@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.*
+import com.example.localization.GlobalLanguageSwitcher
 import com.example.ui.components.GlassButton
 import com.example.ui.components.GlassCard
 import com.example.ui.components.StreakBadge
@@ -145,22 +146,31 @@ fun UpdatesHubScreen(
                         )
                     }
 
-                    val unreadAlerts = notifications.count { !it.isRead }
-                    if (unreadAlerts > 0) {
-                        Surface(
-                            color = CoralRose,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.clickable {
-                                currentTab = UpdatesTabType.NOTIFICATIONS.name
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        GlobalLanguageSwitcher(
+                            modifier = Modifier.testTag("updates_language_switcher")
+                        )
+
+                        val unreadAlerts = notifications.count { !it.isRead }
+                        if (unreadAlerts > 0) {
+                            Surface(
+                                color = CoralRose,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.clickable {
+                                    currentTab = UpdatesTabType.NOTIFICATIONS.name
+                                }
+                            ) {
+                                Text(
+                                    text = "$unreadAlerts new",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
                             }
-                        ) {
-                            Text(
-                                text = "$unreadAlerts new",
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
                         }
                     }
                 }

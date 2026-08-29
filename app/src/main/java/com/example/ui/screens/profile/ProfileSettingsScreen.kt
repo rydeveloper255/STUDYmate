@@ -39,6 +39,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.ExamEntity
 import com.example.data.model.NotificationPreference
 import com.example.data.model.UserProfile
+import com.example.localization.AppLanguage
+import com.example.localization.GlobalLanguageSwitcher
+import com.example.localization.LocalAppLanguage
+import com.example.localization.LocalLanguageManager
+import com.example.localization.appString
 import com.example.ui.components.GlassButton
 import com.example.ui.components.GlassCard
 import com.example.ui.components.PersistenceStatusIndicator
@@ -265,6 +270,11 @@ fun ProfileSettingsScreen(
                     }
                 },
                 actions = {
+                    GlobalLanguageSwitcher(
+                        isDark = !isGlassLight,
+                        compact = true,
+                        modifier = Modifier.padding(end = 4.dp)
+                    )
                     IconButton(
                         onClick = { showDiagnosticDialog = true },
                         modifier = Modifier.testTag("diagnostic_button")
@@ -507,6 +517,116 @@ fun ProfileSettingsScreen(
                             secondaryTextColor = secondaryTextColor,
                             onClick = { activeSubScreen = ProfileSubScreen.DATA_SYNC },
                             testTag = "row_data_sync"
+                        )
+                    }
+                }
+            }
+
+            // =========================================================================
+            // 🌐 GLOBAL LANGUAGE & LOCALIZATION SYSTEM
+            // =========================================================================
+            item {
+                val languageManager = LocalLanguageManager.current
+                val currentLang = LocalAppLanguage.current
+
+                SectionHeader(
+                    title = "GLOBAL LANGUAGE & TRANSLATOR 🌐",
+                    subtitle = "Switch display language across all study modules & notifications",
+                    primaryColor = primaryTextColor,
+                    accentColor = NeonCyan
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                GlassCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("global_language_card"),
+                    shape = RoundedCornerShape(20.dp),
+                    fillAlpha = if (isAmoled) 0.9f else if (isGlassLight) 0.75f else 0.55f,
+                    borderColor = cardBorderColor
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Active App Language",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = primaryTextColor
+                                )
+                                Text(
+                                    text = "Current: ${currentLang.title} (${currentLang.nativeName})",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = NeonCyan
+                                )
+                            }
+
+                            GlobalLanguageSwitcher(
+                                isDark = !isGlassLight,
+                                compact = false
+                            )
+                        }
+
+                        HorizontalDivider(color = cardBorderColor)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            AppLanguage.values().forEach { lang ->
+                                val isSelected = currentLang == lang
+                                Surface(
+                                    onClick = { languageManager?.setLanguage(lang) },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isSelected) NeonCyan.copy(alpha = 0.18f) else cardBorderColor.copy(alpha = 0.1f),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = if (isSelected) NeonCyan else cardBorderColor
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("lang_btn_${lang.code}")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Text(
+                                            text = "${lang.nativeName} (${lang.title})",
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            fontSize = 12.sp,
+                                            color = if (isSelected) (if (isGlassLight) Color(0xFF0F172A) else NeonCyan) else primaryTextColor
+                                        )
+                                        if (isSelected) {
+                                            Spacer(Modifier.width(6.dp))
+                                            Icon(
+                                                Icons.Filled.Check,
+                                                contentDescription = null,
+                                                tint = if (isGlassLight) Color(0xFF0F172A) else NeonCyan,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = "⚡ Instant change: No restart needed. Translation cache is saved for offline access.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = secondaryTextColor,
+                            fontSize = 10.sp
                         )
                     }
                 }

@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.model.*
+import com.example.localization.GlobalLanguageSwitcher
 import com.example.ui.components.*
 import com.example.ui.theme.*
 import com.example.ui.screens.nova.NovaHomeUniversalWidget
@@ -132,6 +133,8 @@ fun HomeScreen(
     weakTopicInsights: List<com.example.data.model.WeakTopicInsight> = emptyList(),
     onToggleDailyMissionTask: (String, Boolean) -> Unit = { _, _ -> },
     onOpenSmartPlanner: () -> Unit = {},
+    onOpenLearn: (String?) -> Unit = {},
+    onOpenPractice: (String?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isDark = isAppInDarkTheme()
@@ -433,11 +436,16 @@ fun HomeScreen(
                         }
                     }
 
-                    // Right: Theme Switcher, Notifications & Profile
+                    // Right: Language Switcher, Theme Switcher, Notifications & Profile
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        // Global Language Switcher
+                        GlobalLanguageSwitcher(
+                            modifier = Modifier.testTag("home_language_switcher")
+                        )
+
                         // Quick Theme Switcher (1-tap toggle for light / dark / night study mode)
                         GlassThemeToggle(
                             testTag = "home_theme_toggle_button"
@@ -732,6 +740,8 @@ fun HomeScreen(
             item {
                 Collapsible2x2FeatureGridSection(
                     onNavigateToTab = onNavigateToTab,
+                    onOpenLearn = onOpenLearn,
+                    onOpenPractice = onOpenPractice,
                     onOpenSmartVacancy = onOpenSmartVacancy,
                     onOpenExamReadinessCenter = onOpenExamReadinessCenter,
                     onOpenProfileSettings = onOpenProfileSettings,
@@ -3047,6 +3057,8 @@ private fun BlockAppsCardSection(
 @Composable
 private fun Collapsible2x2FeatureGridSection(
     onNavigateToTab: (AppNavTab) -> Unit,
+    onOpenLearn: (String?) -> Unit,
+    onOpenPractice: (String?) -> Unit,
     onOpenSmartVacancy: (String?) -> Unit,
     onOpenExamReadinessCenter: () -> Unit,
     onOpenProfileSettings: () -> Unit,
@@ -3067,11 +3079,11 @@ private fun Collapsible2x2FeatureGridSection(
                 icon = Icons.AutoMirrored.Filled.MenuBook,
                 accentColor = DeepIndigo,
                 items = listOf(
-                    FeatureGridItem("Study", "Learn subjects & chapters", Icons.AutoMirrored.Filled.MenuBook, DeepIndigo) { onNavigateToTab(AppNavTab.STUDY) },
-                    FeatureGridItem("Notes", "Smart AI notes & summaries", Icons.Filled.Description, Color(0xFF8B5CF6)) { onNavigateToTab(AppNavTab.AI_TUTOR) },
-                    FeatureGridItem("Current Affairs", "Daily news, CA & quizzes", Icons.Filled.Article, GoldenSpark) { onNavigateToTab(AppNavTab.UPDATES) },
-                    FeatureGridItem("Study Materials", "PDF vault & formula sheets", Icons.Filled.PictureAsPdf, Color(0xFFEF4444)) { onOpenDocumentSummarizer() },
-                    FeatureGridItem("Chapters", "Syllabus & topic breakdown", Icons.Filled.AutoStories, Color(0xFF3B82F6)) { onNavigateToTab(AppNavTab.STUDY) }
+                    FeatureGridItem("Study", "Learn subjects & chapters", Icons.AutoMirrored.Filled.MenuBook, DeepIndigo) { onOpenLearn("study") },
+                    FeatureGridItem("Notes", "Smart AI notes & summaries", Icons.Filled.Description, Color(0xFF8B5CF6)) { onOpenLearn("notes") },
+                    FeatureGridItem("Current Affairs", "Daily news, CA & quizzes", Icons.Filled.Article, GoldenSpark) { onOpenLearn("current_affairs") },
+                    FeatureGridItem("Study Materials", "Verified formula vault & notes", Icons.Filled.PictureAsPdf, Color(0xFFEF4444)) { onOpenLearn("materials") },
+                    FeatureGridItem("Chapters", "10-Pillar chapter learning", Icons.Filled.AutoStories, Color(0xFF3B82F6)) { onOpenLearn("chapters") }
                 )
             ),
             FeatureCategory(
@@ -3080,11 +3092,11 @@ private fun Collapsible2x2FeatureGridSection(
                 icon = Icons.Filled.Quiz,
                 accentColor = EmeraldSuccess,
                 items = listOf(
-                    FeatureGridItem("Practice", "Subject & topic practice", Icons.Filled.Quiz, EmeraldSuccess) { onNavigateToTab(AppNavTab.PRACTICE) },
-                    FeatureGridItem("Mock Tests", "Full length test series", Icons.Filled.TaskAlt, ElectricViolet) { onNavigateToTab(AppNavTab.PRACTICE) },
-                    FeatureGridItem("PYQ", "Previous year papers", Icons.Filled.HistoryEdu, Color(0xFFF59E0B)) { onNavigateToTab(AppNavTab.PRACTICE) },
-                    FeatureGridItem("Quiz", "Daily speed quizzes", Icons.Filled.Timer, NeonCyan) { onNavigateToTab(AppNavTab.PRACTICE) },
-                    FeatureGridItem("Weak Topics", "Targeted mistake bank", Icons.Filled.Spellcheck, Color(0xFFEC4899)) { onNavigateToTab(AppNavTab.PRACTICE) }
+                    FeatureGridItem("Practice", "Subject & topic practice", Icons.Filled.Quiz, EmeraldSuccess) { onOpenPractice("practice") },
+                    FeatureGridItem("Mock Tests", "Full length test series", Icons.Filled.TaskAlt, ElectricViolet) { onOpenPractice("mock_tests") },
+                    FeatureGridItem("PYQ", "Previous year papers", Icons.Filled.HistoryEdu, Color(0xFFF59E0B)) { onOpenPractice("pyq") },
+                    FeatureGridItem("Quiz", "Daily speed quizzes", Icons.Filled.Timer, NeonCyan) { onOpenPractice("daily_quiz") },
+                    FeatureGridItem("Weak Topics", "Targeted mistake bank", Icons.Filled.Spellcheck, Color(0xFFEC4899)) { onOpenPractice("weak_topics") }
                 )
             ),
             FeatureCategory(

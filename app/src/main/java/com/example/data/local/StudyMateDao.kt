@@ -194,6 +194,30 @@ interface FlashcardDao {
 }
 
 @Dao
+interface NovaConversationDao {
+    @Query("SELECT * FROM nova_conversations ORDER BY updatedAt DESC")
+    fun getAllConversations(): Flow<List<NovaConversationEntity>>
+
+    @Query("SELECT * FROM nova_conversations WHERE id = :id LIMIT 1")
+    suspend fun getConversationById(id: String): NovaConversationEntity?
+
+    @Query("SELECT * FROM nova_conversations WHERE title LIKE '%' || :query || '%' OR messagesJson LIKE '%' || :query || '%' ORDER BY updatedAt DESC")
+    fun searchConversations(query: String): Flow<List<NovaConversationEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdate(conversation: NovaConversationEntity)
+
+    @Query("UPDATE nova_conversations SET title = :newTitle, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun renameConversation(id: String, newTitle: String, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("DELETE FROM nova_conversations WHERE id = :id")
+    suspend fun deleteConversation(id: String)
+
+    @Query("DELETE FROM nova_conversations")
+    suspend fun clearAllConversations()
+}
+
+@Dao
 interface NovaMemoryDao {
     @Query("SELECT * FROM nova_memory ORDER BY timestamp DESC")
     fun getAllMemories(): Flow<List<NovaMemoryItem>>

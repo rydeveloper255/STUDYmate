@@ -101,6 +101,7 @@ fun ProgressDashboardScreen(
     onSaveAndNext: (() -> Unit)? = null,
     onMarkForReviewAndNext: (() -> Unit)? = null,
     onPreviousQuestion: (() -> Unit)? = null,
+    onConfirmOrientation: (() -> Unit)? = null,
     onSaveExamObjective: (ExamObjective) -> Unit = {},
     onStartFocusOnTopic: (subject: String, topic: String) -> Unit = { _, _ -> },
     examReadiness: ExamReadinessScore? = null,
@@ -469,7 +470,8 @@ fun ProgressDashboardScreen(
             onStartPractice = onStartPractice,
             onSaveAndNext = onSaveAndNext,
             onMarkForReviewAndNext = onMarkForReviewAndNext,
-            onPreviousQuestion = onPreviousQuestion
+            onPreviousQuestion = onPreviousQuestion,
+            onConfirmOrientation = { onConfirmOrientation?.invoke() }
         )
         return
     }

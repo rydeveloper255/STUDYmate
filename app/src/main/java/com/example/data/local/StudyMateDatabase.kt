@@ -16,6 +16,7 @@ import com.example.data.model.*
         MistakeItem::class,
         FlashcardItem::class,
         UserQuestionMaterial::class,
+        NovaConversationEntity::class,
         NovaMemoryItem::class,
         NovaReminderItem::class,
         VoiceNoteItem::class,
@@ -76,6 +77,7 @@ abstract class StudyMateDatabase : RoomDatabase() {
     abstract fun mistakeDao(): MistakeDao
     abstract fun flashcardDao(): FlashcardDao
     abstract fun userQuestionMaterialDao(): UserQuestionMaterialDao
+    abstract fun novaConversationDao(): NovaConversationDao
     abstract fun novaMemoryDao(): NovaMemoryDao
     abstract fun novaReminderDao(): NovaReminderDao
     abstract fun voiceNoteDao(): VoiceNoteDao

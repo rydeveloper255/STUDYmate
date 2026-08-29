@@ -9,8 +9,10 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.StudyMateApplication
 import com.example.data.model.*
+import com.example.data.model.updates.*
 import com.example.data.remote.AuthRepository
 import com.example.data.remote.GeminiRepository
+import com.example.data.remote.supabase.LatestUpdatesRepository
 import com.example.data.repository.ExamCatalogRepository
 import com.example.data.repository.StudyRepository
 import com.example.service.intelligence.StudyMateIntelligenceEngine
@@ -116,6 +118,7 @@ data class ActiveTestState(
     val isNovaAnalyzing: Boolean = false,
     val isPaletteOpen: Boolean = false,
     val isSubmitConfirmOpen: Boolean = false,
+    val isOrientationConfirmed: Boolean = false,
     val config: MockTestConfig = MockTestConfig()
 ) {
     fun getCbtState(questionIndex: Int): QuestionCbtState {
@@ -1011,6 +1014,29 @@ class MainViewModel(
 
     private val _isRefreshingRecruitment = MutableStateFlow(false)
     val isRefreshingRecruitment: StateFlow<Boolean> = _isRefreshingRecruitment.asStateFlow()
+
+    // --- Step 71 Dedicated Latest Updates Category State Flows ---
+    val latestUpdatesRepository: LatestUpdatesRepository by lazy {
+        LatestUpdatesRepository(recruitmentDao = (getApplication() as StudyMateApplication).database.recruitmentDao())
+    }
+
+    private val _vacancyFeedState = MutableStateFlow(CategoryFeedState())
+    val vacancyFeedState: StateFlow<CategoryFeedState> = _vacancyFeedState.asStateFlow()
+
+    private val _admitCardFeedState = MutableStateFlow(CategoryFeedState())
+    val admitCardFeedState: StateFlow<CategoryFeedState> = _admitCardFeedState.asStateFlow()
+
+    private val _resultFeedState = MutableStateFlow(CategoryFeedState())
+    val resultFeedState: StateFlow<CategoryFeedState> = _resultFeedState.asStateFlow()
+
+    private val _answerKeyFeedState = MutableStateFlow(CategoryFeedState())
+    val answerKeyFeedState: StateFlow<CategoryFeedState> = _answerKeyFeedState.asStateFlow()
+
+    private val _admissionFeedState = MutableStateFlow(CategoryFeedState())
+    val admissionFeedState: StateFlow<CategoryFeedState> = _admissionFeedState.asStateFlow()
+
+    private val _selectedUpdateDetail = MutableStateFlow<LatestUpdateItem?>(null)
+    val selectedUpdateDetail: StateFlow<LatestUpdateItem?> = _selectedUpdateDetail.asStateFlow()
 
     // --- Room-based Intelligence Engine State Flows ---
     val allExamObjectives: StateFlow<List<ExamObjective>> = studyRepository.allExamObjectives
@@ -2664,10 +2690,12 @@ class MainViewModel(
                 _activeTestState.value = ActiveTestState(
                     config = config,
                     questions = res.questions,
+                    totalDurationSeconds = config.timeLimitMinutes * 60,
                     remainingSeconds = config.timeLimitMinutes * 60,
-                    isTestInProgress = true
+                    isTestInProgress = true,
+                    isOrientationConfirmed = false
                 )
-                startMockTestTimerJob()
+                sessionPersistence.saveActiveSession(_activeTestState.value)
                 onSessionCreated(res)
             } catch (e: Exception) {
                 android.util.Log.e("MainViewModel", "Failed to launch practice session: ${e.message}")
@@ -2899,12 +2927,12 @@ class MainViewModel(
                             isSubmitting = false,
                             submissionError = null,
                             completedAttempt = null,
+                            isOrientationConfirmed = false,
                             config = config
                         )
 
                         _activeTestState.value = newState
                         sessionPersistence.saveActiveSession(newState)
-                        startMockTestTimerJob()
                     }
 
                     is com.example.service.intelligence.QuestionSourceResult.InsufficientPyq -> {
@@ -2934,10 +2962,43 @@ class MainViewModel(
         }
     }
 
+    /**
+     * Called when the user has rotated the device and confirmed landscape mode.
+     * Starts/synchronizes the actual test timer and renders CBT test screen.
+     */
+    fun confirmTestOrientationAndStartTimer() {
+        if (!_activeTestState.value.isOrientationConfirmed && _activeTestState.value.isTestInProgress) {
+            val now = System.currentTimeMillis()
+            val totalSeconds = _activeTestState.value.totalDurationSeconds
+            val expiresAt = now + (totalSeconds * 1000L)
+            _activeTestState.value = _activeTestState.value.copy(
+                isOrientationConfirmed = true,
+                startedAtTimestamp = now,
+                expiresAtTimestamp = expiresAt,
+                remainingSeconds = totalSeconds
+            )
+            sessionPersistence.saveActiveSession(_activeTestState.value)
+            startMockTestTimerJob()
+        }
+    }
+
+    /**
+     * Cancels a pending test launch from the rotation gate.
+     */
+    fun cancelPendingTestLaunch() {
+        mockTestTimerJob?.cancel()
+        _activeTestState.value = ActiveTestState(isTestInProgress = false)
+        sessionPersistence.clearActiveSession()
+    }
+
     private fun startMockTestTimerJob() {
         mockTestTimerJob?.cancel()
         mockTestTimerJob = viewModelScope.launch {
             while (_activeTestState.value.isTestInProgress && !_activeTestState.value.isCompleted) {
+                if (!_activeTestState.value.isOrientationConfirmed) {
+                    kotlinx.coroutines.delay(200L)
+                    continue
+                }
                 kotlinx.coroutines.delay(1000L)
                 val now = System.currentTimeMillis()
                 val expiresAt = _activeTestState.value.expiresAtTimestamp
@@ -5127,6 +5188,138 @@ class MainViewModel(
             if (action != null) {
                 onNavigate(action)
             }
+        }
+    }
+
+    // --- Step 71 Dedicated Category Feed Operations ---
+
+    private fun getMutableStateForCategory(category: UpdateCategory): MutableStateFlow<CategoryFeedState> {
+        return when (category) {
+            UpdateCategory.VACANCY -> _vacancyFeedState
+            UpdateCategory.ADMIT_CARD -> _admitCardFeedState
+            UpdateCategory.RESULT -> _resultFeedState
+            UpdateCategory.ANSWER_KEY -> _answerKeyFeedState
+            UpdateCategory.ADMISSION -> _admissionFeedState
+        }
+    }
+
+    fun loadUpdatesForCategory(category: UpdateCategory, refresh: Boolean = false, page: Int = 0) {
+        val stateFlow = getMutableStateForCategory(category)
+        viewModelScope.launch {
+            if (refresh) {
+                stateFlow.update { it.copy(isRefreshing = true, errorMessage = null) }
+            } else if (page == 0 && stateFlow.value.items.isEmpty()) {
+                stateFlow.update { it.copy(isLoading = true, errorMessage = null) }
+            }
+
+            val current = stateFlow.value
+            val result = latestUpdatesRepository.getUpdatesForCategory(
+                category = category,
+                page = page,
+                searchQuery = current.searchQuery.ifBlank { null },
+                organizationFilter = current.selectedOrg.ifBlank { null },
+                examFilter = current.selectedExam.ifBlank { null },
+                sortOption = current.selectedSort
+            )
+
+            result.onSuccess { items ->
+                stateFlow.update { prev ->
+                    val combined = if (page == 0) items else (prev.items + items).distinctBy { it.id }
+                    prev.copy(
+                        items = combined,
+                        isLoading = false,
+                        isRefreshing = false,
+                        errorMessage = null,
+                        currentPage = page,
+                        hasMorePages = items.size >= LatestUpdatesRepository.PAGE_SIZE
+                    )
+                }
+            }.onFailure { err ->
+                stateFlow.update { prev ->
+                    prev.copy(
+                        isLoading = false,
+                        isRefreshing = false,
+                        errorMessage = if (prev.items.isEmpty()) err.message ?: "Unable to load updates" else null
+                    )
+                }
+            }
+        }
+    }
+
+    fun setCategorySearch(category: UpdateCategory, query: String) {
+        val stateFlow = getMutableStateForCategory(category)
+        stateFlow.update { it.copy(searchQuery = query) }
+        loadUpdatesForCategory(category, refresh = true, page = 0)
+    }
+
+    fun setCategoryOrgFilter(category: UpdateCategory, org: String) {
+        val stateFlow = getMutableStateForCategory(category)
+        stateFlow.update { it.copy(selectedOrg = org) }
+        loadUpdatesForCategory(category, refresh = true, page = 0)
+    }
+
+    fun setCategoryExamFilter(category: UpdateCategory, exam: String) {
+        val stateFlow = getMutableStateForCategory(category)
+        stateFlow.update { it.copy(selectedExam = exam) }
+        loadUpdatesForCategory(category, refresh = true, page = 0)
+    }
+
+    fun setCategorySort(category: UpdateCategory, sort: String) {
+        val stateFlow = getMutableStateForCategory(category)
+        stateFlow.update { it.copy(selectedSort = sort) }
+        loadUpdatesForCategory(category, refresh = true, page = 0)
+    }
+
+    fun selectUpdateDetail(item: LatestUpdateItem?) {
+        _selectedUpdateDetail.value = item
+    }
+
+    fun toggleSaveLatestUpdate(id: String, isSaved: Boolean) {
+        viewModelScope.launch {
+            recruitmentIntelligenceEngine.toggleSaveItem(id, isSaved)
+            // Update across all category feed state flows
+            val flows: List<MutableStateFlow<CategoryFeedState>> = listOf(
+                _vacancyFeedState,
+                _admitCardFeedState,
+                _resultFeedState,
+                _answerKeyFeedState,
+                _admissionFeedState
+            )
+            flows.forEach { flow ->
+                flow.update { state ->
+                    state.copy(items = state.items.map {
+                        if (it.id == id) it.copy(isSaved = isSaved) else it
+                    })
+                }
+            }
+            if (_selectedUpdateDetail.value?.id == id) {
+                _selectedUpdateDetail.update { it?.copy(isSaved = isSaved) }
+            }
+            _snackbarMessage.emit(if (isSaved) "📌 Saved to your bookmarks" else "Removed from bookmarks")
+        }
+    }
+
+    fun setLatestUpdateDeadlineReminder(id: String, enabled: Boolean, daysBefore: Int = 3) {
+        viewModelScope.launch {
+            recruitmentIntelligenceEngine.setDeadlineReminder(id, enabled, daysBefore)
+            val flows: List<MutableStateFlow<CategoryFeedState>> = listOf(
+                _vacancyFeedState,
+                _admitCardFeedState,
+                _resultFeedState,
+                _answerKeyFeedState,
+                _admissionFeedState
+            )
+            flows.forEach { flow ->
+                flow.update { state ->
+                    state.copy(items = state.items.map {
+                        if (it.id == id) it.copy(hasDeadlineReminder = enabled) else it
+                    })
+                }
+            }
+            if (_selectedUpdateDetail.value?.id == id) {
+                _selectedUpdateDetail.update { it?.copy(hasDeadlineReminder = enabled) }
+            }
+            _snackbarMessage.emit(if (enabled) "⏰ Reminder set for $daysBefore days before deadline" else "Reminder cancelled")
         }
     }
 

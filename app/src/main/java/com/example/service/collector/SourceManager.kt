@@ -30,7 +30,7 @@ class SourceManager {
             ContentSourceConfig(
                 sourceId = SOURCE_ID_VACANCY,
                 sourceName = "Sarkari Result — Latest Vacancies",
-                sourceUrl = "https://sarkariresult.com.cm/latest-jobs/",
+                sourceUrl = "https://www.sarkariresult.com/latestjobs.php",
                 category = ContentCategory.VACANCY,
                 enabled = true,
                 priority = 1,
@@ -43,7 +43,7 @@ class SourceManager {
             ContentSourceConfig(
                 sourceId = SOURCE_ID_RESULT,
                 sourceName = "Sarkari Result — Exam Results",
-                sourceUrl = "https://sarkariresult.com.cm/result/",
+                sourceUrl = "https://www.sarkariresult.com/result.php",
                 category = ContentCategory.RESULT,
                 enabled = true,
                 priority = 2,
@@ -56,7 +56,7 @@ class SourceManager {
             ContentSourceConfig(
                 sourceId = SOURCE_ID_ADMIT_CARD,
                 sourceName = "Sarkari Result — Admit Cards & Hall Tickets",
-                sourceUrl = "https://sarkariresult.com.cm/admit-card/",
+                sourceUrl = "https://www.sarkariresult.com/admitcard.php",
                 category = ContentCategory.ADMIT_CARD,
                 enabled = true,
                 priority = 3,
@@ -69,7 +69,7 @@ class SourceManager {
             ContentSourceConfig(
                 sourceId = SOURCE_ID_ANSWER_KEY,
                 sourceName = "Sarkari Result — Answer Keys",
-                sourceUrl = "https://sarkariresult.com.cm/answer-key/",
+                sourceUrl = "https://www.sarkariresult.com/answerkey.php",
                 category = ContentCategory.ANSWER_KEY,
                 enabled = true,
                 priority = 4,
@@ -82,7 +82,7 @@ class SourceManager {
             ContentSourceConfig(
                 sourceId = SOURCE_ID_ADMISSION,
                 sourceName = "Sarkari Result — Admissions",
-                sourceUrl = "https://sarkariresult.com.cm/admission/",
+                sourceUrl = "https://www.sarkariresult.com/admission.php",
                 category = ContentCategory.ADMISSION,
                 enabled = true,
                 priority = 5,

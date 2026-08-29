@@ -615,11 +615,11 @@ fun NovaHomeUniversalWidget(
 
                 NovaSheetActionTile(
                     icon = Icons.Default.Search,
-                    title = "Universal Smart Search",
-                    subtitle = "Instant formulas, summaries, and pyqs",
+                    title = "Ask Nova AI Chat",
+                    subtitle = "Instant formulas, summaries, and doubts solver",
                     onClick = {
                         showPlusMenu = false
-                        viewModel.setTab(NovaScreenTab.SMART_SEARCH)
+                        viewModel.setTab(NovaScreenTab.ASSISTANT_CHAT)
                         onNavigateToTab?.invoke(AppNavTab.AI_TUTOR)
                     }
                 )

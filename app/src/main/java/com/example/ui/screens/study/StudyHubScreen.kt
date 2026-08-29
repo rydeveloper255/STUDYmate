@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.*
+import com.example.localization.GlobalLanguageSwitcher
 import com.example.ui.components.GlassButton
 import com.example.ui.components.GlassCard
 import com.example.ui.components.StreakBadge
@@ -273,9 +274,13 @@ fun StudyHubScreen(
                     }
 
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        GlobalLanguageSwitcher(
+                            modifier = Modifier.testTag("study_language_switcher")
+                        )
+
                         IconButton(
                             onClick = { showSavedLearningSheet = true },
                             modifier = Modifier

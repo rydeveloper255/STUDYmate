@@ -3,6 +3,7 @@ package com.example.ui.screens.vacancy
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -42,6 +43,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.*
+import com.example.localization.GlobalLanguageSwitcher
+import com.example.localization.appString
 import com.example.ui.theme.*
 
 fun parseHexColor(hex: String, defaultColor: Color = Color(0xFF10B981)): Color {
@@ -142,6 +145,19 @@ fun SmartVacancyScreen(
         label = "spin_angle"
     )
 
+    // Intelligent hierarchical BackHandler to prevent accidental screen exits
+    BackHandler(enabled = true) {
+        when {
+            selectedDetailItem != null -> onSelectDetailItem(null)
+            showFindJobsDialog -> showFindJobsDialog = false
+            showProfileDialog -> showProfileDialog = false
+            showStateSelector -> showStateSelector = false
+            showNotificationSettingsDialog -> showNotificationSettingsDialog = false
+            showDiagnosticsDialog -> showDiagnosticsDialog = false
+            else -> onBack()
+        }
+    }
+
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
@@ -184,7 +200,7 @@ fun SmartVacancyScreen(
                             }
                         }
                         Text(
-                            "Primary: sarkariresult.com.cm + Official Boards",
+                            "Primary: sarkariresult.com + Official Boards",
                             style = MaterialTheme.typography.bodySmall,
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -193,7 +209,13 @@ fun SmartVacancyScreen(
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
+                        onClick = {
+                            if (selectedDetailItem != null) {
+                                onSelectDetailItem(null)
+                            } else {
+                                onBack()
+                            }
+                        },
                         modifier = Modifier.testTag("vacancy_back_button")
                     ) {
                         Icon(
@@ -204,6 +226,13 @@ fun SmartVacancyScreen(
                     }
                 },
                 actions = {
+                    // Global Language Switcher
+                    GlobalLanguageSwitcher(
+                        isDark = isDark,
+                        compact = true,
+                        modifier = Modifier.padding(end = 4.dp)
+                    )
+
                     // System Diagnostics Button
                     IconButton(
                         onClick = { showDiagnosticsDialog = true },
@@ -2822,7 +2851,7 @@ fun AlertsTabContent(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    "Verified Source • sarkariresult.com.cm",
+                                    "Verified Source • sarkariresult.com",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontSize = 10.sp,
                                     color = Color(0xFF10B981)

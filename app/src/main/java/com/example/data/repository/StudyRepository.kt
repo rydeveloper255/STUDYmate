@@ -40,6 +40,7 @@ class StudyRepository(
     val allUserQuestionMaterials: Flow<List<UserQuestionMaterial>> = database.userQuestionMaterialDao().getAllMaterials()
     val allNovaMemories: Flow<List<NovaMemoryItem>> = database.novaMemoryDao().getAllMemories()
     val activeNovaMemories: Flow<List<NovaMemoryItem>> = database.novaMemoryDao().getActiveMemories()
+    val allNovaConversations: Flow<List<NovaConversationEntity>> = database.novaConversationDao().getAllConversations()
     val allNovaReminders: Flow<List<NovaReminderItem>> = database.novaReminderDao().getAllReminders()
     val pendingNovaReminders: Flow<List<NovaReminderItem>> = database.novaReminderDao().getPendingReminders()
     val allVoiceNotes: Flow<List<VoiceNoteItem>> = database.voiceNoteDao().getAllVoiceNotes()
@@ -197,6 +198,30 @@ class StudyRepository(
 
     suspend fun clearAllNovaMemories() = withContext(Dispatchers.IO) {
         database.novaMemoryDao().clearAllMemories()
+    }
+
+    suspend fun saveNovaConversation(conversation: NovaConversationEntity) = withContext(Dispatchers.IO) {
+        database.novaConversationDao().insertOrUpdate(conversation)
+    }
+
+    suspend fun getNovaConversationById(id: String): NovaConversationEntity? = withContext(Dispatchers.IO) {
+        database.novaConversationDao().getConversationById(id)
+    }
+
+    fun searchNovaConversations(query: String): Flow<List<NovaConversationEntity>> {
+        return database.novaConversationDao().searchConversations(query)
+    }
+
+    suspend fun renameNovaConversation(id: String, newTitle: String) = withContext(Dispatchers.IO) {
+        database.novaConversationDao().renameConversation(id, newTitle)
+    }
+
+    suspend fun deleteNovaConversation(id: String) = withContext(Dispatchers.IO) {
+        database.novaConversationDao().deleteConversation(id)
+    }
+
+    suspend fun clearAllNovaConversations() = withContext(Dispatchers.IO) {
+        database.novaConversationDao().clearAllConversations()
     }
 
     suspend fun getActiveMemoriesOnce(): List<NovaMemoryItem> = withContext(Dispatchers.IO) {

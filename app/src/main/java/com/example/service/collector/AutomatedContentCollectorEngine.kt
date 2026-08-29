@@ -144,12 +144,18 @@ class AutomatedContentCollectorEngine(
                         Log.d(TAG, "Source ${source.sourceName} is reference only. Skipping direct scrape.")
                     }
                 }
+            } catch (e: java.net.UnknownHostException) {
+                totalFailedSources++
+                val sanitizedError = "Host unreachable or offline (${e.message})"
+                errorsList.add("${source.sourceName}: $sanitizedError")
+                sourceManager.recordSourceCheckResult(source.sourceId, isSuccess = false, errorMessage = sanitizedError)
+                Log.d(TAG, "Source [${source.sourceName}] offline: $sanitizedError")
             } catch (e: Exception) {
                 totalFailedSources++
                 val sanitizedError = TelegramBotConfig.sanitize(e.message ?: "Error processing ${source.sourceName}")
                 errorsList.add("${source.sourceName}: $sanitizedError")
                 sourceManager.recordSourceCheckResult(source.sourceId, isSuccess = false, errorMessage = sanitizedError)
-                Log.e(TAG, "Failure on source [${source.sourceName}]: $sanitizedError", e)
+                Log.w(TAG, "Failure on source [${source.sourceName}]: $sanitizedError")
             }
         }
 

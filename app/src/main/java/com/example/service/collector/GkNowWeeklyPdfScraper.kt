@@ -64,8 +64,17 @@ class GkNowWeeklyPdfScraper(
             } else {
                 pdfList.addAll(getFallbackWeeklyPdfs())
             }
+        } catch (e: java.net.UnknownHostException) {
+            Log.d(TAG, "GK Now host offline or unresolved: ${e.message}")
+            pdfList.addAll(getFallbackWeeklyPdfs())
+        } catch (e: java.net.SocketTimeoutException) {
+            Log.d(TAG, "GK Now socket timeout fetching PDFs")
+            pdfList.addAll(getFallbackWeeklyPdfs())
+        } catch (e: java.io.IOException) {
+            Log.d(TAG, "GK Now IO exception: ${e.message}")
+            pdfList.addAll(getFallbackWeeklyPdfs())
         } catch (e: Exception) {
-            Log.e(TAG, "Error scraping GK Now Weekly PDFs: ${e.message}", e)
+            Log.d(TAG, "GK Now scraping exception: ${e.message}")
             pdfList.addAll(getFallbackWeeklyPdfs())
         }
 

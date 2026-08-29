@@ -1,53 +1,68 @@
 package com.example.ui.screens.practice
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.MenuBook
-import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.example.data.model.*
+import com.example.localization.GlobalLanguageSwitcher
 import com.example.service.intelligence.PersonalizationSettings
 import com.example.service.intelligence.PracticeMode
 import com.example.service.intelligence.SmartPracticeRecommendation
-import com.example.ui.components.GlassButton
 import com.example.ui.components.GlassCard
 import com.example.ui.components.StreakBadge
 import com.example.ui.components.springClickable
 import com.example.ui.screens.progress.ActiveMockTestScreen
-import com.example.ui.screens.progress.ProgressDashboardScreen
 import com.example.ui.theme.*
 import com.example.viewmodel.ActiveTestState
 
-enum class PracticeSectionTab(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
+/**
+ * Step 68 — StudyMate Practice Sub-Destinations
+ *
+ * Dedicated sub-destinations for the 5 separate Practice screens:
+ * 1. Subject & Topic Practice
+ * 2. Mock Tests
+ * 3. Previous Year Questions (PYQ)
+ * 4. Daily Speed Quiz
+ * 5. Weak Topics & Mistake Bank
+ */
+sealed class PracticeSubDestination {
+    object MainHub : PracticeSubDestination()
+    data class SubjectPractice(val subject: String? = null, val chapter: String? = null, val topic: String? = null) : PracticeSubDestination()
+    data class MockTests(val initialCategory: String? = null) : PracticeSubDestination()
+    data class Pyq(val exam: String? = null, val year: String? = null, val subject: String? = null) : PracticeSubDestination()
+    data class DailyQuiz(val quizDate: String? = null) : PracticeSubDestination()
+    object WeakTopics : PracticeSubDestination()
+}
+
+enum class PracticeSectionTab(val title: String, val icon: ImageVector) {
     MODES("Practice Modes", Icons.Filled.Dashboard),
     MOCKS("Mock Tests", Icons.Filled.Quiz),
     PYQ("PYQ Bank", Icons.Filled.HistoryEdu),
@@ -106,6 +121,7 @@ fun PracticeHubScreen(
     onSaveAndNext: () -> Unit = {},
     onMarkForReviewAndNext: () -> Unit = {},
     onPreviousQuestion: () -> Unit = {},
+    onConfirmOrientation: () -> Unit = {},
     pendingResumeSession: ActiveTestState? = null,
     onResumePendingTest: () -> Unit = {},
     onDiscardPendingTest: () -> Unit = {},
@@ -128,13 +144,11 @@ fun PracticeHubScreen(
     novaProgressAnalysis: String? = null,
     isNovaProgressAnalyzing: Boolean = false,
     onGenerateNovaProgressAnalysis: (String, String, String) -> Unit = { _, _, _ -> },
+    initialSubModule: String? = null,
     initialSectionTab: PracticeSectionTab = PracticeSectionTab.MODES,
     modifier: Modifier = Modifier
 ) {
-    var showSavedDialog by remember { mutableStateOf(false) }
-    var reportingQuestionId by remember { mutableStateOf<String?>(null) }
-
-    // Active Mock Test Execution View takes full priority
+    // If Active Test Execution is in progress, it takes full screen priority
     if (activeTestState.isTestInProgress) {
         ActiveMockTestScreen(
             state = activeTestState,
@@ -147,258 +161,381 @@ fun PracticeHubScreen(
             onSetSubmitConfirmOpen = onSetSubmitConfirmOpen,
             onSubmitTest = onSubmitTest,
             onExitTest = onExitTest,
-            onRetakeTest = {
-                val attempt = activeTestState.completedAttempt ?: attempts.firstOrNull()
-                if (attempt != null) onRetakeTest(attempt)
-            },
+            onRetakeTest = { },
             onRetakeWrongQuestions = onRetakeWrongQuestions,
             onRetryUnanswered = onRetryUnanswered,
             onStartPractice = onStartPractice,
             onSaveAndNext = onSaveAndNext,
             onMarkForReviewAndNext = onMarkForReviewAndNext,
-            onPreviousQuestion = onPreviousQuestion
+            onPreviousQuestion = onPreviousQuestion,
+            onConfirmOrientation = onConfirmOrientation
         )
         return
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        // Mode Selector Bar at Top
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            item {
-                FilterChip(
-                    selected = true,
-                    onClick = { showSavedDialog = true },
-                    label = { Text("🔖 Saved (${savedQuestionsList.size})") },
-                    leadingIcon = { Icon(Icons.Filled.Bookmark, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                    modifier = Modifier.testTag("saved_questions_chip")
-                )
-            }
-            item {
-                SuggestionChip(
-                    onClick = onOpenRevisionHub,
-                    label = { Text("🔄 Revision Hub") },
-                    icon = { Icon(Icons.Filled.Autorenew, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary) },
-                    modifier = Modifier.testTag("open_revision_hub_chip")
-                )
-            }
-            items(PracticeMode.values()) { mode ->
-                SuggestionChip(
-                    onClick = { onLaunchPracticeMode(mode, "", "", mode.defaultQuestions) },
-                    label = { Text(mode.displayName) },
-                    icon = {
-                        val icon = when(mode) {
-                            PracticeMode.QUICK_PRACTICE -> Icons.Filled.Bolt
-                            PracticeMode.TOPIC_PRACTICE -> Icons.Filled.Topic
-                            PracticeMode.SUBJECT_PRACTICE -> Icons.AutoMirrored.Filled.MenuBook
-                            PracticeMode.REVISION_PRACTICE -> Icons.Filled.History
-                            PracticeMode.MOCK_TEST -> Icons.Filled.Assignment
-                            PracticeMode.WEAK_AREA_PRACTICE -> Icons.Filled.Psychology
-                            PracticeMode.SAVED_QUESTIONS -> Icons.Filled.Bookmark
-                        }
-                        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
-                    },
-                    modifier = Modifier.testTag("practice_mode_chip_${mode.name.lowercase()}")
-                )
-            }
+    // Determine initial destination
+    val initialDest = remember(initialSubModule) {
+        when (initialSubModule?.lowercase()) {
+            "practice", "subject_practice", "subjectpractice", "topic_practice", "topic", "drill" -> PracticeSubDestination.SubjectPractice()
+            "mock_tests", "mocktests", "mocks" -> PracticeSubDestination.MockTests()
+            "pyq", "pyqs", "previous_year" -> PracticeSubDestination.Pyq()
+            "daily_quiz", "dailyquiz", "quiz" -> PracticeSubDestination.DailyQuiz()
+            "weak_topics", "weaktopics", "mistakes" -> PracticeSubDestination.WeakTopics
+            else -> PracticeSubDestination.MainHub
         }
-
-        // Full Progress Dashboard Screen
-        ProgressDashboardScreen(
-            user = user,
-            attempts = attempts,
-            mistakes = mistakes,
-            userMaterials = userMaterials,
-            examObjective = examObjective,
-            topicMasteries = topicMasteries,
-            sessionHistory = sessionHistory,
-            allFocusSessions = allFocusSessions,
-            snapshot = snapshot,
-            activeTestState = activeTestState,
-            isTestGenerating = isTestGenerating,
-            generationError = generationError,
-            insufficientPyqNotice = insufficientPyqNotice,
-            mistakeDiagnosis = mistakeDiagnosis,
-            onStartTestWithConfig = onStartTestWithConfig,
-            onSelectAnswer = onSelectAnswer,
-            onClearAnswer = onClearAnswer,
-            onToggleMarkForReview = onToggleMarkForReview,
-            onSkipQuestion = onSkipQuestion,
-            onNavigateQuestion = onNavigateQuestion,
-            onSetPaletteOpen = onSetPaletteOpen,
-            onSetSubmitConfirmOpen = onSetSubmitConfirmOpen,
-            onSubmitTest = onSubmitTest,
-            onExitTest = onExitTest,
-            onReviewPastTest = onReviewPastTest,
-            onRetakeTest = onRetakeTest,
-            onRetakeWrongQuestions = onRetakeWrongQuestions,
-            onRetryUnanswered = onRetryUnanswered,
-            onStartPractice = onStartPractice,
-            onDeletePastTest = onDeletePastTest,
-            onSaveUserMaterial = onSaveUserMaterial,
-            onDeleteUserMaterial = onDeleteUserMaterial,
-            onDiagnoseMistakes = onDiagnoseMistakes,
-            onMarkMistakeMastered = onMarkMistakeMastered,
-            onClearGenerationError = onClearGenerationError,
-            onConfirmStartWithAvailablePyqs = onConfirmStartWithAvailablePyqs,
-            onConfirmAddAiToPyqs = onConfirmAddAiToPyqs,
-            onDismissInsufficientPyqNotice = onDismissInsufficientPyqNotice,
-            onCancelTestGeneration = onCancelTestGeneration,
-            onSaveAndNext = onSaveAndNext,
-            onMarkForReviewAndNext = onMarkForReviewAndNext,
-            onPreviousQuestion = onPreviousQuestion,
-            pendingResumeSession = pendingResumeSession,
-            onResumePendingTest = onResumePendingTest,
-            onDiscardPendingTest = onDiscardPendingTest,
-            onSaveExamObjective = onSaveExamObjective,
-            onStartFocusOnTopic = onStartFocusOnTopic,
-            examReadiness = examReadiness,
-            subjectSummaries = subjectSummaries,
-            recommendations = recommendations,
-            dailyPlan = dailyPlan,
-            onSetManualTopicOverride = onSetManualTopicOverride,
-            onResetPreparationData = onResetPreparationData,
-            onOpenReadinessCenter = onOpenReadinessCenter,
-            userPreferences = userPreferences,
-            onUpdatePersonalizationSettings = onUpdatePersonalizationSettings,
-            onResetPersonalizationSignals = onResetPersonalizationSignals,
-            onRecordSpacedRevisionFeedback = onRecordSpacedRevisionFeedback,
-            onBack = onBack,
-            onNavigateToStudy = onNavigateToStudy,
-            activeExamContext = activeExamContext,
-            novaProgressAnalysis = novaProgressAnalysis,
-            isNovaProgressAnalyzing = isNovaProgressAnalyzing,
-            onGenerateNovaProgressAnalysis = onGenerateNovaProgressAnalysis,
-            modifier = Modifier.weight(1f)
-        )
     }
 
-    // Saved Questions Dialog
-    if (showSavedDialog) {
-        AlertDialog(
-            onDismissRequest = { showSavedDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Bookmark, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Saved Questions (${savedQuestionsList.size})")
+    // Hierarchical back stack for Practice module
+    val practiceStack = remember {
+        mutableStateListOf<PracticeSubDestination>().apply {
+            if (initialDest !is PracticeSubDestination.MainHub) {
+                add(PracticeSubDestination.MainHub)
+            }
+            add(initialDest)
+        }
+    }
+
+    val currentDestination = practiceStack.lastOrNull() ?: PracticeSubDestination.MainHub
+
+    fun navigatePractice(dest: PracticeSubDestination) {
+        if (practiceStack.lastOrNull() != dest) {
+            practiceStack.add(dest)
+        }
+    }
+
+    fun popPractice() {
+        if (practiceStack.size > 1) {
+            practiceStack.removeAt(practiceStack.size - 1)
+        } else {
+            onBack()
+        }
+    }
+
+    // BackHandler ensures back-stack pops one level at a time (e.g. Paper -> Year -> Exam -> PYQ -> Practice -> Home)
+    BackHandler(enabled = true) {
+        popPractice()
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        AnimatedContent(
+            targetState = currentDestination,
+            transitionSpec = { fadeIn() togetherWith fadeOut() },
+            label = "PracticeSubDestinationTransition"
+        ) { destination ->
+            when (destination) {
+                is PracticeSubDestination.MainHub -> {
+                    PracticeMainHubView(
+                        user = user,
+                        attempts = attempts,
+                        mistakes = mistakes,
+                        onOpenSubDestination = { navigatePractice(it) },
+                        onBack = { popPractice() }
+                    )
                 }
-            },
-            text = {
-                if (savedQuestionsList.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                is PracticeSubDestination.SubjectPractice -> {
+                    SubjectTopicPracticeScreen(
+                        user = user,
+                        initialSubject = destination.subject,
+                        initialChapter = destination.chapter,
+                        initialTopic = destination.topic,
+                        onBack = { popPractice() }
+                    )
+                }
+                is PracticeSubDestination.MockTests -> {
+                    MockTestsScreen(
+                        user = user,
+                        attempts = attempts,
+                        initialCategory = destination.initialCategory,
+                        onBack = { popPractice() }
+                    )
+                }
+                is PracticeSubDestination.Pyq -> {
+                    PyqScreen(
+                        user = user,
+                        initialExam = destination.exam,
+                        initialYear = destination.year,
+                        initialSubject = destination.subject,
+                        onBack = { popPractice() }
+                    )
+                }
+                is PracticeSubDestination.DailyQuiz -> {
+                    DailySpeedQuizScreen(
+                        user = user,
+                        initialQuizDate = destination.quizDate,
+                        onBack = { popPractice() }
+                    )
+                }
+                is PracticeSubDestination.WeakTopics -> {
+                    WeakTopicsScreen(
+                        user = user,
+                        attempts = attempts,
+                        mistakes = mistakes,
+                        onLaunchPracticeForTopic = { sub, top ->
+                            navigatePractice(PracticeSubDestination.SubjectPractice(subject = sub, topic = top))
+                        },
+                        onBack = { popPractice() }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PracticeMainHubView(
+    user: UserProfile?,
+    attempts: List<MockTestAttempt>,
+    mistakes: List<MistakeItem>,
+    onOpenSubDestination: (PracticeSubDestination) -> Unit,
+    onBack: () -> Unit
+) {
+    val examName = user?.examName?.ifBlank { "Competitive Exam" } ?: "Competitive Exam"
+    val recentScore = attempts.firstOrNull()?.score ?: 0
+    val totalAttemptsCount = attempts.size
+    val totalMistakesCount = mistakes.size
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
                         Text(
-                            "No saved questions yet. Click bookmark on any question during practice to save it for review!",
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center
+                            text = "Practice & Test Hub",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "$examName • 5 Core Practice Modes",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 350.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(savedQuestionsList) { q ->
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack, modifier = Modifier.testTag("btn_practice_hub_back")) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                },
+                actions = {
+                    StreakBadge(user?.streakDays ?: 1)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    GlobalLanguageSwitcher()
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+            )
+        }
+    ) { paddingValues ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .background(MaterialTheme.colorScheme.background)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Hero Status Overview Card
+            item {
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "Ready for Practice Drills",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Select a dedicated practice module below.",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
                             ) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    Text(
-                                        text = q.questionText,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "${q.subject} • ${q.topic}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                        IconButton(
-                                            onClick = { onUnsaveQuestion(q.id) },
-                                            modifier = Modifier.size(24.dp)
-                                        ) {
-                                            Icon(Icons.Filled.Delete, contentDescription = "Unsave", tint = MaterialTheme.colorScheme.error)
-                                        }
-                                    }
-                                }
+                                Text(
+                                    text = "$totalAttemptsCount Tests Taken",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
                             }
                         }
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showSavedDialog = false
-                    if (savedQuestionsList.isNotEmpty()) {
-                        onLaunchPracticeMode(PracticeMode.SAVED_QUESTIONS, "", "", 10)
-                    }
-                }) {
-                    Text(if (savedQuestionsList.isNotEmpty()) "Practice Saved Qs" else "Close")
-                }
-            },
-            dismissButton = {
-                if (savedQuestionsList.isNotEmpty()) {
-                    TextButton(onClick = { showSavedDialog = false }) {
-                        Text("Dismiss")
-                    }
-                }
             }
-        )
+
+            // The 5 Clean Dedicated Cards
+            item {
+                Text(
+                    text = "PRACTICE MODULES",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            // Card 1: Subject & Topic Practice
+            item {
+                PracticeModuleCard(
+                    title = "Subject & Topic Practice",
+                    subtitle = "Customized chapter drills, difficulty levels & question counts",
+                    tag = "practice_card_subject_practice",
+                    icon = Icons.Filled.Quiz,
+                    gradient = listOf(Color(0xFF6366F1), Color(0xFF8B5CF6)),
+                    badgeText = "Chapter-wise",
+                    onClick = { onOpenSubDestination(PracticeSubDestination.SubjectPractice()) }
+                )
+            }
+
+            // Card 2: Mock Tests
+            item {
+                PracticeModuleCard(
+                    title = "Mock Tests",
+                    subtitle = "Full-length exam simulations, timer & rank estimate",
+                    tag = "practice_card_mock_tests",
+                    icon = Icons.Filled.TaskAlt,
+                    gradient = listOf(ElectricViolet, Color(0xFF6366F1)),
+                    badgeText = "Full Length & Mini",
+                    onClick = { onOpenSubDestination(PracticeSubDestination.MockTests()) }
+                )
+            }
+
+            // Card 3: Previous Year Questions (PYQ)
+            item {
+                PracticeModuleCard(
+                    title = "Previous Year Questions (PYQ)",
+                    subtitle = "Shift-wise authentic exam papers with verified solutions",
+                    tag = "practice_card_pyq",
+                    icon = Icons.Filled.HistoryEdu,
+                    gradient = listOf(Color(0xFFF59E0B), Color(0xFFD97706)),
+                    badgeText = "2019 - 2024",
+                    onClick = { onOpenSubDestination(PracticeSubDestination.Pyq()) }
+                )
+            }
+
+            // Card 4: Daily Speed Quiz
+            item {
+                PracticeModuleCard(
+                    title = "Daily Speed Quiz",
+                    subtitle = "10-minute speed drills for today & archive dates",
+                    tag = "practice_card_daily_quiz",
+                    icon = Icons.Filled.Bolt,
+                    gradient = listOf(NeonCyan, Color(0xFF0284C7)),
+                    badgeText = "Daily Challenge",
+                    onClick = { onOpenSubDestination(PracticeSubDestination.DailyQuiz()) }
+                )
+            }
+
+            // Card 5: Weak Topics & Mistake Bank
+            item {
+                PracticeModuleCard(
+                    title = "Weak Topics & Mistake Bank",
+                    subtitle = "Diagnostic error tracking & targeted remediation drills",
+                    tag = "practice_card_weak_topics",
+                    icon = Icons.Filled.Spellcheck,
+                    gradient = listOf(Color(0xFFEC4899), Color(0xFFF43F5E)),
+                    badgeText = "$totalMistakesCount Logged Mistakes",
+                    onClick = { onOpenSubDestination(PracticeSubDestination.WeakTopics) }
+                )
+            }
+        }
     }
+}
 
-    // Question Report Modal
-    if (reportingQuestionId != null) {
-        var reason by remember { mutableStateOf("Wrong Answer Key") }
-        var notes by remember { mutableStateOf("") }
-
-        AlertDialog(
-            onDismissRequest = { reportingQuestionId = null },
-            title = { Text("Report Question Issue") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Help us keep practice questions accurate and clear.")
-                    OutlinedTextField(
-                        value = reason,
-                        onValueChange = { reason = it },
-                        label = { Text("Issue Type") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = notes,
-                        onValueChange = { notes = it },
-                        label = { Text("Additional Notes (Optional)") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    reportingQuestionId?.let { qId ->
-                        onReportQuestion(qId, reason, notes)
-                    }
-                    reportingQuestionId = null
-                }) {
-                    Text("Submit Report")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { reportingQuestionId = null }) {
-                    Text("Cancel")
-                }
+@Composable
+private fun PracticeModuleCard(
+    title: String,
+    subtitle: String,
+    tag: String,
+    icon: ImageVector,
+    gradient: List<Color>,
+    badgeText: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .springClickable(testTag = tag, onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Brush.linearGradient(gradient)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(26.dp)
+                )
             }
-        )
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = title,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = gradient.first().copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = badgeText,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = gradient.first(),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = subtitle,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 17.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier.size(20.dp)
+            )
+        }
     }
 }

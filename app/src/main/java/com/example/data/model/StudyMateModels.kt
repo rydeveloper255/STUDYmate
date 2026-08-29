@@ -673,6 +673,19 @@ enum class NovaMemoryCategory(val displayName: String, val iconName: String) {
     CONVERSATION("Preferences & Interactions", "Chat")
 }
 
+@Entity(tableName = "nova_conversations")
+data class NovaConversationEntity(
+    @PrimaryKey val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String = "New Conversation",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val examContext: String = "",
+    val language: String = "English",
+    val messagesJson: String = "[]",
+    val lastMessagePreview: String = "",
+    val messageCount: Int = 0
+)
+
 @Entity(tableName = "nova_memory")
 data class NovaMemoryItem(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

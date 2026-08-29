@@ -964,3 +964,307 @@ AS $$
         'server_time', timezone('utc'::text, now())
     );
 $$;
+
+-- ----------------------------------------------------------------------------
+-- 9. STEP 69: DEDICATED PRACTICE & CURRENT AFFAIRS TABLES & MIGRATIONS
+-- ----------------------------------------------------------------------------
+
+-- 9.1 Practice Questions (Compatible alias / table)
+CREATE TABLE IF NOT EXISTS public.practice_questions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    question_id TEXT UNIQUE,
+    exam_id UUID REFERENCES public.exams(id) ON DELETE SET NULL,
+    exam_name TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    chapter TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    question_text TEXT NOT NULL,
+    options JSONB NOT NULL,
+    correct_answer TEXT NOT NULL,
+    explanation TEXT,
+    difficulty TEXT DEFAULT 'Medium' CHECK (difficulty IN ('Easy', 'Medium', 'Hard', 'Mixed')),
+    question_type TEXT DEFAULT 'PRACTICE' CHECK (question_type IN ('PRACTICE', 'PYQ', 'DAILY_QUIZ', 'MOCK')),
+    year INT,
+    paper_shift TEXT,
+    source_reference TEXT,
+    language TEXT DEFAULT 'English',
+    is_verified BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.practice_questions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read verified practice questions"
+    ON public.practice_questions FOR SELECT
+    USING (is_verified = true OR public.is_admin() OR public.has_role(auth.uid(), 'reviewer'));
+
+CREATE POLICY "Admin manage practice questions"
+    ON public.practice_questions FOR ALL
+    USING (public.is_admin() OR public.has_role(auth.uid(), 'reviewer'))
+    WITH CHECK (public.is_admin() OR public.has_role(auth.uid(), 'reviewer'));
+
+-- 9.2 Dedicated Mock Tests & Templates
+CREATE TABLE IF NOT EXISTS public.mock_tests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    exam_id UUID REFERENCES public.exams(id) ON DELETE SET NULL,
+    exam_name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    duration INT NOT NULL DEFAULT 60, -- duration in minutes
+    total_questions INT NOT NULL DEFAULT 30,
+    difficulty TEXT DEFAULT 'Medium' CHECK (difficulty IN ('Easy', 'Medium', 'Hard', 'Mixed')),
+    marking_scheme JSONB DEFAULT '{"correct": 1.0, "negative": 0.25}'::jsonb,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.mock_tests ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read active mock tests"
+    ON public.mock_tests FOR SELECT
+    USING (is_active = true OR public.is_admin());
+
+CREATE POLICY "Admin manage mock tests"
+    ON public.mock_tests FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+-- Mock Test Questions Association (Normalized Question References)
+CREATE TABLE IF NOT EXISTS public.mock_test_questions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    mock_test_id UUID NOT NULL REFERENCES public.mock_tests(id) ON DELETE CASCADE,
+    question_id UUID REFERENCES public.practice_questions(id) ON DELETE CASCADE,
+    question_order INT NOT NULL DEFAULT 1,
+    marks NUMERIC(4, 2) DEFAULT 1.0,
+    negative_marks NUMERIC(4, 2) DEFAULT 0.25,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    UNIQUE(mock_test_id, question_id),
+    UNIQUE(mock_test_id, question_order)
+);
+
+ALTER TABLE public.mock_test_questions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read mock test questions"
+    ON public.mock_test_questions FOR SELECT
+    USING (true);
+
+CREATE POLICY "Admin manage mock test questions"
+    ON public.mock_test_questions FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+-- Mock Test User-Specific Attempts
+CREATE TABLE IF NOT EXISTS public.mock_attempts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    mock_test_id UUID REFERENCES public.mock_tests(id) ON DELETE SET NULL,
+    test_title TEXT NOT NULL,
+    exam_name TEXT NOT NULL,
+    score NUMERIC(6, 2) NOT NULL DEFAULT 0.0,
+    correct INT NOT NULL DEFAULT 0,
+    wrong INT NOT NULL DEFAULT 0,
+    unattempted INT NOT NULL DEFAULT 0,
+    accuracy NUMERIC(5, 2) NOT NULL DEFAULT 0.0,
+    time_taken INT NOT NULL DEFAULT 0, -- seconds
+    started_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    completed_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    weak_topics JSONB DEFAULT '[]'::jsonb,
+    strong_topics JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.mock_attempts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users read own mock attempts"
+    ON public.mock_attempts FOR SELECT
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users insert own mock attempts"
+    ON public.mock_attempts FOR INSERT
+    WITH CHECK (auth.uid() = user_id);
+
+-- 9.3 Dedicated Daily Quiz System (One official quiz per date)
+CREATE TABLE IF NOT EXISTS public.daily_quizzes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    quiz_date DATE UNIQUE NOT NULL,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'published' CHECK (status IN ('draft', 'published', 'archived')),
+    total_questions INT NOT NULL DEFAULT 10,
+    duration_minutes INT NOT NULL DEFAULT 15,
+    difficulty TEXT DEFAULT 'Mixed',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.daily_quizzes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read published daily quizzes"
+    ON public.daily_quizzes FOR SELECT
+    USING (status = 'published' OR public.is_admin());
+
+CREATE POLICY "Admin manage daily quizzes"
+    ON public.daily_quizzes FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+CREATE TABLE IF NOT EXISTS public.daily_quiz_questions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    daily_quiz_id UUID NOT NULL REFERENCES public.daily_quizzes(id) ON DELETE CASCADE,
+    question_id UUID REFERENCES public.practice_questions(id) ON DELETE CASCADE,
+    question_order INT NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    UNIQUE(daily_quiz_id, question_id),
+    UNIQUE(daily_quiz_id, question_order)
+);
+
+ALTER TABLE public.daily_quiz_questions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read daily quiz questions"
+    ON public.daily_quiz_questions FOR SELECT
+    USING (true);
+
+CREATE POLICY "Admin manage daily quiz questions"
+    ON public.daily_quiz_questions FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+CREATE TABLE IF NOT EXISTS public.daily_quiz_attempts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    daily_quiz_id UUID NOT NULL REFERENCES public.daily_quizzes(id) ON DELETE CASCADE,
+    score NUMERIC(6, 2) NOT NULL DEFAULT 0.0,
+    correct INT NOT NULL DEFAULT 0,
+    wrong INT NOT NULL DEFAULT 0,
+    unattempted INT NOT NULL DEFAULT 0,
+    accuracy NUMERIC(5, 2) NOT NULL DEFAULT 0.0,
+    time_taken_seconds INT NOT NULL DEFAULT 0,
+    completed_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    UNIQUE(user_id, daily_quiz_id)
+);
+
+ALTER TABLE public.daily_quiz_attempts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users read own daily quiz attempts"
+    ON public.daily_quiz_attempts FOR SELECT
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users insert own daily quiz attempts"
+    ON public.daily_quiz_attempts FOR INSERT
+    WITH CHECK (auth.uid() = user_id);
+
+-- 9.4 Step 69 Daily Current Affairs Schema (Safe non-destructive migration)
+CREATE TABLE IF NOT EXISTS public.daily_current_affairs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    short_summary TEXT NOT NULL,
+    content TEXT NOT NULL,
+    affair_date DATE NOT NULL,
+    published_date TEXT,
+    day INT,
+    month INT,
+    year INT,
+    category TEXT NOT NULL DEFAULT 'National & Governance',
+    source_name TEXT DEFAULT 'PIB / Official Govt Portal',
+    source_url TEXT,
+    read_more_url TEXT,
+    image_url TEXT,
+    source_type TEXT DEFAULT 'OFFICIAL_PORTAL',
+    source_identifier TEXT,
+    content_hash TEXT UNIQUE,
+    ai_processed BOOLEAN NOT NULL DEFAULT false,
+    key_points_json JSONB DEFAULT '[]'::jsonb,
+    quiz_questions_json JSONB DEFAULT '[]'::jsonb,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    is_verified BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.daily_current_affairs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read verified daily current affairs"
+    ON public.daily_current_affairs FOR SELECT
+    USING (is_verified = true OR public.is_admin());
+
+CREATE POLICY "Admin manage daily current affairs"
+    ON public.daily_current_affairs FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+-- 9.5 Content Ingestion Log Table
+CREATE TABLE IF NOT EXISTS public.content_fetch_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_type TEXT NOT NULL,
+    source_name TEXT NOT NULL,
+    source_url TEXT,
+    items_discovered INT DEFAULT 0,
+    items_saved INT DEFAULT 0,
+    duplicates_skipped INT DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'SUCCESS',
+    error_message TEXT,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    finished_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.content_fetch_log ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Admins view content fetch logs"
+    ON public.content_fetch_log FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+-- 9.6 Step 71 Latest Updates Schema (Dedicated 5 Categories: vacancy, admit_card, result, answer_key, admission)
+CREATE TABLE IF NOT EXISTS public.latest_updates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    update_type TEXT NOT NULL CHECK (update_type IN ('vacancy', 'admit_card', 'result', 'answer_key', 'admission')),
+    title TEXT NOT NULL,
+    short_description TEXT,
+    full_content TEXT,
+    organization TEXT,
+    exam_name TEXT,
+    post_name TEXT,
+    published_date TEXT,
+    start_date TEXT,
+    last_date TEXT,
+    exam_date TEXT,
+    source_url TEXT,
+    apply_url TEXT,
+    download_url TEXT,
+    image_url TEXT,
+    language TEXT DEFAULT 'English',
+    source_name TEXT,
+    source_type TEXT DEFAULT 'OFFICIAL_PORTAL',
+    external_id TEXT UNIQUE,
+    content_hash TEXT UNIQUE,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.latest_updates ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read active latest updates"
+    ON public.latest_updates FOR SELECT
+    USING (is_active = true OR public.is_admin());
+
+CREATE POLICY "Admin manage latest updates"
+    ON public.latest_updates FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+-- Step 69 & 71 Performance Indexes
+CREATE INDEX IF NOT EXISTS idx_practice_questions_filter ON public.practice_questions(exam_name, subject, chapter, topic, difficulty);
+CREATE INDEX IF NOT EXISTS idx_practice_questions_pyq ON public.practice_questions(question_type, exam_name, year, paper_shift);
+CREATE INDEX IF NOT EXISTS idx_mock_tests_exam ON public.mock_tests(exam_name, is_active);
+CREATE INDEX IF NOT EXISTS idx_mock_attempts_user ON public.mock_attempts(user_id, completed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_daily_quizzes_date ON public.daily_quizzes(quiz_date);
+CREATE INDEX IF NOT EXISTS idx_daily_current_affairs_affair_date ON public.daily_current_affairs(affair_date DESC);
+CREATE INDEX IF NOT EXISTS idx_daily_current_affairs_hash ON public.daily_current_affairs(content_hash);
+CREATE INDEX IF NOT EXISTS idx_latest_updates_type ON public.latest_updates(update_type, is_active, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_latest_updates_dates ON public.latest_updates(last_date, exam_date);
+CREATE INDEX IF NOT EXISTS idx_latest_updates_org_exam ON public.latest_updates(organization, exam_name);
+CREATE INDEX IF NOT EXISTS idx_latest_updates_hash ON public.latest_updates(content_hash);
+
