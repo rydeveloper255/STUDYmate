@@ -141,6 +141,36 @@ class StudyMateApplication : Application(), ImageLoaderFactory {
             supabaseClient = supabaseClient
         )
         telegramBotService = com.example.data.remote.telegram.TelegramBotService()
+
+        // Step 75: Initialize Telegram Admin Control & Error Automation
+        com.example.service.admin.TelegramAdminBotManager.init(
+            context = this,
+            botService = telegramBotService,
+            db = database,
+            sbClient = supabaseClient
+        )
+
+        // Step 76: Initialize User Feedback & Bug Report Manager
+        com.example.service.feedback.FeedbackManager.initialize(
+            context = this,
+            db = database
+        )
+
+        // Setup non-blocking global uncaught crash alerting
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                com.example.service.admin.TelegramAdminBotManager.notifyCriticalFailure(
+                    feature = "App Core",
+                    operation = "Thread: ${thread.name}",
+                    reason = throwable.message ?: throwable.javaClass.simpleName
+                )
+            } catch (e: Exception) {
+                // Ignore failure during crash handler
+            }
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
+
         sourceManager = com.example.service.collector.SourceManager()
         automatedContentCollectorEngine = com.example.service.collector.AutomatedContentCollectorEngine(
             context = this,

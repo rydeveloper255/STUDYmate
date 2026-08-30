@@ -23,6 +23,7 @@ android {
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
     buildConfigField("String", "TELEGRAM_BOT_TOKEN", "\"dummy_telegram_bot_token\"")
+    buildConfigField("String", "TELEGRAM_ADMIN_CHAT_ID", "\"dummy_admin_chat_id\"")
     buildConfigField("String", "GEMINI_API_KEY", "\"dummy_key\"")
     buildConfigField("String", "SUPABASE_URL", "\"https://your-project.supabase.co\"")
     buildConfigField("String", "SUPABASE_ANON_KEY", "\"eyJhbGciOi...\"")

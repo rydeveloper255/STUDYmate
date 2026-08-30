@@ -155,6 +155,12 @@ class AutomatedContentCollectorEngine(
                 val sanitizedError = TelegramBotConfig.sanitize(e.message ?: "Error processing ${source.sourceName}")
                 errorsList.add("${source.sourceName}: $sanitizedError")
                 sourceManager.recordSourceCheckResult(source.sourceId, isSuccess = false, errorMessage = sanitizedError)
+                com.example.service.admin.TelegramAdminBotManager.notifyContentPipelineFailure(
+                    content = source.category.name,
+                    source = source.sourceName,
+                    stage = "Scrape & Extraction",
+                    reason = sanitizedError
+                )
                 Log.w(TAG, "Failure on source [${source.sourceName}]: $sanitizedError")
             }
         }

@@ -374,56 +374,8 @@ class MainViewModel(
     init {
         checkAndRestoreActiveSession()
         checkAndRestoreActiveFocusSession()
-        seedDefaultSchedulesIfEmpty()
         startScheduleTickerLoop()
         refreshNovaSmartPlannerData()
-    }
-
-    private fun seedDefaultSchedulesIfEmpty() {
-        viewModelScope.launch {
-            val existing = studyRepository.studyScheduleListOnce()
-            if (existing.isEmpty()) {
-                val defaultItems = listOf(
-                    com.example.data.model.StudyScheduleItem(
-                        dayOfWeek = "MON",
-                        startTime = "07:00 PM",
-                        endTime = "08:00 PM",
-                        durationMinutes = 60,
-                        subject = "Mathematics",
-                        topic = "Percentage & Profit",
-                        isAutoFocus = true,
-                        isStrictMode = true,
-                        repeatType = "WEEKLY",
-                        repeatDaysJson = "[\"MON\",\"WED\",\"FRI\"]"
-                    ),
-                    com.example.data.model.StudyScheduleItem(
-                        dayOfWeek = "MON",
-                        startTime = "08:15 PM",
-                        endTime = "09:00 PM",
-                        durationMinutes = 45,
-                        subject = "General Science",
-                        topic = "Physics Laws",
-                        isAutoFocus = false,
-                        isStrictMode = false,
-                        repeatType = "WEEKLY",
-                        repeatDaysJson = "[\"MON\",\"TUE\",\"THU\"]"
-                    ),
-                    com.example.data.model.StudyScheduleItem(
-                        dayOfWeek = "TUE",
-                        startTime = "06:30 PM",
-                        endTime = "07:30 PM",
-                        durationMinutes = 60,
-                        subject = "English",
-                        topic = "Grammar & Comprehension",
-                        isAutoFocus = true,
-                        isStrictMode = false,
-                        repeatType = "WEEKLY",
-                        repeatDaysJson = "[\"TUE\",\"THU\",\"SAT\"]"
-                    )
-                )
-                defaultItems.forEach { studyRepository.saveScheduleItem(it) }
-            }
-        }
     }
 
     private fun startScheduleTickerLoop() {

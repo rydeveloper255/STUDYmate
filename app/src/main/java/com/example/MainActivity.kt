@@ -128,7 +128,7 @@ fun StudyMateAppContent(
     val isAuthLoading by viewModel.isAuthLoading.collectAsStateWithLifecycle()
     val authErrorMessage by viewModel.authErrorMessage.collectAsStateWithLifecycle()
 
-    var isSplashFinished by remember { mutableStateOf(false) }
+    var isSplashFinished by rememberSaveable { mutableStateOf(false) }
     val currentTab = when (val dest = backStackManager.currentDestination) {
         is AppDestination.MainTab -> dest.tab
         else -> AppNavTab.HOME
@@ -196,6 +196,8 @@ fun StudyMateAppContent(
     }
 
     // Authenticated & Onboarded Main Application Flow
+    val isMaintenanceActive by com.example.service.admin.MaintenanceManager.isMaintenanceActive.collectAsStateWithLifecycle()
+    val maintenanceReason by com.example.service.admin.MaintenanceManager.maintenanceReason.collectAsStateWithLifecycle()
     val novaViewModel: NovaViewModel = viewModel()
     val studyPlan by viewModel.studyPlanItems.collectAsStateWithLifecycle()
     val isPlanGenerating by viewModel.isPlanGenerating.collectAsStateWithLifecycle()
@@ -1312,21 +1314,26 @@ fun StudyMateAppContent(
                             }
                         )
 
-                        AppNavTab.UPDATES -> UpdatesLauncherHomeScreen(
-                            onNavigateToCategory = { category ->
-                                viewModel.loadUpdatesForCategory(category, refresh = false, page = 0)
-                                backStackManager.navigateTo(AppDestination.UpdatesCategory(category))
-                            },
-                            onOpenSearch = {
-                                viewModel.loadUpdatesForCategory(UpdateCategory.VACANCY, refresh = false, page = 0)
-                                backStackManager.navigateTo(AppDestination.UpdatesCategory(UpdateCategory.VACANCY))
-                            },
+                        AppNavTab.UPDATES -> UpdatesHubScreen(
+                            vacancyState = vacancyState,
+                            admitCardState = admitCardState,
+                            resultState = resultState,
+                            answerKeyState = answerKeyState,
+                            admissionState = admissionState,
+                            onLoadCategory = { cat, refresh -> viewModel.loadUpdatesForCategory(cat, refresh = refresh, page = 0) },
+                            onSearchChange = { cat, query -> viewModel.setCategorySearch(cat, query) },
+                            onOrgFilterChange = { cat, org -> viewModel.setCategoryOrgFilter(cat, org) },
+                            onExamFilterChange = { cat, exam -> viewModel.setCategoryExamFilter(cat, exam) },
+                            onSortChange = { cat, sort -> viewModel.setCategorySort(cat, sort) },
+                            onToggleSave = { id, saved -> viewModel.toggleSaveLatestUpdate(id, saved) },
+                            onSetReminder = { id, set, days -> viewModel.setLatestUpdateDeadlineReminder(id, set, days) },
                             onOpenBookmarks = {
                                 backStackManager.navigateTo(AppDestination.SmartVacancy("SAVED"))
                             },
                             onOpenNotifications = {
                                 backStackManager.navigateTo(AppDestination.NotificationCenter)
-                            }
+                            },
+                            onBackToHome = { onSelectTab(AppNavTab.HOME) }
                         )
 
                         AppNavTab.PROFILE -> ProfileSettingsScreen(
@@ -1464,6 +1471,44 @@ fun StudyMateAppContent(
                     },
                     onBack = { viewModel.closeResourceViewer() }
                 )
+            }
+
+            // Step 75 Maintenance Mode Notice Overlay
+            if (isMaintenanceActive) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .align(Alignment.TopCenter),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                    color = androidx.compose.ui.graphics.Color(0xFFFEF3C7),
+                    shadowElevation = 4.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "🛠",
+                            fontSize = 20.sp,
+                            modifier = Modifier.padding(end = 10.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Scheduled Maintenance Active",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = androidx.compose.ui.graphics.Color(0xFF92400E)
+                            )
+                            Text(
+                                text = "StudyMate is undergoing scheduled optimization. Offline study, practice, and notes remain 100% accessible.",
+                                fontSize = 11.sp,
+                                color = androidx.compose.ui.graphics.Color(0xFFB45309),
+                                lineHeight = 15.sp
+                            )
+                        }
+                    }
+                }
             }
 
             // Step 30 In-App Notification Floating Banner Overlay

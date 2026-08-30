@@ -90,8 +90,9 @@ class SupabaseAuthManager(
         Log.d(TAG, "Supabase session saved for user: $userId ($email)")
     }
 
-    fun associateFirebaseOrLocalUser(userId: String, email: String) {
-        if (prefs.getString(KEY_USER_ID, null).isNullOrBlank()) {
+    fun associateFirebaseOrLocalUser(userId: String, email: String, force: Boolean = false) {
+        val current = prefs.getString(KEY_USER_ID, null)
+        if (force || current.isNullOrBlank() || current.startsWith("scholar_") || current == "guest_uid") {
             prefs.edit()
                 .putString(KEY_USER_ID, userId)
                 .putString(KEY_USER_EMAIL, email)

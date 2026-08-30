@@ -324,6 +324,10 @@ class AuthRepository(
                 supabaseAuthManager?.associateFirebaseOrLocalUser(userProfile.uid, userProfile.email)
                 supabaseSyncService?.syncUserProfile(userProfile)
                 supabaseSyncService?.fullCloudRestore()
+                if (existingProfile == null || !existingProfile.isOnboardingCompleted) {
+                    com.example.service.admin.TelegramAdminBotManager.notifyNewUser(userProfile)
+                }
+                com.example.service.admin.TelegramAdminBotManager.clearFailedLoginAttempts(userProfile.email)
                 userProfile
             }
 
@@ -547,6 +551,8 @@ class AuthRepository(
 
             userDao.insertOrUpdateUserProfile(profile)
             supabaseSyncService?.syncUserProfile(profile)
+            com.example.service.admin.TelegramAdminBotManager.notifyNewUser(profile)
+            com.example.service.admin.TelegramAdminBotManager.clearFailedLoginAttempts(profile.email)
 
             PersistenceMonitor.log("AUTH_OTP_VERIFY", "profiles", uidToUse, uidToUse, "SUCCESS")
             Result.success(profile)
@@ -766,6 +772,7 @@ class AuthRepository(
                     }
                     is SupabaseResult.Error -> {
                         val err = signInRes.message
+                        com.example.service.admin.TelegramAdminBotManager.recordFailedLoginAttempt(normalizedEmail, err)
                         PersistenceMonitor.log("AUTH_SIGNIN", "auth.users", normalizedEmail, normalizedEmail, "FAILED", signInRes.code?.toString(), err)
                         if (err.contains("invalid", ignoreCase = true) || signInRes.code == 400) {
                             return@withContext Result.failure(Exception("Email/Password galat hai. Kripya dobara check karein."))
@@ -811,6 +818,7 @@ class AuthRepository(
 
             userDao.insertOrUpdateUserProfile(profile)
             supabaseSyncService?.syncUserProfile(profile)
+            com.example.service.admin.TelegramAdminBotManager.clearFailedLoginAttempts(profile.email)
 
             PersistenceMonitor.log("AUTH_SIGNIN", "profiles", uidToUse, uidToUse, "SUCCESS")
             Result.success(profile)

@@ -112,6 +112,11 @@ object BackendHealthManager {
         )
 
         _healthReport.value = report
+        com.example.service.admin.TelegramAdminBotManager.updateServiceStatus(
+            serviceName = "Supabase",
+            isHealthy = isHealthy,
+            reason = if (isHealthy) "Operational (${latency}ms)" else dbStatus
+        )
         report
     }
 }

@@ -1,310 +1,269 @@
 package com.example.ui.screens.updates
 
-import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.data.model.*
-import com.example.localization.GlobalLanguageSwitcher
-import com.example.ui.components.GlassButton
-import com.example.ui.components.GlassCard
-import com.example.ui.components.StreakBadge
-import com.example.ui.components.springClickable
-import com.example.ui.screens.intelligence.LiveExamIntelligenceScreen
-import com.example.ui.screens.notification.NotificationCenterScreen
-import com.example.ui.screens.vacancy.SmartVacancyScreen
+import com.example.data.model.updates.CategoryFeedState
+import com.example.data.model.updates.LatestUpdateItem
+import com.example.data.model.updates.UpdateCategory
 import com.example.ui.theme.*
 
-enum class UpdatesTabType(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val initialSubTab: String) {
-    VACANCIES("Vacancies", Icons.Filled.WorkOutline, "VACANCY"),
-    RESULTS("Results", Icons.Filled.EmojiEvents, "RESULT"),
-    ADMIT_CARDS("Admit Cards", Icons.Filled.ConfirmationNumber, "ADMIT_CARD"),
-    CURRENT_AFFAIRS("Current Affairs", Icons.Filled.Article, "CA"),
-    NOTIFICATIONS("Alerts", Icons.Filled.NotificationsActive, "ALERTS")
+/**
+ * Sub-destinations for Latest Updates module.
+ * Provides genuinely separate screens/routes for all 5 features:
+ * 1. Vacancy
+ * 2. Admit Card
+ * 3. Result
+ * 4. Answer Key
+ * 5. Admission
+ * Plus Detail screen and Main Updates Launcher Home.
+ */
+sealed class UpdatesSubDestination {
+    object MainHub : UpdatesSubDestination()
+    object Vacancy : UpdatesSubDestination()
+    object AdmitCard : UpdatesSubDestination()
+    object Result : UpdatesSubDestination()
+    object AnswerKey : UpdatesSubDestination()
+    object Admission : UpdatesSubDestination()
+    data class Detail(val item: LatestUpdateItem) : UpdatesSubDestination()
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UpdatesHubScreen(
-    // Recruitment State
-    recruitmentFeedState: RecruitmentFeedState,
-    isRefreshingRecruitment: Boolean,
-    onRefreshRecruitment: () -> Unit,
-    onCategorySelected: (String) -> Unit,
-    onStateSelected: (String) -> Unit,
-    onTabSelected: (String) -> Unit,
-    onSearchQueryChanged: (String) -> Unit,
-    onSortOptionSelected: (RecruitmentSortOption) -> Unit,
-    onToggleSaveRecruitment: (String, Boolean) -> Unit,
+    vacancyState: CategoryFeedState,
+    admitCardState: CategoryFeedState,
+    resultState: CategoryFeedState,
+    answerKeyState: CategoryFeedState,
+    admissionState: CategoryFeedState,
+    onLoadCategory: (UpdateCategory, Boolean) -> Unit,
+    onSearchChange: (UpdateCategory, String) -> Unit,
+    onOrgFilterChange: (UpdateCategory, String) -> Unit,
+    onExamFilterChange: (UpdateCategory, String) -> Unit,
+    onSortChange: (UpdateCategory, String) -> Unit,
+    onToggleSave: (String, Boolean) -> Unit,
     onSetReminder: (String, Boolean, Int) -> Unit,
-    selectedDetailItem: RecruitmentEntity?,
-    onSelectDetailItem: (RecruitmentEntity?) -> Unit,
-    onUpdateProfile: ((UserRecruitmentProfile) -> Unit)? = null,
-    onUpdateApplicationStatus: ((String, UserApplicationStatus, String, String, String, String) -> Unit)? = null,
-    onUpdateDocumentsReady: ((String, List<String>) -> Unit)? = null,
-    onUpdateChecklistChecked: ((String, List<String>) -> Unit)? = null,
-    onFindJobsForMe: ((String?, String?, String?, Int?) -> Unit)? = null,
-    recruitmentNotificationSettings: RecruitmentNotificationSettings = RecruitmentNotificationSettings(),
-    onUpdateNotificationSettings: ((RecruitmentNotificationSettings) -> Unit)? = null,
-    recruitmentOutbox: List<RecruitmentOutboxItem> = emptyList(),
-    recruitmentDailyDigest: DailyRecruitmentDigest? = null,
-    recruitmentDiagnostics: AdminRecruitmentDiagnostics = AdminRecruitmentDiagnostics(),
-    onMuteRecruitment: ((String) -> Unit)? = null,
-    onUnmuteRecruitment: ((String) -> Unit)? = null,
-    onMuteCategory: ((String) -> Unit)? = null,
-    onUnmuteCategory: ((String) -> Unit)? = null,
-    onMarkOutboxRead: ((String) -> Unit)? = null,
-    onMarkAllOutboxRead: (() -> Unit)? = null,
-    onDeleteOutboxItem: ((String) -> Unit)? = null,
-    onClearAllOutbox: (() -> Unit)? = null,
-    onNovaQuery: ((String) -> Unit)? = null,
-    // Live Exam Intelligence / Current Affairs State
-    liveExamFeedState: LiveExamFeedState,
-    isRefreshingLiveExam: Boolean,
-    onRefreshLiveExam: () -> Unit,
-    onToggleSaveLiveUpdate: (String, Boolean) -> Unit,
-    onToggleSaveTrending: (String, Boolean) -> Unit,
-    onStartQuizForTopic: (String, String) -> Unit,
-    onAskNovaAboutUpdate: (String) -> Unit,
-    // Notifications State
-    notifications: List<AppNotification> = emptyList(),
-    onMarkNotificationAsRead: (String) -> Unit = {},
-    onMarkAllNotificationsAsRead: () -> Unit = {},
-    onDeleteNotification: (String) -> Unit = {},
-    onClearAllNotifications: () -> Unit = {},
-    onNavigateDeepLink: (String, String?) -> Unit = { _, _ -> },
-    onOpenNotificationSettings: () -> Unit = {},
-    initialTab: UpdatesTabType = UpdatesTabType.VACANCIES,
+    onOpenBookmarks: () -> Unit = {},
+    onOpenNotifications: () -> Unit = {},
+    initialCategory: UpdateCategory? = null,
+    initialDetailItem: LatestUpdateItem? = null,
+    onBackToHome: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     val isDark = isAppInDarkTheme()
-    var currentTab by rememberSaveable { mutableStateOf(initialTab.name) }
-    val activeTab = runCatching { UpdatesTabType.valueOf(currentTab) }.getOrDefault(UpdatesTabType.VACANCIES)
 
-    Column(
+    // Determine initial destination
+    val initialDest = remember(initialCategory, initialDetailItem) {
+        when {
+            initialDetailItem != null -> UpdatesSubDestination.Detail(initialDetailItem)
+            initialCategory == UpdateCategory.VACANCY -> UpdatesSubDestination.Vacancy
+            initialCategory == UpdateCategory.ADMIT_CARD -> UpdatesSubDestination.AdmitCard
+            initialCategory == UpdateCategory.RESULT -> UpdatesSubDestination.Result
+            initialCategory == UpdateCategory.ANSWER_KEY -> UpdatesSubDestination.AnswerKey
+            initialCategory == UpdateCategory.ADMISSION -> UpdatesSubDestination.Admission
+            else -> UpdatesSubDestination.MainHub
+        }
+    }
+
+    // Hierarchical back stack for Latest Updates module
+    val updatesStack = remember {
+        mutableStateListOf<UpdatesSubDestination>().apply {
+            if (initialDest !is UpdatesSubDestination.MainHub) {
+                add(UpdatesSubDestination.MainHub)
+            }
+            add(initialDest)
+        }
+    }
+
+    val currentDestination = updatesStack.lastOrNull() ?: UpdatesSubDestination.MainHub
+
+    fun navigateUpdates(dest: UpdatesSubDestination) {
+        if (updatesStack.lastOrNull() != dest) {
+            updatesStack.add(dest)
+        }
+    }
+
+    fun popUpdates() {
+        if (updatesStack.size > 1) {
+            updatesStack.removeAt(updatesStack.size - 1)
+        } else {
+            onBackToHome()
+        }
+    }
+
+    // BackHandler manages internal sub-destination navigation stack
+    BackHandler(enabled = true) {
+        popUpdates()
+    }
+
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(appBackgroundGradient(isDark))
     ) {
-        // Top Header
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = if (isDark) Color(0xFF0F172A).copy(alpha = 0.95f) else Color.White.copy(alpha = 0.95f),
-            shadowElevation = 4.dp
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 10.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "Updates Hub",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = if (isDark) Color.White else DeepIndigo
-                        )
-                        Text(
-                            text = "Vacancies • Results • Admit Cards • Current Affairs",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-                        )
-                    }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        GlobalLanguageSwitcher(
-                            modifier = Modifier.testTag("updates_language_switcher")
-                        )
-
-                        val unreadAlerts = notifications.count { !it.isRead }
-                        if (unreadAlerts > 0) {
-                            Surface(
-                                color = CoralRose,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.clickable {
-                                    currentTab = UpdatesTabType.NOTIFICATIONS.name
-                                }
-                            ) {
-                                Text(
-                                    text = "$unreadAlerts new",
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
+        AnimatedContent(
+            targetState = currentDestination,
+            transitionSpec = {
+                fadeIn() togetherWith fadeOut()
+            },
+            label = "updates_sub_destination"
+        ) { destination ->
+            when (destination) {
+                is UpdatesSubDestination.MainHub -> {
+                    UpdatesLauncherHomeScreen(
+                        onNavigateToCategory = { category ->
+                            onLoadCategory(category, false)
+                            when (category) {
+                                UpdateCategory.VACANCY -> navigateUpdates(UpdatesSubDestination.Vacancy)
+                                UpdateCategory.ADMIT_CARD -> navigateUpdates(UpdatesSubDestination.AdmitCard)
+                                UpdateCategory.RESULT -> navigateUpdates(UpdatesSubDestination.Result)
+                                UpdateCategory.ANSWER_KEY -> navigateUpdates(UpdatesSubDestination.AnswerKey)
+                                UpdateCategory.ADMISSION -> navigateUpdates(UpdatesSubDestination.Admission)
                             }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Scrollable Top Tabs / Chips
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    UpdatesTabType.entries.forEach { tab ->
-                        val isSelected = activeTab == tab
-                        Surface(
-                            modifier = Modifier
-                                .height(38.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .springClickable(testTag = "updates_tab_${tab.name.lowercase()}") {
-                                    currentTab = tab.name
-                                    if (tab == UpdatesTabType.VACANCIES) onTabSelected("VACANCY")
-                                    else if (tab == UpdatesTabType.RESULTS) onTabSelected("RESULT")
-                                    else if (tab == UpdatesTabType.ADMIT_CARDS) onTabSelected("ADMIT_CARD")
-                                },
-                            color = if (isSelected) {
-                                if (isDark) NeonCyan else DeepIndigo
-                            } else {
-                                if (isDark) Color(0x1AFFFFFF) else Color(0x0D000000)
-                            },
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = tab.icon,
-                                    contentDescription = null,
-                                    tint = if (isSelected) {
-                                        if (isDark) Color(0xFF070B19) else Color.White
-                                    } else {
-                                        if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-                                    },
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = tab.title,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) {
-                                        if (isDark) Color(0xFF070B19) else Color.White
-                                    } else {
-                                        if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Section Content
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            when (activeTab) {
-                UpdatesTabType.VACANCIES,
-                UpdatesTabType.RESULTS,
-                UpdatesTabType.ADMIT_CARDS -> {
-                    SmartVacancyScreen(
-                        feedState = recruitmentFeedState,
-                        isRefreshing = isRefreshingRecruitment,
-                        onRefresh = onRefreshRecruitment,
-                        onCategorySelected = onCategorySelected,
-                        onStateSelected = onStateSelected,
-                        onTabSelected = onTabSelected,
-                        onSearchQueryChanged = onSearchQueryChanged,
-                        onSortOptionSelected = onSortOptionSelected,
-                        onToggleSave = onToggleSaveRecruitment,
-                        onSetReminder = onSetReminder,
-                        selectedDetailItem = selectedDetailItem,
-                        onSelectDetailItem = onSelectDetailItem,
-                        onUpdateProfile = onUpdateProfile,
-                        onUpdateApplicationStatus = onUpdateApplicationStatus,
-                        onUpdateDocumentsReady = onUpdateDocumentsReady,
-                        onUpdateChecklistChecked = onUpdateChecklistChecked,
-                        onFindJobsForMe = onFindJobsForMe,
-                        onSubmitReport = { _, _, _ ->
-                            Toast.makeText(context, "Thank you. Your report has been recorded.", Toast.LENGTH_SHORT).show()
                         },
-                        notificationSettings = recruitmentNotificationSettings,
-                        onUpdateNotificationSettings = onUpdateNotificationSettings,
-                        outboxItems = recruitmentOutbox,
-                        dailyDigest = recruitmentDailyDigest,
-                        diagnostics = recruitmentDiagnostics,
-                        onMuteRecruitment = onMuteRecruitment,
-                        onUnmuteRecruitment = onUnmuteRecruitment,
-                        onMuteCategory = onMuteCategory,
-                        onUnmuteCategory = onUnmuteCategory,
-                        onMarkOutboxRead = onMarkOutboxRead,
-                        onMarkAllOutboxRead = onMarkAllOutboxRead,
-                        onDeleteOutboxItem = onDeleteOutboxItem,
-                        onClearAllOutbox = onClearAllOutbox,
-                        onNovaQuery = onNovaQuery,
-                        onBack = { currentTab = UpdatesTabType.VACANCIES.name }
+                        onOpenSearch = {
+                            onLoadCategory(UpdateCategory.VACANCY, false)
+                            navigateUpdates(UpdatesSubDestination.Vacancy)
+                        },
+                        onOpenBookmarks = onOpenBookmarks,
+                        onOpenNotifications = onOpenNotifications
                     )
                 }
 
-                UpdatesTabType.CURRENT_AFFAIRS -> {
-                    LiveExamIntelligenceScreen(
-                        feedState = liveExamFeedState,
-                        isRefreshing = isRefreshingLiveExam,
-                        onRefresh = onRefreshLiveExam,
-                        onToggleSaveUpdate = onToggleSaveLiveUpdate,
-                        onToggleSaveTrending = onToggleSaveTrending,
-                        onStartQuizForTopic = onStartQuizForTopic,
-                        onAskNovaAboutUpdate = onAskNovaAboutUpdate,
-                        onBack = { currentTab = UpdatesTabType.VACANCIES.name }
+                is UpdatesSubDestination.Vacancy -> {
+                    LaunchedEffect(Unit) {
+                        onLoadCategory(UpdateCategory.VACANCY, false)
+                    }
+                    VacancyListScreen(
+                        items = vacancyState.items,
+                        isLoading = vacancyState.isLoading,
+                        errorMessage = vacancyState.errorMessage,
+                        searchQuery = vacancyState.searchQuery,
+                        selectedOrg = vacancyState.selectedOrg,
+                        selectedExam = vacancyState.selectedExam,
+                        selectedSort = vacancyState.selectedSort,
+                        onSearchChange = { onSearchChange(UpdateCategory.VACANCY, it) },
+                        onOrgFilterChange = { onOrgFilterChange(UpdateCategory.VACANCY, it) },
+                        onExamFilterChange = { onExamFilterChange(UpdateCategory.VACANCY, it) },
+                        onSortChange = { onSortChange(UpdateCategory.VACANCY, it) },
+                        onRefresh = { onLoadCategory(UpdateCategory.VACANCY, true) },
+                        onSelectDetail = { item ->
+                            navigateUpdates(UpdatesSubDestination.Detail(item))
+                        },
+                        onToggleSave = onToggleSave,
+                        onBackToLauncher = { popUpdates() }
                     )
                 }
 
-                UpdatesTabType.NOTIFICATIONS -> {
-                    NotificationCenterScreen(
-                        notifications = notifications,
-                        onMarkAsRead = onMarkNotificationAsRead,
-                        onMarkAllAsRead = onMarkAllNotificationsAsRead,
-                        onDeleteNotification = onDeleteNotification,
-                        onClearAll = onClearAllNotifications,
-                        onNavigateDeepLink = onNavigateDeepLink,
-                        onOpenSettings = onOpenNotificationSettings,
-                        onBack = { currentTab = UpdatesTabType.VACANCIES.name }
+                is UpdatesSubDestination.AdmitCard -> {
+                    LaunchedEffect(Unit) {
+                        onLoadCategory(UpdateCategory.ADMIT_CARD, false)
+                    }
+                    AdmitCardListScreen(
+                        items = admitCardState.items,
+                        isLoading = admitCardState.isLoading,
+                        errorMessage = admitCardState.errorMessage,
+                        searchQuery = admitCardState.searchQuery,
+                        selectedOrg = admitCardState.selectedOrg,
+                        selectedExam = admitCardState.selectedExam,
+                        selectedSort = admitCardState.selectedSort,
+                        onSearchChange = { onSearchChange(UpdateCategory.ADMIT_CARD, it) },
+                        onOrgFilterChange = { onOrgFilterChange(UpdateCategory.ADMIT_CARD, it) },
+                        onExamFilterChange = { onExamFilterChange(UpdateCategory.ADMIT_CARD, it) },
+                        onSortChange = { onSortChange(UpdateCategory.ADMIT_CARD, it) },
+                        onRefresh = { onLoadCategory(UpdateCategory.ADMIT_CARD, true) },
+                        onSelectDetail = { item ->
+                            navigateUpdates(UpdatesSubDestination.Detail(item))
+                        },
+                        onToggleSave = onToggleSave,
+                        onBackToLauncher = { popUpdates() }
+                    )
+                }
+
+                is UpdatesSubDestination.Result -> {
+                    LaunchedEffect(Unit) {
+                        onLoadCategory(UpdateCategory.RESULT, false)
+                    }
+                    ResultListScreen(
+                        items = resultState.items,
+                        isLoading = resultState.isLoading,
+                        errorMessage = resultState.errorMessage,
+                        searchQuery = resultState.searchQuery,
+                        selectedOrg = resultState.selectedOrg,
+                        selectedExam = resultState.selectedExam,
+                        selectedSort = resultState.selectedSort,
+                        onSearchChange = { onSearchChange(UpdateCategory.RESULT, it) },
+                        onOrgFilterChange = { onOrgFilterChange(UpdateCategory.RESULT, it) },
+                        onExamFilterChange = { onExamFilterChange(UpdateCategory.RESULT, it) },
+                        onSortChange = { onSortChange(UpdateCategory.RESULT, it) },
+                        onRefresh = { onLoadCategory(UpdateCategory.RESULT, true) },
+                        onSelectDetail = { item ->
+                            navigateUpdates(UpdatesSubDestination.Detail(item))
+                        },
+                        onToggleSave = onToggleSave,
+                        onBackToLauncher = { popUpdates() }
+                    )
+                }
+
+                is UpdatesSubDestination.AnswerKey -> {
+                    LaunchedEffect(Unit) {
+                        onLoadCategory(UpdateCategory.ANSWER_KEY, false)
+                    }
+                    AnswerKeyListScreen(
+                        items = answerKeyState.items,
+                        isLoading = answerKeyState.isLoading,
+                        errorMessage = answerKeyState.errorMessage,
+                        searchQuery = answerKeyState.searchQuery,
+                        selectedOrg = answerKeyState.selectedOrg,
+                        selectedExam = answerKeyState.selectedExam,
+                        selectedSort = answerKeyState.selectedSort,
+                        onSearchChange = { onSearchChange(UpdateCategory.ANSWER_KEY, it) },
+                        onOrgFilterChange = { onOrgFilterChange(UpdateCategory.ANSWER_KEY, it) },
+                        onExamFilterChange = { onExamFilterChange(UpdateCategory.ANSWER_KEY, it) },
+                        onSortChange = { onSortChange(UpdateCategory.ANSWER_KEY, it) },
+                        onRefresh = { onLoadCategory(UpdateCategory.ANSWER_KEY, true) },
+                        onSelectDetail = { item ->
+                            navigateUpdates(UpdatesSubDestination.Detail(item))
+                        },
+                        onToggleSave = onToggleSave,
+                        onBackToLauncher = { popUpdates() }
+                    )
+                }
+
+                is UpdatesSubDestination.Admission -> {
+                    LaunchedEffect(Unit) {
+                        onLoadCategory(UpdateCategory.ADMISSION, false)
+                    }
+                    AdmissionListScreen(
+                        items = admissionState.items,
+                        isLoading = admissionState.isLoading,
+                        errorMessage = admissionState.errorMessage,
+                        searchQuery = admissionState.searchQuery,
+                        selectedOrg = admissionState.selectedOrg,
+                        selectedExam = admissionState.selectedExam,
+                        selectedSort = admissionState.selectedSort,
+                        onSearchChange = { onSearchChange(UpdateCategory.ADMISSION, it) },
+                        onOrgFilterChange = { onOrgFilterChange(UpdateCategory.ADMISSION, it) },
+                        onExamFilterChange = { onExamFilterChange(UpdateCategory.ADMISSION, it) },
+                        onSortChange = { onSortChange(UpdateCategory.ADMISSION, it) },
+                        onRefresh = { onLoadCategory(UpdateCategory.ADMISSION, true) },
+                        onSelectDetail = { item ->
+                            navigateUpdates(UpdatesSubDestination.Detail(item))
+                        },
+                        onToggleSave = onToggleSave,
+                        onBackToLauncher = { popUpdates() }
+                    )
+                }
+
+                is UpdatesSubDestination.Detail -> {
+                    UpdateDetailScreen(
+                        item = destination.item,
+                        onBack = { popUpdates() },
+                        onToggleSave = onToggleSave,
+                        onSetReminder = onSetReminder
                     )
                 }
             }

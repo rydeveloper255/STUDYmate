@@ -58,7 +58,7 @@ class SupabaseSyncService(
             try {
                 _syncStatus.value = SupabaseSyncStatus.Syncing
                 val uid = if (user.uid.isNotBlank()) user.uid else userId
-                authManager.associateFirebaseOrLocalUser(uid, user.email)
+                authManager.associateFirebaseOrLocalUser(uid, user.email, force = true)
 
                 val profileJson = JSONObject().apply {
                     put("id", uid)
@@ -68,6 +68,8 @@ class SupabaseSyncService(
                     put("grade", user.grade)
                     put("education_level", user.educationLevel)
                     put("language_preference", user.languagePreference)
+                    put("app_language", user.appLanguage)
+                    put("content_language", user.contentLanguage)
                     put("exam_category", user.examCategory)
                     put("exam_name", user.examName)
                     put("exam_date_millis", user.examDateMillis)
@@ -83,10 +85,15 @@ class SupabaseSyncService(
                     put("preparation_level", user.preparationLevel)
                     put("daily_target_minutes", user.dailyTargetMinutes)
                     put("available_study_hours", user.availableStudyHours.toDouble())
+                    put("subject_time_allocation_json", user.subjectTimeAllocationJson)
                     put("preferred_study_start_time", user.preferredStudyStartTime)
                     put("preferred_study_end_time", user.preferredStudyEndTime)
                     put("preferred_study_days", JSONArray(user.preferredStudyDays))
                     put("break_duration_minutes", user.breakDurationMinutes)
+                    put("preferred_session_duration_minutes", user.preferredSessionDurationMinutes)
+                    put("custom_study_blocks_json", user.customStudyBlocksJson)
+                    put("mock_test_language", user.mockTestLanguage)
+                    put("default_mock_test_question_count", user.defaultMockTestQuestionCount)
                     put("preferred_study_time", user.preferredStudyTime)
                     put("morning_night_preference", user.morningNightPreference)
                     put("revision_frequency", user.revisionFrequency)
@@ -95,6 +102,7 @@ class SupabaseSyncService(
                     put("short_term_goal", user.shortTermGoal)
                     put("long_term_goal", user.longTermGoal)
                     put("notifications_enabled", user.notificationsEnabled)
+                    put("is_onboarding_completed", user.isOnboardingCompleted)
                     put("xp", user.xp)
                     put("level", user.level)
                     put("streak_days", user.streakDays)
@@ -801,6 +809,16 @@ class SupabaseSyncService(
 
     // --- 11. FULL CLOUD RESTORE / SYNC WHEN LOGGING IN ---
 
+    private fun JSONArray?.toStringList(): List<String> {
+        if (this == null) return emptyList()
+        val list = mutableListOf<String>()
+        for (i in 0 until length()) {
+            val item = optString(i, "")
+            if (item.isNotBlank() && item != "null") list.add(item)
+        }
+        return list
+    }
+
     suspend fun fullCloudRestore(): Boolean = withContext(Dispatchers.IO) {
         if (!client.isReady()) return@withContext false
         try {
@@ -813,18 +831,57 @@ class SupabaseSyncService(
                 if (array.length() > 0) {
                     val p = array.getJSONObject(0)
                     val local = database.userDao().getUserProfileOnce()
-                    val restored = (local ?: UserProfile(id = "current_user")).copy(
-                        name = p.optString("name", local?.name ?: "Student"),
-                        email = p.optString("email", local?.email ?: ""),
-                        grade = p.optString("grade", local?.grade ?: "Class 12"),
-                        examName = p.optString("exam_name", local?.examName ?: "JEE"),
-                        examDateMillis = p.optLong("exam_date_millis", local?.examDateMillis ?: System.currentTimeMillis()),
-                        targetScore = p.optString("target_score", local?.targetScore ?: "Top 500 AIR"),
-                        xp = p.optInt("xp", local?.xp ?: 350),
-                        level = p.optInt("level", local?.level ?: 2),
-                        streakDays = p.optInt("streak_days", local?.streakDays ?: 4),
-                        totalFocusMinutes = p.optInt("total_focus_minutes", local?.totalFocusMinutes ?: 135),
-                        isOnboardingCompleted = true
+                    
+                    val restored = UserProfile(
+                        id = "current_user",
+                        uid = p.optString("id", userId).takeIf { it.isNotBlank() && it != "null" } ?: userId,
+                        name = p.optString("name", local?.name ?: "Student").takeIf { it.isNotBlank() && it != "null" } ?: (local?.name ?: "Student"),
+                        email = p.optString("email", local?.email ?: "").takeIf { it.isNotBlank() && it != "null" } ?: (local?.email ?: ""),
+                        photoUrl = p.optString("photo_url").takeIf { it.isNotBlank() && it != "null" } ?: local?.photoUrl,
+                        grade = p.optString("grade", local?.grade ?: "Class 12").takeIf { it.isNotBlank() && it != "null" } ?: (local?.grade ?: "Class 12"),
+                        educationLevel = p.optString("education_level", local?.educationLevel ?: "Senior Secondary (11th-12th)").takeIf { it.isNotBlank() && it != "null" } ?: (local?.educationLevel ?: "Senior Secondary (11th-12th)"),
+                        languagePreference = p.optString("language_preference", local?.languagePreference ?: "English").takeIf { it.isNotBlank() && it != "null" } ?: (local?.languagePreference ?: "English"),
+                        appLanguage = p.optString("app_language", local?.appLanguage ?: "English").takeIf { it.isNotBlank() && it != "null" } ?: (local?.appLanguage ?: "English"),
+                        contentLanguage = p.optString("content_language", local?.contentLanguage ?: "Hindi").takeIf { it.isNotBlank() && it != "null" } ?: (local?.contentLanguage ?: "Hindi"),
+                        examCategory = p.optString("exam_category", local?.examCategory ?: "Competitive / Entrance").takeIf { it.isNotBlank() && it != "null" } ?: (local?.examCategory ?: "Competitive / Entrance"),
+                        examName = p.optString("exam_name", local?.examName ?: "JEE").takeIf { it.isNotBlank() && it != "null" } ?: (local?.examName ?: "JEE"),
+                        examDateMillis = if (p.has("exam_date_millis") && !p.isNull("exam_date_millis")) p.optLong("exam_date_millis", local?.examDateMillis ?: (System.currentTimeMillis() + 60L * 86400000L)) else (local?.examDateMillis ?: (System.currentTimeMillis() + 60L * 86400000L)),
+                        targetScore = p.optString("target_score", local?.targetScore ?: "Top 500 AIR").takeIf { it.isNotBlank() && it != "null" } ?: (local?.targetScore ?: "Top 500 AIR"),
+                        goal = p.optString("goal", local?.goal ?: "Competitive Exam").takeIf { it.isNotBlank() && it != "null" } ?: (local?.goal ?: "Competitive Exam"),
+                        subjects = p.optJSONArray("subjects")?.toStringList()?.takeIf { it.isNotEmpty() } ?: local?.subjects ?: listOf("Mathematics", "Physics", "Chemistry"),
+                        highPrioritySubjects = p.optJSONArray("high_priority_subjects")?.toStringList() ?: local?.highPrioritySubjects ?: listOf("Physics", "Mathematics"),
+                        mediumPrioritySubjects = p.optJSONArray("medium_priority_subjects")?.toStringList() ?: local?.mediumPrioritySubjects ?: listOf("Chemistry"),
+                        lowPrioritySubjects = p.optJSONArray("low_priority_subjects")?.toStringList() ?: local?.lowPrioritySubjects ?: emptyList(),
+                        strongSubjects = p.optJSONArray("strong_subjects")?.toStringList() ?: local?.strongSubjects ?: listOf("Physics"),
+                        weakSubjects = p.optJSONArray("weak_subjects")?.toStringList() ?: local?.weakSubjects ?: listOf("Chemistry"),
+                        weakTopics = p.optJSONArray("weak_topics")?.toStringList() ?: local?.weakTopics ?: listOf("Organic Reaction Mechanisms", "Rotational Dynamics"),
+                        preparationLevel = p.optString("preparation_level", local?.preparationLevel ?: "Intermediate (Practicing questions & concepts)").takeIf { it.isNotBlank() && it != "null" } ?: (local?.preparationLevel ?: "Intermediate (Practicing questions & concepts)"),
+                        dailyTargetMinutes = if (p.has("daily_target_minutes")) p.optInt("daily_target_minutes", local?.dailyTargetMinutes ?: 180) else (local?.dailyTargetMinutes ?: 180),
+                        availableStudyHours = if (p.has("available_study_hours")) p.optDouble("available_study_hours", (local?.availableStudyHours ?: 4.0f).toDouble()).toFloat() else (local?.availableStudyHours ?: 4.0f),
+                        subjectTimeAllocationJson = p.optString("subject_time_allocation_json", local?.subjectTimeAllocationJson ?: "{}").takeIf { it.isNotBlank() && it != "null" } ?: (local?.subjectTimeAllocationJson ?: "{}"),
+                        preferredStudyStartTime = p.optString("preferred_study_start_time", local?.preferredStudyStartTime ?: "06:00 PM").takeIf { it.isNotBlank() && it != "null" } ?: (local?.preferredStudyStartTime ?: "06:00 PM"),
+                        preferredStudyEndTime = p.optString("preferred_study_end_time", local?.preferredStudyEndTime ?: "10:00 PM").takeIf { it.isNotBlank() && it != "null" } ?: (local?.preferredStudyEndTime ?: "10:00 PM"),
+                        preferredStudyDays = p.optJSONArray("preferred_study_days")?.toStringList()?.takeIf { it.isNotEmpty() } ?: local?.preferredStudyDays ?: listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat"),
+                        breakDurationMinutes = if (p.has("break_duration_minutes")) p.optInt("break_duration_minutes", local?.breakDurationMinutes ?: 15) else (local?.breakDurationMinutes ?: 15),
+                        preferredSessionDurationMinutes = if (p.has("preferred_session_duration_minutes")) p.optInt("preferred_session_duration_minutes", local?.preferredSessionDurationMinutes ?: 25) else (local?.preferredSessionDurationMinutes ?: 25),
+                        customStudyBlocksJson = p.optString("custom_study_blocks_json", local?.customStudyBlocksJson ?: "[]").takeIf { it.isNotBlank() && it != "null" } ?: (local?.customStudyBlocksJson ?: "[]"),
+                        mockTestLanguage = p.optString("mock_test_language", local?.mockTestLanguage ?: "English").takeIf { it.isNotBlank() && it != "null" } ?: (local?.mockTestLanguage ?: "English"),
+                        defaultMockTestQuestionCount = if (p.has("default_mock_test_question_count")) p.optInt("default_mock_test_question_count", local?.defaultMockTestQuestionCount ?: 25) else (local?.defaultMockTestQuestionCount ?: 25),
+                        preferredStudyTime = p.optString("preferred_study_time", local?.preferredStudyTime ?: "Evening").takeIf { it.isNotBlank() && it != "null" } ?: (local?.preferredStudyTime ?: "Evening"),
+                        morningNightPreference = p.optString("morning_night_preference", local?.morningNightPreference ?: "Balanced").takeIf { it.isNotBlank() && it != "null" } ?: (local?.morningNightPreference ?: "Balanced"),
+                        revisionFrequency = p.optString("revision_frequency", local?.revisionFrequency ?: "Spaced Repetition").takeIf { it.isNotBlank() && it != "null" } ?: (local?.revisionFrequency ?: "Spaced Repetition"),
+                        mockTestFrequency = p.optString("mock_test_frequency", local?.mockTestFrequency ?: "Weekly").takeIf { it.isNotBlank() && it != "null" } ?: (local?.mockTestFrequency ?: "Weekly"),
+                        dailyStudyGoal = p.optString("daily_study_goal", local?.dailyStudyGoal ?: "Complete daily scheduled topics & 20 active recall flashcards").takeIf { it.isNotBlank() && it != "null" } ?: (local?.dailyStudyGoal ?: "Complete daily scheduled topics & 20 active recall flashcards"),
+                        shortTermGoal = p.optString("short_term_goal", local?.shortTermGoal ?: "Master high-yield concepts and achieve 85%+ mock accuracy").takeIf { it.isNotBlank() && it != "null" } ?: (local?.shortTermGoal ?: "Master high-yield concepts and achieve 85%+ mock accuracy"),
+                        longTermGoal = p.optString("long_term_goal", local?.longTermGoal ?: "Achieve top rank in target exam and secure admission").takeIf { it.isNotBlank() && it != "null" } ?: (local?.longTermGoal ?: "Achieve top rank in target exam and secure admission"),
+                        notificationsEnabled = if (p.has("notifications_enabled")) p.optBoolean("notifications_enabled", local?.notificationsEnabled ?: true) else (local?.notificationsEnabled ?: true),
+                        isGuest = false,
+                        isOnboardingCompleted = if (p.has("is_onboarding_completed")) p.optBoolean("is_onboarding_completed", true) else true,
+                        xp = if (p.has("xp")) p.optInt("xp", local?.xp ?: 350) else (local?.xp ?: 350),
+                        level = if (p.has("level")) p.optInt("level", local?.level ?: 2) else (local?.level ?: 2),
+                        streakDays = if (p.has("streak_days")) p.optInt("streak_days", local?.streakDays ?: 4) else (local?.streakDays ?: 4),
+                        totalFocusMinutes = if (p.has("total_focus_minutes")) p.optInt("total_focus_minutes", local?.totalFocusMinutes ?: 135) else (local?.totalFocusMinutes ?: 135),
+                        totalQuestionsSolved = if (p.has("total_questions_solved")) p.optInt("total_questions_solved", local?.totalQuestionsSolved ?: 48) else (local?.totalQuestionsSolved ?: 48)
                     )
                     database.userDao().insertOrUpdateUserProfile(restored)
                 }

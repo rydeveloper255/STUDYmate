@@ -62,13 +62,15 @@ import com.example.data.model.*
         com.example.data.model.content.AiProcessingLogEntity::class,
         com.example.data.model.content.TelegramPublicationEntity::class,
         com.example.data.model.content.ContentSourceConfig::class,
-        com.example.data.model.content.ContentSourceReferenceEntity::class
+        com.example.data.model.content.ContentSourceReferenceEntity::class,
+        UserFeedbackEntity::class
     ],
-    version = 24,
+    version = 25,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
 abstract class StudyMateDatabase : RoomDatabase() {
+    abstract fun userFeedbackDao(): UserFeedbackDao
     abstract fun userDao(): UserDao
     abstract fun studyPlanDao(): StudyPlanDao
     abstract fun userStudyPreferencesDao(): UserStudyPreferencesDao

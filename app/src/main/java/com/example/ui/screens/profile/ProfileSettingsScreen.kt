@@ -1291,79 +1291,14 @@ fun ProfileSettingsScreen(
     }
 
     if (showReportProblemDialog) {
-        var problemCategory by remember { mutableStateOf("Bug Report") }
-        var problemDescription by remember { mutableStateOf("") }
-        var isReporting by remember { mutableStateOf(false) }
-
-        Dialog(onDismissRequest = { showReportProblemDialog = false }) {
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = Color(0xFF0F172A),
-                border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.4f)),
-                modifier = Modifier.fillMaxWidth(0.95f)
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("Report a Problem", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
-
-                    Text("Category", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.7f))
-                    val categories = listOf("Bug Report", "Incorrect Question", "Feature Request", "Sync Issue")
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(categories) { cat ->
-                            FilterChip(
-                                selected = problemCategory == cat,
-                                onClick = { problemCategory = cat },
-                                label = { Text(cat, fontSize = 11.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = NeonCyan,
-                                    selectedLabelColor = Color(0xFF090D16)
-                                )
-                            )
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = problemDescription,
-                        onValueChange = { problemDescription = it },
-                        label = { Text("Describe what happened") },
-                        placeholder = { Text("Provide details to help us fix the issue...") },
-                        modifier = Modifier.fillMaxWidth().height(120.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = NeonCyan,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TextButton(onClick = { showReportProblemDialog = false }) {
-                            Text("Cancel", color = Color.White.copy(alpha = 0.7f))
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(
-                            onClick = {
-                                if (problemDescription.isBlank()) {
-                                    Toast.makeText(context, "Please describe the problem", Toast.LENGTH_SHORT).show()
-                                    return@Button
-                                }
-                                isReporting = true
-                                Toast.makeText(context, "Thank you! Problem report submitted ✨", Toast.LENGTH_SHORT).show()
-                                showReportProblemDialog = false
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color(0xFF090D16))
-                        ) {
-                            Text("Submit Report", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showReportProblemDialog = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            com.example.ui.screens.feedback.FeedbackScreen(
+                initialFeature = "Profile & Settings",
+                onBackClick = { showReportProblemDialog = false }
+            )
         }
     }
 

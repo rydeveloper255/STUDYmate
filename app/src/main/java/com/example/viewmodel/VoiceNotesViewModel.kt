@@ -91,14 +91,7 @@ class VoiceNotesViewModel(application: Application) : AndroidViewModel(applicati
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
-        // Seed initial example voice note if empty so user immediately experiences AI audio transcription
-        viewModelScope.launch {
-            allVoiceNotes.take(1).collect { existing ->
-                if (existing.isEmpty()) {
-                    seedSampleVoiceNotes()
-                }
-            }
-        }
+        // Voice notes are purely user-created through microphone audio recording
     }
 
     fun setSubjectFilter(subject: String) {
@@ -348,60 +341,6 @@ class VoiceNotesViewModel(application: Application) : AndroidViewModel(applicati
 
     fun clearStatusNotification() {
         _statusNotification.value = null
-    }
-
-    private suspend fun seedSampleVoiceNotes() = withContext(Dispatchers.IO) {
-        val sampleDir = File(getApplication<Application>().filesDir, "voice_notes")
-        if (!sampleDir.exists()) sampleDir.mkdirs()
-        
-        val dummyFile1 = File(sampleDir, "sample_physics_lecture.m4a")
-        if (!dummyFile1.exists()) dummyFile1.writeText("sample_audio_data_placeholder")
-
-        val dummyFile2 = File(sampleDir, "sample_chem_reminder.m4a")
-        if (!dummyFile2.exists()) dummyFile2.writeText("sample_audio_data_placeholder")
-
-        val sample1 = VoiceNoteItem(
-            title = "Rotational Mechanics & Torque Equilibrium",
-            audioFilePath = dummyFile1.absolutePath,
-            durationMillis = 184000L, // 3m 4s
-            subject = "Physics",
-            noteType = VoiceNoteType.LECTURE,
-            transcription = "Today in Physics lecture, the professor covered torque about an arbitrary hinge point. Key rule: sum of torques equals I times alpha. If angular acceleration is zero, the system is in static equilibrium. Make sure to resolve forces perpendicular to the position vector.",
-            summary = "Comprehensive lecture overview on rotational dynamics and torque balance. Emphasizes resolving forces along the perpendicular lever arm and computing moment of inertia about the instantaneous axis of rotation.",
-            keyPoints = listOf(
-                "τ = r × F = r F sin(θ)",
-                "Static equilibrium condition: ΣFx = 0, ΣFy = 0, Στ = 0",
-                "Moment of Inertia of a solid cylinder = 1/2 M R²"
-            ),
-            extractedReminders = listOf(
-                "Solve Question 14 and 18 from HC Verma Chapter 10",
-                "Review angular momentum conservation before Wednesday test"
-            ),
-            isBookmarked = true,
-            createdAt = System.currentTimeMillis() - (2 * 3600 * 1000L)
-        )
-
-        val sample2 = VoiceNoteItem(
-            title = "Organic Reactions & Reagent Memory",
-            audioFilePath = dummyFile2.absolutePath,
-            durationMillis = 52000L, // 52s
-            subject = "Chemistry",
-            noteType = VoiceNoteType.QUICK_REMINDER,
-            transcription = "Quick reminder for organic chemistry: Grignard reagent RMgX reacts with dry CO2 followed by acid hydrolysis to produce carboxylic acids with one additional carbon atom. Keep reagents strictly anhydrous!",
-            summary = "Audio mnemonic and synthesis reminder for Grignard reagent carbonation pathway.",
-            keyPoints = listOf(
-                "R-Mg-X + CO2 -> R-COOMgX -> (H3O+) -> R-COOH",
-                "Requires strictly anhydrous ether solvent"
-            ),
-            extractedReminders = listOf(
-                "Practice 5 reaction mechanisms for carboxylic acids tonight"
-            ),
-            isBookmarked = false,
-            createdAt = System.currentTimeMillis() - (18 * 3600 * 1000L)
-        )
-
-        studyRepository.saveVoiceNote(sample1)
-        studyRepository.saveVoiceNote(sample2)
     }
 
     override fun onCleared() {

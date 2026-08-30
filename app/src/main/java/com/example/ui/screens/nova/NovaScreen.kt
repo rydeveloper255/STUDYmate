@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -126,6 +127,11 @@ fun NovaScreen(
         }
     }
 
+    // BackHandler pops any active tool screen back to the Nova AI Tools Hub
+    BackHandler(enabled = currentTab != NovaScreenTab.DASHBOARD) {
+        viewModel.setTab(NovaScreenTab.DASHBOARD)
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -145,49 +151,55 @@ fun NovaScreen(
                 .fillMaxSize()
                 .padding(if (currentTab == NovaScreenTab.DASHBOARD || currentTab == NovaScreenTab.ASSISTANT_CHAT || currentTab == NovaScreenTab.SMART_NOTES) PaddingValues(0.dp) else paddingValues)
         ) {
-            when (currentTab) {
-                NovaScreenTab.DASHBOARD -> {
-                    NovaDashboardTab(
-                        viewModel = viewModel,
-                        onNavigateToFocus = onNavigateToFocus,
-                        onNavigateToPlanner = onNavigateToPlanner,
-                        onRequestMicPermission = { startListeningWithPermission() }
-                    )
-                }
-                NovaScreenTab.ASSISTANT_CHAT -> {
-                    NovaAssistantChatTab(
-                        viewModel = viewModel,
-                        onRequestMicPermission = { startListeningWithPermission() },
-                        onBackToHub = { viewModel.setTab(NovaScreenTab.DASHBOARD) }
-                    )
-                }
-                NovaScreenTab.SMART_NOTES -> {
-                    NovaSmartNotesTab(
-                        viewModel = viewModel,
-                        onBackToHub = { viewModel.setTab(NovaScreenTab.DASHBOARD) }
-                    )
-                }
-                NovaScreenTab.CURRENT_AFFAIRS -> {
-                    NovaCurrentAffairsTab(
-                        viewModel = viewModel
-                    )
-                }
-                NovaScreenTab.VOICE_NOTES -> {
-                    VoiceNotesTab(
-                        viewModel = voiceNotesViewModel
-                    )
-                }
-                NovaScreenTab.INTERACTIVE_STUDY_QUIZ -> {
-                    NovaQuizIntelligenceTab(viewModel = viewModel)
-                }
-                NovaScreenTab.MEMORY_CENTER -> {
-                    NovaMemoryCenterTab(viewModel = viewModel)
-                }
-                NovaScreenTab.ANALYTICS_STRATEGY -> {
-                    NovaStrategyAnalyticsTab(viewModel = viewModel)
-                }
-                NovaScreenTab.NOVA_SETTINGS -> {
-                    NovaSettingsPrivacyTab(viewModel = viewModel)
+            AnimatedContent(
+                targetState = currentTab,
+                transitionSpec = { fadeIn() togetherWith fadeOut() },
+                label = "nova_tool_transition"
+            ) { tab ->
+                when (tab) {
+                    NovaScreenTab.DASHBOARD -> {
+                        NovaDashboardTab(
+                            viewModel = viewModel,
+                            onNavigateToFocus = onNavigateToFocus,
+                            onNavigateToPlanner = onNavigateToPlanner,
+                            onRequestMicPermission = { startListeningWithPermission() }
+                        )
+                    }
+                    NovaScreenTab.ASSISTANT_CHAT -> {
+                        NovaAssistantChatTab(
+                            viewModel = viewModel,
+                            onRequestMicPermission = { startListeningWithPermission() },
+                            onBackToHub = { viewModel.setTab(NovaScreenTab.DASHBOARD) }
+                        )
+                    }
+                    NovaScreenTab.SMART_NOTES -> {
+                        NovaSmartNotesTab(
+                            viewModel = viewModel,
+                            onBackToHub = { viewModel.setTab(NovaScreenTab.DASHBOARD) }
+                        )
+                    }
+                    NovaScreenTab.CURRENT_AFFAIRS -> {
+                        NovaCurrentAffairsTab(
+                            viewModel = viewModel
+                        )
+                    }
+                    NovaScreenTab.VOICE_NOTES -> {
+                        VoiceNotesTab(
+                            viewModel = voiceNotesViewModel
+                        )
+                    }
+                    NovaScreenTab.INTERACTIVE_STUDY_QUIZ -> {
+                        NovaQuizIntelligenceTab(viewModel = viewModel)
+                    }
+                    NovaScreenTab.MEMORY_CENTER -> {
+                        NovaMemoryCenterTab(viewModel = viewModel)
+                    }
+                    NovaScreenTab.ANALYTICS_STRATEGY -> {
+                        NovaStrategyAnalyticsTab(viewModel = viewModel)
+                    }
+                    NovaScreenTab.NOVA_SETTINGS -> {
+                        NovaSettingsPrivacyTab(viewModel = viewModel)
+                    }
                 }
             }
 

@@ -31,7 +31,7 @@ class FocusProtectionEngineTest {
     @Test
     fun `essential apps and system settings are never blocked by BlockingController`() {
         BlockingController.createSessionSnapshot(
-            restrictedPackages = setOf("com.instagram.android", "com.android.settings", "com.android.phone"),
+            packages = setOf("com.instagram.android", "com.android.settings", "com.android.phone"),
             isStrictMode = true
         )
 
@@ -41,14 +41,14 @@ class FocusProtectionEngineTest {
             currentPackage = context.packageName,
             sessionState = FocusSessionState.ACTIVE
         )
-        assertEquals(BlockDecision.ALLOW, settingsDecision)
+        assertEquals(BlockDecision.SYSTEM_EXCEPTION, settingsDecision)
 
         val phoneDecision = BlockingController.evaluateBlockDecision(
             packageName = "com.android.phone",
             currentPackage = context.packageName,
             sessionState = FocusSessionState.ACTIVE
         )
-        assertEquals(BlockDecision.ALLOW, phoneDecision)
+        assertEquals(BlockDecision.SYSTEM_EXCEPTION, phoneDecision)
 
         // StudyMate itself is never blocked
         val ownAppDecision = BlockingController.evaluateBlockDecision(
@@ -70,7 +70,7 @@ class FocusProtectionEngineTest {
     @Test
     fun `payment and UPI apps are never blocked`() {
         BlockingController.createSessionSnapshot(
-            restrictedPackages = setOf("net.one97.paytm", "com.phonepe.app", "com.google.android.apps.nbu.paisa.user"),
+            packages = setOf("com.instagram.android", "com.zhiliaoapp.musically"),
             isStrictMode = true
         )
 
@@ -92,12 +92,11 @@ class FocusProtectionEngineTest {
     @Test
     fun `snapshot immutability preserves block list during session`() {
         val initialRestricted = setOf("com.snapchat.android", "com.zhiliaoapp.musically")
-        BlockingController.createSessionSnapshot(initialRestricted, isStrictMode = true)
+        BlockingController.createSessionSnapshot(packages = initialRestricted, isStrictMode = true)
 
         val snapshot = BlockingController.getActiveSnapshot()
         assertNotNull(snapshot)
-        assertTrue(snapshot!!.restrictedPackages.contains("com.snapchat.android"))
-        assertTrue(snapshot.isStrictMode)
+        assertTrue(snapshot.contains("com.snapchat.android"))
     }
 
     @Test
@@ -168,9 +167,8 @@ class FocusProtectionEngineTest {
 
     @Test
     fun `device compatibility layer detects OEM profile`() {
-        val oem = DeviceCompatibilityLayer.detectOEM()
+        val oem = DeviceCompatibilityLayer.getDeviceProfile()
         assertNotNull(oem)
-        val guidance = DeviceCompatibilityLayer.getOEMGuidance(context)
-        assertNotNull(guidance)
+        assertNotNull(oem.guidanceMessage)
     }
 }

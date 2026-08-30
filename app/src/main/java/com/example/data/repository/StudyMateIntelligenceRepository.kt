@@ -383,108 +383,21 @@ class StudyMateIntelligenceRepository(
     }
 
     /**
-     * Seeds initial baseline topic masteries and exam objective if empty.
+     * Initializes baseline exam objective for the user with zero fake attempts/masteries.
+     * Real mastery metrics accumulate purely through actual practice quizzes and tests.
      */
     suspend fun seedInitialIntelligenceIfEmpty(profile: UserProfile) = withContext(Dispatchers.IO) {
-        val existingMasteries = topicMasteryDao.getAllTopicMasteries().firstOrNull() ?: emptyList()
-        if (existingMasteries.isEmpty()) {
-            val initial = listOf(
-                TopicMastery(
-                    subject = "Physics",
-                    topic = "Newton's Laws & Friction",
-                    masteryScore = 78,
-                    accuracyPercent = 80f,
-                    totalQuestionsAttempted = 25,
-                    correctQuestionsCount = 20,
-                    incorrectQuestionsCount = 5,
-                    easySolved = 10,
-                    medSolved = 8,
-                    hardSolved = 2,
-                    masteryLevel = "PROFICIENT"
-                ),
-                TopicMastery(
-                    subject = "Physics",
-                    topic = "Rotational Dynamics",
-                    masteryScore = 48,
-                    accuracyPercent = 52f,
-                    totalQuestionsAttempted = 30,
-                    correctQuestionsCount = 15,
-                    incorrectQuestionsCount = 15,
-                    easySolved = 8,
-                    medSolved = 5,
-                    hardSolved = 2,
-                    masteryLevel = "DEVELOPING",
-                    weakSpots = listOf("Moment of inertia for non-uniform rods", "Angular momentum conservation in collisions")
-                ),
-                TopicMastery(
-                    subject = "Chemistry",
-                    topic = "Chemical Equilibrium & Le Chatelier",
-                    masteryScore = 86,
-                    accuracyPercent = 88f,
-                    totalQuestionsAttempted = 28,
-                    correctQuestionsCount = 25,
-                    incorrectQuestionsCount = 3,
-                    easySolved = 12,
-                    medSolved = 10,
-                    hardSolved = 3,
-                    masteryLevel = "MASTERED"
-                ),
-                TopicMastery(
-                    subject = "Chemistry",
-                    topic = "Organic Reaction Mechanisms",
-                    masteryScore = 55,
-                    accuracyPercent = 58f,
-                    totalQuestionsAttempted = 35,
-                    correctQuestionsCount = 20,
-                    incorrectQuestionsCount = 15,
-                    easySolved = 9,
-                    medSolved = 8,
-                    hardSolved = 3,
-                    masteryLevel = "DEVELOPING",
-                    weakSpots = listOf("Electrophilic addition regioselectivity", "Carbocation rearrangement")
-                ),
-                TopicMastery(
-                    subject = "Mathematics",
-                    topic = "Differential Calculus & Maxima/Minima",
-                    masteryScore = 82,
-                    accuracyPercent = 84f,
-                    totalQuestionsAttempted = 40,
-                    correctQuestionsCount = 34,
-                    incorrectQuestionsCount = 6,
-                    easySolved = 15,
-                    medSolved = 14,
-                    hardSolved = 5,
-                    masteryLevel = "PROFICIENT"
-                ),
-                TopicMastery(
-                    subject = "Mathematics",
-                    topic = "Integral Calculus & Definite Integrals",
-                    masteryScore = 60,
-                    accuracyPercent = 62f,
-                    totalQuestionsAttempted = 32,
-                    correctQuestionsCount = 20,
-                    incorrectQuestionsCount = 12,
-                    easySolved = 10,
-                    medSolved = 8,
-                    hardSolved = 2,
-                    masteryLevel = "DEVELOPING",
-                    weakSpots = listOf("Integration by parts cyclic integrals", "Properties of definite integrals with modulus")
-                )
-            )
-            topicMasteryDao.insertTopicMasteries(initial)
-        }
-
         val existingObjectives = examObjectiveDao.getAllExamObjectives().firstOrNull() ?: emptyList()
-        if (existingObjectives.isEmpty()) {
+        if (existingObjectives.isEmpty() && profile.examName.isNotBlank()) {
             val objective = ExamObjective(
                 examName = profile.examName,
-                targetScoreOrRank = "Top 500 AIR",
+                targetScoreOrRank = "Target Goal",
                 examDateMillis = profile.examDateMillis,
                 category = "Competitive Exam",
-                targetWeeklyStudyHours = 28f,
-                totalSyllabusTopicsCount = 120,
-                completedSyllabusTopicsCount = 45,
-                prioritySubjects = profile.subjects.ifEmpty { listOf("Physics", "Mathematics", "Chemistry") },
+                targetWeeklyStudyHours = 20f,
+                totalSyllabusTopicsCount = 100,
+                completedSyllabusTopicsCount = 0,
+                prioritySubjects = profile.subjects.ifEmpty { listOf("General Studies", "Mathematics", "Science") },
                 status = "ACTIVE"
             )
             examObjectiveDao.insertObjective(objective)
