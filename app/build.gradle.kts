@@ -13,6 +13,29 @@ android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
+  fun getEnvVar(key: String, defaultValue: String = ""): String {
+    val envValue = System.getenv(key)
+    if (!envValue.isNullOrBlank()) return envValue
+    
+    val envFiles = listOf(rootProject.file(".env"), file(".env"))
+    for (envFile in envFiles) {
+      if (envFile.exists()) {
+        val lines = envFile.readLines()
+        for (line in lines) {
+          val trimmed = line.trim()
+          if (!trimmed.startsWith("#") && trimmed.contains("=")) {
+            val parts = trimmed.split("=", limit = 2)
+            if (parts[0].trim() == key) {
+              val valStr = parts[1].trim()
+              if (valStr.isNotBlank()) return valStr
+            }
+          }
+        }
+      }
+    }
+    return defaultValue
+  }
+
   defaultConfig {
     applicationId = "com.aistudio.studymate.kqxmvp"
     minSdk = 24
@@ -22,11 +45,17 @@ android {
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-    buildConfigField("String", "TELEGRAM_BOT_TOKEN", "\"dummy_telegram_bot_token\"")
-    buildConfigField("String", "TELEGRAM_ADMIN_CHAT_ID", "\"dummy_admin_chat_id\"")
-    buildConfigField("String", "GEMINI_API_KEY", "\"dummy_key\"")
-    buildConfigField("String", "SUPABASE_URL", "\"https://your-project.supabase.co\"")
-    buildConfigField("String", "SUPABASE_ANON_KEY", "\"eyJhbGciOi...\"")
+    buildConfigField("String", "TELEGRAM_BOT_TOKEN", "\"${getEnvVar("TELEGRAM_BOT_TOKEN", "dummy_telegram_bot_token")}\"")
+    buildConfigField("String", "TELEGRAM_ADMIN_CHAT_ID", "\"${getEnvVar("TELEGRAM_ADMIN_CHAT_ID", "dummy_admin_chat_id")}\"")
+    buildConfigField("String", "GEMINI_API_KEY", "\"${getEnvVar("GEMINI_API_KEY", "dummy_key")}\"")
+    buildConfigField("String", "SUPABASE_URL", "\"${getEnvVar("SUPABASE_URL", "https://your-project.supabase.co")}\"")
+    buildConfigField("String", "SUPABASE_ANON_KEY", "\"${getEnvVar("SUPABASE_ANON_KEY", "eyJhbGciOi...")}\"")
+    buildConfigField("String", "SERPER_API_KEY", "\"${getEnvVar("SERPER_API_KEY", "dummy_serper_key")}\"")
+    buildConfigField("String", "ELEVENLABS_API_KEY", "\"${getEnvVar("ELEVENLABS_API_KEY", "dummy_elevenlabs_key")}\"")
+    buildConfigField("String", "ELEVENLABS_VOICE_ID", "\"${getEnvVar("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")}\"")
+    buildConfigField("String", "ELEVENLABS_MODEL_ID", "\"${getEnvVar("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")}\"")
+    buildConfigField("String", "SMTP_EMAIL", "\"${getEnvVar("SMTP_EMAIL", "dummy_smtp_email@example.com")}\"")
+    buildConfigField("String", "SMTP_APP_PASSWORD", "\"${getEnvVar("SMTP_APP_PASSWORD", "dummy_smtp_app_password")}\"")
   }
 
   signingConfigs {

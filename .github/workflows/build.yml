@@ -9,7 +9,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,14 +19,33 @@ jobs:
       - name: Prepare environment configuration
         run: |
           cat << 'EOF' > .env
-          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY || 'dummy_api_key_for_build' }}
-          SUPABASE_URL=${{ secrets.SUPABASE_URL || 'https://dummy.supabase.co' }}
-          SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY || 'dummy_anon_key_for_build' }}
-          SERPER_API_KEY=${{ secrets.SERPER_API_KEY || 'dummy_serper_key' }}
-          ELEVENLABS_API_KEY=${{ secrets.ELEVENLABS_API_KEY || 'dummy_elevenlabs_key' }}
+          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+          SERPER_API_KEY=${{ secrets.SERPER_API_KEY }}
+          ELEVENLABS_API_KEY=${{ secrets.ELEVENLABS_API_KEY }}
           ELEVENLABS_VOICE_ID=${{ secrets.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM' }}
           ELEVENLABS_MODEL_ID=${{ secrets.ELEVENLABS_MODEL_ID || 'eleven_multilingual_v2' }}
+          SMTP_EMAIL=${{ secrets.SMTP_EMAIL }}
+          SMTP_APP_PASSWORD=${{ secrets.SMTP_APP_PASSWORD }}
+          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID=${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
           EOF
+
+          cat << 'EOF' > app/.env
+          GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+          SERPER_API_KEY=${{ secrets.SERPER_API_KEY }}
+          ELEVENLABS_API_KEY=${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID=${{ secrets.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM' }}
+          ELEVENLABS_MODEL_ID=${{ secrets.ELEVENLABS_MODEL_ID || 'eleven_multilingual_v2' }}
+          SMTP_EMAIL=${{ secrets.SMTP_EMAIL }}
+          SMTP_APP_PASSWORD=${{ secrets.SMTP_APP_PASSWORD }}
+          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID=${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          EOF
+
           cat << 'EOF' > .env.example
           GEMINI_API_KEY=dummy_api_key_for_build
           SUPABASE_URL=https://dummy.supabase.co
@@ -36,6 +54,10 @@ jobs:
           ELEVENLABS_API_KEY=dummy_elevenlabs_key
           ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
           ELEVENLABS_MODEL_ID=eleven_multilingual_v2
+          SMTP_EMAIL=dummy_smtp_email@example.com
+          SMTP_APP_PASSWORD=dummy_smtp_app_password
+          TELEGRAM_BOT_TOKEN=dummy_telegram_bot_token
+          TELEGRAM_ADMIN_CHAT_ID=dummy_admin_chat_id
           EOF
 
       - name: Setup JDK 17
@@ -57,6 +79,16 @@ jobs:
           validate-wrappers: false
 
       - name: Build Debug APK
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+          SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: gradle assembleDebug
 
       - name: Upload APK
@@ -65,4 +97,3 @@ jobs:
           name: StudyMate-AI-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-

@@ -1255,6 +1255,34 @@ CREATE POLICY "Admin manage latest updates"
     USING (public.is_admin())
     WITH CHECK (public.is_admin());
 
+-- 9.7 Step 82 WhatsApp Content Source Raw Ingestion Table
+CREATE TABLE IF NOT EXISTS public.raw_source_content (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_type TEXT NOT NULL, -- 'WHATSAPP_CHANNEL', 'WEB_SCRAPER', etc.
+    source_name TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    source_message_id TEXT,
+    source_post_date TEXT,
+    raw_text TEXT NOT NULL,
+    attachment_reference TEXT,
+    source_timestamp BIGINT,
+    content_hash TEXT UNIQUE,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.raw_source_content ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Admins manage raw source content"
+    ON public.raw_source_content FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+CREATE INDEX IF NOT EXISTS idx_raw_source_content_source ON public.raw_source_content(source_type, source_message_id);
+CREATE INDEX IF NOT EXISTS idx_raw_source_content_hash ON public.raw_source_content(content_hash);
+CREATE INDEX IF NOT EXISTS idx_raw_source_content_date ON public.raw_source_content(source_post_date);
+
 -- Step 69 & 71 Performance Indexes
 CREATE INDEX IF NOT EXISTS idx_practice_questions_filter ON public.practice_questions(exam_name, subject, chapter, topic, difficulty);
 CREATE INDEX IF NOT EXISTS idx_practice_questions_pyq ON public.practice_questions(question_type, exam_name, year, paper_shift);

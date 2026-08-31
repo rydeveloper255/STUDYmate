@@ -26,7 +26,8 @@ enum class SourceType {
     PDF_DIRECTORY,
     RSS_FEED,
     OFFICIAL_PORTAL,
-    REFERENCE_ONLY
+    REFERENCE_ONLY,
+    WHATSAPP_CHANNEL
 }
 
 /**

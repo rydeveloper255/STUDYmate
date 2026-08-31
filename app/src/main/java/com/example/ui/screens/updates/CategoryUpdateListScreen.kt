@@ -348,7 +348,7 @@ fun CategoryUpdateListScreen(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "No updates available.",
+                            text = "No updates available right now.",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = if (isDark) Color.White else DeepIndigo
@@ -568,6 +568,19 @@ fun CategoryUpdateCard(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = EmeraldSuccess
+                    )
+                }
+            }
+
+            // Source Attribution
+            if (item.sourceName.isNotBlank()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Source: ${item.sourceName}",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Normal,
+                        color = if (isDark) Color(0xFF64748B) else Color(0xFF94A3B8)
                     )
                 }
             }

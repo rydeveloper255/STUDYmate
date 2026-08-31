@@ -40,7 +40,11 @@ class AutomatedContentCollectorEngine(
     private val recruitmentScraper: SmartRecruitmentScraperService = SmartRecruitmentScraperService(geminiRepository),
     private val gkNowPdfScraper: GkNowWeeklyPdfScraper = GkNowWeeklyPdfScraper(),
     private val aiEngine: ContentIntelligenceAiEngine = ContentIntelligenceAiEngine(geminiRepository),
-    private val supabaseContentHub: com.example.data.remote.supabase.SupabaseContentHubService = com.example.data.remote.supabase.SupabaseContentHubService(database = database)
+    private val supabaseContentHub: com.example.data.remote.supabase.SupabaseContentHubService = com.example.data.remote.supabase.SupabaseContentHubService(database = database),
+    private val whatsAppIngestionService: com.example.service.content.whatsapp.WhatsAppChannelIngestionService = com.example.service.content.whatsapp.WhatsAppChannelIngestionService(
+        recruitmentDao = database.recruitmentDao(),
+        sourceManager = sourceManager
+    )
 ) {
     companion object {
         private const val TAG = "ContentCollectorEngine"
@@ -107,6 +111,19 @@ class AutomatedContentCollectorEngine(
         for (source in enabledSources) {
             try {
                 Log.d(TAG, "Ingesting source: ${source.sourceName} [${source.sourceUrl}]")
+                if (source.sourceType == SourceType.WHATSAPP_CHANNEL) {
+                    val waResult = whatsAppIngestionService.runIngestionCycle(source.sourceUrl)
+                    totalNewItems += waResult.publishedCount
+                    totalUpdatedItems += waResult.updatedCount
+                    totalDuplicates += waResult.duplicateCount
+                    totalReviewRequired += waResult.reviewRequiredCount
+                    if (!waResult.success && waResult.failedCount > 0) {
+                        totalFailedSources++
+                        waResult.errorMessage?.let { errorsList.add("${source.sourceName}: $it") }
+                    }
+                    continue
+                }
+
                 when (source.category) {
                     ContentCategory.CURRENT_AFFAIRS_PDF -> {
                         val pdfResults = processWeeklyPdfSource(source)

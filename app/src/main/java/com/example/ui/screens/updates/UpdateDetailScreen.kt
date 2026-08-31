@@ -328,6 +328,24 @@ fun UpdateDetailScreen(
                             )
                         }
                     }
+
+                    if (item.sourceName.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Filled.Public,
+                                contentDescription = null,
+                                tint = if (isDark) Color(0xFF64748B) else Color(0xFF94A3B8),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Source: ${item.sourceName}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isDark) Color(0xFF64748B) else Color(0xFF94A3B8)
+                            )
+                        }
+                    }
                 }
             }
 

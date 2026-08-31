@@ -16,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap
 class SourceManager {
 
     companion object {
+        const val SOURCE_ID_WHATSAPP_CHANNEL = "src_whatsapp_channel_updates"
         const val SOURCE_ID_VACANCY = "src_sarkari_vacancy"
         const val SOURCE_ID_RESULT = "src_sarkari_result"
         const val SOURCE_ID_ADMIT_CARD = "src_sarkari_admit_card"
@@ -28,17 +29,30 @@ class SourceManager {
 
         val DEFAULT_SOURCES = listOf(
             ContentSourceConfig(
+                sourceId = SOURCE_ID_WHATSAPP_CHANNEL,
+                sourceName = "StudyMate WhatsApp Updates",
+                sourceUrl = "https://whatsapp.com/channel/0029VaAbQf01NCrYADMLt00L",
+                category = ContentCategory.VACANCY,
+                enabled = true,
+                priority = 1,
+                sourceType = SourceType.WHATSAPP_CHANNEL,
+                language = "Hindi",
+                description = "Primary official discovery source for recruitment vacancies, admit cards, results, and exam updates.",
+                checkIntervalMinutes = 60L,
+                status = SourceStatus.ACTIVE
+            ),
+            ContentSourceConfig(
                 sourceId = SOURCE_ID_VACANCY,
                 sourceName = "Sarkari Result — Latest Vacancies",
                 sourceUrl = "https://www.sarkariresult.com/latestjobs.php",
                 category = ContentCategory.VACANCY,
-                enabled = true,
-                priority = 1,
+                enabled = false, // Step 82: Primary source for Vacancy is WhatsApp Channel
+                priority = 10,
                 sourceType = SourceType.WEB_SCRAPER,
                 language = "Hindi",
-                description = "Primary discovery source for new recruitment vacancies and job notifications.",
+                description = "Secondary discovery source (Disabled in Step 82 in favor of WhatsApp Channel).",
                 checkIntervalMinutes = 180L,
-                status = SourceStatus.ACTIVE
+                status = SourceStatus.DISABLED
             ),
             ContentSourceConfig(
                 sourceId = SOURCE_ID_RESULT,
@@ -104,19 +118,6 @@ class SourceManager {
                 description = "Date-wise and week-wise Hindi Current Affairs PDF repository.",
                 checkIntervalMinutes = 180L,
                 status = SourceStatus.ACTIVE
-            ),
-            ContentSourceConfig(
-                sourceId = SOURCE_ID_WHATSAPP_REF,
-                sourceName = "StudyMate WhatsApp Channel Reference",
-                sourceUrl = "https://whatsapp.com/channel/0029VaAbQf01NCrYADMLt00L",
-                category = ContentCategory.EXTERNAL_SOURCE,
-                enabled = false, // Reference only as mandated by security rules
-                priority = 7,
-                sourceType = SourceType.REFERENCE_ONLY,
-                language = "Hinglish",
-                description = "Configured reference channel only. Not scraped directly.",
-                checkIntervalMinutes = 1440L,
-                status = SourceStatus.DISABLED
             )
         )
     }
