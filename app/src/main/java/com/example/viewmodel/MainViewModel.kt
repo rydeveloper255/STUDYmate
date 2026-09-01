@@ -1536,22 +1536,8 @@ class MainViewModel(
     }
 
     fun saveOnboarding(profile: UserProfile) {
-        saveOnboardingWithCallback(profile) { }
-    }
-
-    fun saveOnboardingWithCallback(
-        profile: UserProfile,
-        onResult: (Result<UserProfile>) -> Unit = {}
-    ) {
         viewModelScope.launch {
             _isAuthLoading.value = true
-            com.example.data.persistence.PersistenceMonitor.updateStatus(com.example.data.persistence.PersistenceStatus.Saving)
-            com.example.service.analytics.DiagnosticLogger.logInfo(
-                operation = "SaveOnboarding",
-                resource = "UserProfile",
-                message = "Initiating onboarding profile and schedule persistence for ${profile.name}"
-            )
-
             val currentUser = userProfile.value
             val finalProfile = profile.copy(
                 id = "current_user",
@@ -1561,59 +1547,10 @@ class MainViewModel(
                 isGuest = currentUser?.isGuest ?: false,
                 isOnboardingCompleted = true
             )
-
-            try {
-                // 1. Complete onboarding in auth repository (saves to Room UserDao & Remote sync)
-                val res = authRepository.completeOnboarding(finalProfile)
-
-                res.onSuccess { savedUser ->
-                    // 2. Persist custom study blocks to StudySchedule table
-                    studyRepository.saveStudyScheduleFromProfile(savedUser)
-
-                    // 3. Generate initial AI study plan and smart flashcards
-                    generateAiStudyPlan()
-
-                    com.example.data.persistence.PersistenceMonitor.updateStatus(
-                        com.example.data.persistence.PersistenceStatus.Saved(message = "✓ Profile & Schedule verified")
-                    )
-                    com.example.service.analytics.DiagnosticLogger.logSuccess(
-                        category = com.example.service.analytics.DiagnosticCategory.SAVE_SUCCESS,
-                        operation = "SaveOnboarding",
-                        resource = "UserProfile & StudySchedule",
-                        affectedFields = listOf("name", "examName", "subjects", "customStudyBlocksJson"),
-                        message = "Onboarding completed, study routine generated, and schedule slots created successfully."
-                    )
-                    _isAuthLoading.value = false
-                    onResult(Result.success(savedUser))
-                }.onFailure { err ->
-                    val errMsg = err.message ?: "Failed to save profile details."
-                    com.example.data.persistence.PersistenceMonitor.updateStatus(
-                        com.example.data.persistence.PersistenceStatus.Failed(errMsg)
-                    )
-                    com.example.service.analytics.DiagnosticLogger.logError(
-                        category = com.example.service.analytics.DiagnosticCategory.ONBOARDING_SAVE_ERROR,
-                        operation = "SaveOnboarding",
-                        resource = "UserProfile",
-                        affectedFields = listOf("name", "examName", "subjects"),
-                        errorMessage = errMsg
-                    )
-                    _isAuthLoading.value = false
-                    onResult(Result.failure(err))
-                }
-            } catch (e: Exception) {
-                val errMsg = e.message ?: "Unexpected error saving profile."
-                com.example.data.persistence.PersistenceMonitor.updateStatus(
-                    com.example.data.persistence.PersistenceStatus.Failed(errMsg)
-                )
-                com.example.service.analytics.DiagnosticLogger.logError(
-                    category = com.example.service.analytics.DiagnosticCategory.ONBOARDING_SAVE_ERROR,
-                    operation = "SaveOnboarding",
-                    resource = "UserProfile",
-                    errorMessage = errMsg
-                )
-                _isAuthLoading.value = false
-                onResult(Result.failure(e))
-            }
+            authRepository.completeOnboarding(finalProfile)
+            // Generate initial personalized study plan and flashcards
+            generateAiStudyPlan()
+            _isAuthLoading.value = false
         }
     }
 

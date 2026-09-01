@@ -158,7 +158,7 @@ fun StudyMateAppContent(
         return
     }
 
-    // 1. Unauthenticated -> Auth Screen Flow
+    // Unauthenticated -> Auth Screen Flow
     val context = androidx.compose.ui.platform.LocalContext.current
     if (userProfile == null) {
         AuthScreenHost(
@@ -168,21 +168,7 @@ fun StudyMateAppContent(
         return
     }
 
-    // 2. Profile Details & Onboarding (Screenshot 2)
-    if (!userProfile!!.isOnboardingCompleted) {
-        OnboardingScreen(
-            initialName = userProfile?.name ?: "",
-            onComplete = { profile ->
-                viewModel.saveOnboarding(profile)
-            },
-            onSaveProfile = { profile, callback ->
-                viewModel.saveOnboardingWithCallback(profile, callback)
-            }
-        )
-        return
-    }
-
-    // 3. Focus & Notification Permission Setup (Screenshots 3, 4, 5)
+    // First-Time User -> Setup / Permission Screen
     val appPrefs = remember(context) { context.getSharedPreferences("studymate_app_prefs", android.content.Context.MODE_PRIVATE) }
     var isPermissionSetupCompleted by remember {
         mutableStateOf(appPrefs.getBoolean("has_completed_permission_setup", false))
@@ -193,6 +179,17 @@ fun StudyMateAppContent(
             onCompleteSetup = {
                 appPrefs.edit().putBoolean("has_completed_permission_setup", true).apply()
                 isPermissionSetupCompleted = true
+            }
+        )
+        return
+    }
+
+    // First-Time User -> Onboarding Screen
+    if (!userProfile!!.isOnboardingCompleted) {
+        OnboardingScreen(
+            initialName = userProfile?.name ?: "",
+            onComplete = { profile ->
+                viewModel.saveOnboarding(profile)
             }
         )
         return
