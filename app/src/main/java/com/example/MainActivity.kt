@@ -174,6 +174,9 @@ fun StudyMateAppContent(
             initialName = userProfile?.name ?: "",
             onComplete = { profile ->
                 viewModel.saveOnboarding(profile)
+            },
+            onSaveProfile = { profile, callback ->
+                viewModel.saveOnboardingWithCallback(profile, callback)
             }
         )
         return

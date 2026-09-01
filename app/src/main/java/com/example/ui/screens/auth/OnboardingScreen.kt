@@ -13,6 +13,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -27,27 +29,45 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.model.StudyTimeBlock
 import com.example.data.model.UserProfile
+import com.example.data.persistence.PersistenceMonitor
+import com.example.data.persistence.PersistenceStatus
 import com.example.localization.AppLanguage
 import com.example.localization.LanguageManager
+import com.example.service.analytics.DiagnosticCategory
+import com.example.service.analytics.DiagnosticLogger
+import com.example.ui.components.StudyMateBrandLogo
 import com.example.ui.components.springClickable
 import com.example.ui.theme.*
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.*
 
+data class OnboardingScheduleSlot(
+    val id: String = UUID.randomUUID().toString(),
+    val title: String,
+    val iconName: String, // "morning", "afternoon", "evening", "night", "custom"
+    val startTime: String,
+    val durationMinutes: Int,
+    val breakMinutes: Int,
+    val isEnabled: Boolean = true
+)
+
 @Composable
 fun OnboardingScreen(
     initialName: String = "Student",
-    onComplete: (userProfile: UserProfile) -> Unit
+    onComplete: (userProfile: UserProfile) -> Unit = {},
+    onSaveProfile: ((UserProfile, (Result<UserProfile>) -> Unit) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     val sharedPrefs = remember {
         context.getSharedPreferences("studymate_onboarding_draft", Context.MODE_PRIVATE)
     }
@@ -57,8 +77,14 @@ fun OnboardingScreen(
     }
     val totalSteps = 3
 
+    // Real Persistence & Verification State
+    var isSaving by remember { mutableStateOf(false) }
+    var saveErrorMessage by remember { mutableStateOf<String?>(null) }
+    var saveAffectedFields by remember { mutableStateOf<List<String>>(emptyList()) }
+    var saveSuccessConfirmed by remember { mutableStateOf(false) }
+
     // Hardware back navigation
-    BackHandler(enabled = step > 1) {
+    BackHandler(enabled = step > 1 && !isSaving) {
         if (step > 1) {
             step--
             sharedPrefs.edit().putInt("draft_step", step).apply()
@@ -78,7 +104,16 @@ fun OnboardingScreen(
         mutableStateOf(sharedPrefs.getString("draft_academic_level", "Undergraduate") ?: "Undergraduate")
     }
     var selectedCourseOrExam by rememberSaveable {
-        mutableStateOf(sharedPrefs.getString("draft_course_exam", "Computer Science Engineering") ?: "Computer Science Engineering")
+        mutableStateOf(sharedPrefs.getString("draft_course_exam", "RRB NTPC (Railway Non-Technical)") ?: "RRB NTPC (Railway Non-Technical)")
+    }
+    var isCustomExam by rememberSaveable {
+        mutableStateOf(sharedPrefs.getBoolean("draft_is_custom_exam", false))
+    }
+    var customExamNameInput by rememberSaveable {
+        mutableStateOf(sharedPrefs.getString("draft_custom_exam_name", "") ?: "")
+    }
+    var customExamAuthorityInput by rememberSaveable {
+        mutableStateOf(sharedPrefs.getString("draft_custom_exam_auth", "") ?: "")
     }
     var studyGoalInput by rememberSaveable {
         mutableStateOf(sharedPrefs.getString("draft_study_goal", "") ?: "")
@@ -88,10 +123,6 @@ fun OnboardingScreen(
     val academicLevels = listOf("High School", "Undergraduate", "Postgraduate", "Professional")
 
     val popularCoursesAndExams = listOf(
-        "Computer Science Engineering",
-        "Mechanical Engineering",
-        "Electrical Engineering",
-        "Civil Engineering",
         "RRB NTPC (Railway Non-Technical)",
         "RRB Group D (Railway Recruitment)",
         "SSC CGL (Staff Selection Commission)",
@@ -100,11 +131,15 @@ fun OnboardingScreen(
         "UPSC Civil Services (IAS / IPS)",
         "IBPS / SBI Banking PO & Clerk",
         "CBSE Class 12 Science / Commerce",
-        "General Aptitude & Data Science"
+        "Computer Science Engineering",
+        "Mechanical Engineering",
+        "Electrical Engineering",
+        "Civil Engineering",
+        "Custom Exam (Specify your syllabus)"
     )
 
     // ==========================================
-    // STEP 2 STATE - Target Exam & Routine
+    // STEP 2 STATE - Target Exam & Customizable Schedule
     // ==========================================
     var dailyStudyHours by rememberSaveable {
         mutableFloatStateOf(sharedPrefs.getFloat("draft_daily_hours", 4.0f))
@@ -116,106 +151,185 @@ fun OnboardingScreen(
         mutableFloatStateOf(sharedPrefs.getFloat("draft_exam_days", 60f))
     }
 
-    // ==========================================
-    // STEP 3 STATE - Priority Subjects & Launch
-    // ==========================================
-    fun getSubjectsForCourse(course: String): List<String> = when {
-        course.contains("Computer", ignoreCase = true) -> listOf("Data Structures & Algorithms", "Operating Systems", "Database Management", "Computer Networks")
-        course.contains("NTPC", ignoreCase = true) -> listOf("Mathematics", "General Intelligence & Reasoning", "General Awareness", "General Science")
-        course.contains("SSC", ignoreCase = true) -> listOf("Quantitative Aptitude", "General Intelligence & Reasoning", "English Comprehension", "General Awareness")
-        course.contains("JEE", ignoreCase = true) -> listOf("Physics", "Chemistry", "Mathematics")
-        course.contains("NEET", ignoreCase = true) -> listOf("Biology (Botany & Zoology)", "Physics", "Chemistry")
-        course.contains("UPSC", ignoreCase = true) -> listOf("General Studies I (History & Geography)", "General Studies II (Polity)", "General Studies III (Economy)", "CSAT Aptitude")
-        course.contains("Bank", ignoreCase = true) -> listOf("Reasoning Ability", "Quantitative Aptitude", "English Language", "Banking Awareness")
-        else -> listOf("Core Foundations", "Problem Solving & Aptitude", "Analytical Reasoning", "Specialized Electives")
+    // Interactive Customizable Schedule Slots
+    var scheduleSlots by remember {
+        mutableStateOf(
+            listOf(
+                OnboardingScheduleSlot(
+                    id = "slot_morning",
+                    title = "Morning Focus Slot",
+                    iconName = "morning",
+                    startTime = "06:30 AM",
+                    durationMinutes = 60,
+                    breakMinutes = 10,
+                    isEnabled = true
+                ),
+                OnboardingScheduleSlot(
+                    id = "slot_afternoon",
+                    title = "Afternoon Practice Slot",
+                    iconName = "afternoon",
+                    startTime = "02:00 PM",
+                    durationMinutes = 60,
+                    breakMinutes = 10,
+                    isEnabled = true
+                ),
+                OnboardingScheduleSlot(
+                    id = "slot_evening",
+                    title = "Evening Deep Revision",
+                    iconName = "evening",
+                    startTime = "06:00 PM",
+                    durationMinutes = 90,
+                    breakMinutes = 15,
+                    isEnabled = true
+                ),
+                OnboardingScheduleSlot(
+                    id = "slot_night",
+                    title = "Night Flashcards & Recall",
+                    iconName = "night",
+                    startTime = "09:00 PM",
+                    durationMinutes = 45,
+                    breakMinutes = 10,
+                    isEnabled = false
+                )
+            )
+        )
     }
 
-    val availableSubjects = remember(selectedCourseOrExam) {
-        getSubjectsForCourse(selectedCourseOrExam)
+    // ==========================================
+    // STEP 3 STATE - Priority Subjects & Custom Subjects
+    // ==========================================
+    fun getSubjectsForCourse(course: String, isCustom: Boolean): List<String> {
+        if (isCustom) return emptyList()
+        return when {
+            course.contains("NTPC", ignoreCase = true) -> listOf("Mathematics", "General Intelligence & Reasoning", "General Awareness", "General Science")
+            course.contains("Group D", ignoreCase = true) -> listOf("Mathematics", "General Intelligence & Reasoning", "General Science", "Current Affairs")
+            course.contains("SSC", ignoreCase = true) -> listOf("Quantitative Aptitude", "General Intelligence & Reasoning", "English Comprehension", "General Awareness")
+            course.contains("JEE", ignoreCase = true) -> listOf("Physics", "Chemistry", "Mathematics")
+            course.contains("NEET", ignoreCase = true) -> listOf("Biology (Botany & Zoology)", "Physics", "Chemistry")
+            course.contains("UPSC", ignoreCase = true) -> listOf("General Studies I (History & Geography)", "General Studies II (Polity)", "General Studies III (Economy)", "CSAT Aptitude")
+            course.contains("Bank", ignoreCase = true) || course.contains("IBPS", ignoreCase = true) -> listOf("Reasoning Ability", "Quantitative Aptitude", "English Language", "Banking Awareness")
+            course.contains("Computer", ignoreCase = true) -> listOf("Data Structures & Algorithms", "Operating Systems", "Database Management", "Computer Networks")
+            course.contains("Mechanical", ignoreCase = true) -> listOf("Thermodynamics", "Fluid Mechanics", "Strength of Materials", "Manufacturing Tech")
+            course.contains("Electrical", ignoreCase = true) -> listOf("Circuit Theory", "Control Systems", "Power Systems", "Electromagnetics")
+            course.contains("Civil", ignoreCase = true) -> listOf("Structural Engineering", "Geotechnical Engineering", "Transportation", "Surveying")
+            else -> listOf("Core Foundations", "Problem Solving & Aptitude", "Analytical Reasoning", "Specialized Electives")
+        }
     }
 
-    var selectedSubjects by remember(selectedCourseOrExam) {
+    var customSubjectsList by remember {
+        mutableStateOf(
+            if (sharedPrefs.contains("draft_custom_subjects")) {
+                sharedPrefs.getStringSet("draft_custom_subjects", emptySet())?.toList() ?: listOf("Subject 1", "Subject 2")
+            } else {
+                listOf("Core Subject 1", "Analytical Aptitude", "Specialized Paper")
+            }
+        )
+    }
+    var newCustomSubjectInput by remember { mutableStateOf("") }
+
+    val activeExamName = if (isCustomExam && customExamNameInput.isNotBlank()) customExamNameInput.trim() else selectedCourseOrExam
+
+    val availableSubjects = remember(selectedCourseOrExam, isCustomExam, customSubjectsList) {
+        if (isCustomExam) customSubjectsList else getSubjectsForCourse(selectedCourseOrExam, false)
+    }
+
+    var selectedSubjects by remember(availableSubjects) {
         mutableStateOf(availableSubjects.toSet())
     }
 
-    var subjectPriorityMap by remember(selectedCourseOrExam) {
-        mutableStateOf(availableSubjects.associateWith { "HIGH" })
+    var subjectPriorityMap by remember(availableSubjects) {
+        mutableStateOf(
+            availableSubjects.mapIndexed { index, sub ->
+                sub to if (index == 0) "HIGH" else if (index == 1) "HIGH" else "MEDIUM"
+            }.toMap()
+        )
     }
 
-    // Save draft on change
-    LaunchedEffect(step, nameInput, selectedLanguage, selectedAcademicLevel, selectedCourseOrExam, studyGoalInput, dailyStudyHours) {
-        sharedPrefs.edit()
-            .putInt("draft_step", step)
-            .putString("draft_name", nameInput)
-            .putString("draft_language", selectedLanguage)
-            .putString("draft_academic_level", selectedAcademicLevel)
-            .putString("draft_course_exam", selectedCourseOrExam)
-            .putString("draft_study_goal", studyGoalInput)
-            .putFloat("draft_daily_hours", dailyStudyHours)
-            .apply()
-    }
-
+    // Helper: Build the final UserProfile entity
     fun buildFinalProfile(): UserProfile {
-        val totalMins = (dailyStudyHours * 60).toInt()
-        val subs = if (selectedSubjects.isNotEmpty()) selectedSubjects.toList() else availableSubjects
-        val perSub = if (subs.isNotEmpty()) (totalMins / subs.size).coerceAtLeast(15) else 30
+        val highPriority = subjectPriorityMap.filter { it.value == "HIGH" && selectedSubjects.contains(it.key) }.keys.toList()
+        val mediumPriority = subjectPriorityMap.filter { it.value == "MEDIUM" && selectedSubjects.contains(it.key) }.keys.toList()
+        val lowPriority = subjectPriorityMap.filter { it.value == "LOW" && selectedSubjects.contains(it.key) }.keys.toList()
 
-        val allocJson = JSONObject().apply {
-            subs.forEach { sub -> put(sub, perSub) }
-        }
-
-        val blocksJson = JSONArray().apply {
-            subs.take(3).forEachIndexed { i, sub ->
-                put(JSONObject().apply {
-                    put("id", UUID.randomUUID().toString())
-                    put("startTime", listOf("06:00 PM", "07:30 PM", "09:00 PM").getOrElse(i) { "06:00 PM" })
-                    put("subject", sub)
-                    put("durationMinutes", perSub)
-                    put("topic", "Core Fundamentals & Practice")
-                })
+        // Serialize Custom Study Schedule Slots
+        val activeSlots = scheduleSlots.filter { it.isEnabled }
+        val slotsJsonArray = JSONArray()
+        activeSlots.forEach { slot ->
+            val obj = JSONObject().apply {
+                put("id", slot.id)
+                put("subject", highPriority.firstOrNull() ?: selectedSubjects.firstOrNull() ?: "General Studies")
+                put("startTime", slot.startTime)
+                put("durationMinutes", slot.durationMinutes)
+                put("breakMinutes", slot.breakMinutes)
+                put("enabled", slot.isEnabled)
+                put("topic", slot.title)
             }
+            slotsJsonArray.put(obj)
         }
 
-        val highPriority = subjectPriorityMap.filter { it.value == "HIGH" }.keys.toList().ifEmpty { subs.take(2) }
+        val totalDailyMins = (dailyStudyHours * 60).toInt().coerceAtLeast(60)
 
         return UserProfile(
             id = "current_user",
-            name = nameInput.ifBlank { "Student" },
-            photoUrl = "https://api.dicebear.com/7.x/bottts/png?seed=Scholar1",
-            grade = selectedAcademicLevel,
-            educationLevel = selectedAcademicLevel,
+            name = if (nameInput.isNotBlank()) nameInput.trim() else "Student",
+            appLanguage = selectedLanguage,
             languagePreference = selectedLanguage,
-            examCategory = selectedCourseOrExam,
-            examName = selectedCourseOrExam,
-            examDateMillis = System.currentTimeMillis() + (examDaysAhead.toLong() * 24L * 60L * 60L * 1000L),
-            targetScore = if (studyGoalInput.isNotBlank()) studyGoalInput else "Top Merit / 90+ Score",
-            goal = selectedCourseOrExam,
-            subjects = subs,
-            highPrioritySubjects = highPriority,
-            mediumPrioritySubjects = subjectPriorityMap.filter { it.value == "MEDIUM" }.keys.toList(),
-            lowPrioritySubjects = subjectPriorityMap.filter { it.value == "LOW" }.keys.toList(),
-            strongSubjects = subs.filter { it !in highPriority },
-            preparationLevel = "Intermediate (Practicing questions & mock drills)",
-            dailyTargetMinutes = totalMins,
+            educationLevel = selectedAcademicLevel,
+            examName = activeExamName,
+            examCategory = if (isCustomExam) "Custom Goal / Exam" else "Competitive / Academic",
+            examDateMillis = System.currentTimeMillis() + (examDaysAhead.toLong() * 24 * 60 * 60 * 1000L),
+            dailyTargetMinutes = totalDailyMins,
             availableStudyHours = dailyStudyHours,
-            subjectTimeAllocationJson = allocJson.toString(),
-            preferredStudyStartTime = "06:00 PM",
-            preferredStudyEndTime = "10:00 PM",
-            preferredStudyDays = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat"),
-            breakDurationMinutes = 10,
-            preferredSessionDurationMinutes = 25,
-            customStudyBlocksJson = blocksJson.toString(),
-            mockTestLanguage = selectedLanguage,
-            defaultMockTestQuestionCount = 25,
+            preferredStudyStartTime = scheduleSlots.firstOrNull { it.isEnabled }?.startTime ?: "06:00 PM",
             preferredStudyTime = selectedTimingPreset,
-            weakSubjects = highPriority,
-            weakTopics = emptyList(),
-            dailyStudyGoal = if (studyGoalInput.isNotBlank()) studyGoalInput else "Complete ${dailyStudyHours.toInt()}h daily target across $selectedCourseOrExam",
-            shortTermGoal = "Master high-yield topics for $selectedCourseOrExam",
-            longTermGoal = if (studyGoalInput.isNotBlank()) studyGoalInput else "Excel in $selectedCourseOrExam",
-            notificationsEnabled = true,
+            subjects = if (selectedSubjects.isNotEmpty()) selectedSubjects.toList() else listOf("General Studies"),
+            highPrioritySubjects = highPriority.ifEmpty { selectedSubjects.take(2).toList() },
+            mediumPrioritySubjects = mediumPriority,
+            lowPrioritySubjects = lowPriority,
+            customStudyBlocksJson = slotsJsonArray.toString(),
+            dailyStudyGoal = if (studyGoalInput.isNotBlank()) studyGoalInput.trim() else "Master key chapters & complete daily practice targets",
             isOnboardingCompleted = true
         )
+    }
+
+    // Real Save Trigger
+    fun executeSave() {
+        isSaving = true
+        saveErrorMessage = null
+        saveAffectedFields = emptyList()
+
+        val profileToSave = buildFinalProfile()
+
+        if (onSaveProfile != null) {
+            onSaveProfile(profileToSave) { result ->
+                isSaving = false
+                result.onSuccess {
+                    saveSuccessConfirmed = true
+                    sharedPrefs.edit().clear().apply()
+                    onComplete(it)
+                }.onFailure { error ->
+                    saveErrorMessage = error.message ?: "Failed to save profile. Please verify your connection."
+                    val affected = mutableListOf<String>()
+                    if (nameInput.isBlank()) affected.add("Preferred Name")
+                    if (isCustomExam && customExamNameInput.isBlank()) affected.add("Custom Exam Title")
+                    if (selectedSubjects.isEmpty()) affected.add("Subjects Selection")
+                    saveAffectedFields = if (affected.isNotEmpty()) affected else listOf("Profile Details", "Database Storage")
+                    DiagnosticLogger.logError(
+                        category = DiagnosticCategory.ONBOARDING_SAVE_ERROR,
+                        operation = "OnboardingScreenSave",
+                        resource = "UserProfile",
+                        affectedFields = saveAffectedFields,
+                        errorMessage = saveErrorMessage ?: "Save failed"
+                    )
+                }
+            }
+        } else {
+            // Standard fallback
+            sharedPrefs.edit().clear().apply()
+            isSaving = false
+            saveSuccessConfirmed = true
+            onComplete(profileToSave)
+        }
     }
 
     Box(
@@ -251,9 +365,7 @@ fun OnboardingScreen(
                             if (step > 1) {
                                 step--
                             } else {
-                                // Save profile and finish
-                                sharedPrefs.edit().clear().apply()
-                                onComplete(buildFinalProfile())
+                                executeSave()
                             }
                         },
                         modifier = Modifier.size(36.dp)
@@ -296,6 +408,88 @@ fun OnboardingScreen(
                     )
                 }
 
+                // In-Place Save Error Card on Current Step
+                AnimatedVisibility(
+                    visible = !saveErrorMessage.isNullOrBlank(),
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp)
+                            .testTag("onboarding_save_error_card"),
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFF2D1217),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, CoralRose.copy(alpha = 0.7f))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.ErrorOutline,
+                                    contentDescription = "Save Error",
+                                    tint = CoralRose,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = "Couldn't Save Study Routine",
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                )
+                            }
+
+                            Text(
+                                text = saveErrorMessage ?: "An error occurred while saving your academic plan to the local database.",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = Color(0xFFFCA5A5),
+                                    lineHeight = 18.sp
+                                )
+                            )
+
+                            if (saveAffectedFields.isNotEmpty()) {
+                                Text(
+                                    text = "Affected Areas: " + saveAffectedFields.joinToString(", "),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = Color(0xFF94A3B8),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                Button(
+                                    onClick = { executeSave() },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = CoralRose,
+                                        contentColor = Color.White
+                                    ),
+                                    modifier = Modifier.height(36.dp).testTag("onboarding_retry_save_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Retry Save", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Dynamic Step Content
                 AnimatedContent(
                     targetState = step,
@@ -326,6 +520,12 @@ fun OnboardingScreen(
                             onAcademicLevelSelect = { selectedAcademicLevel = it },
                             selectedCourseOrExam = selectedCourseOrExam,
                             onOpenCoursePicker = { showCoursePicker = true },
+                            isCustomExam = isCustomExam,
+                            onToggleCustomExam = { isCustomExam = it },
+                            customExamNameInput = customExamNameInput,
+                            onCustomExamNameChange = { customExamNameInput = it },
+                            customExamAuthorityInput = customExamAuthorityInput,
+                            onCustomExamAuthorityChange = { customExamAuthorityInput = it },
                             studyGoalInput = studyGoalInput,
                             onStudyGoalChange = { studyGoalInput = it }
                         )
@@ -336,11 +536,29 @@ fun OnboardingScreen(
                             selectedTimingPreset = selectedTimingPreset,
                             onTimingPresetSelect = { selectedTimingPreset = it },
                             examDaysAhead = examDaysAhead,
-                            onExamDaysChange = { examDaysAhead = it }
+                            onExamDaysChange = { examDaysAhead = it },
+                            scheduleSlots = scheduleSlots,
+                            onToggleSlot = { id, enabled ->
+                                scheduleSlots = scheduleSlots.map { if (it.id == id) it.copy(isEnabled = enabled) else it }
+                            },
+                            onUpdateSlotDuration = { id, duration ->
+                                scheduleSlots = scheduleSlots.map { if (it.id == id) it.copy(durationMinutes = duration) else it }
+                            },
+                            onAddCustomSlot = { title, time, duration, breakMins ->
+                                scheduleSlots = scheduleSlots + OnboardingScheduleSlot(
+                                    title = title,
+                                    iconName = "custom",
+                                    startTime = time,
+                                    durationMinutes = duration,
+                                    breakMinutes = breakMins,
+                                    isEnabled = true
+                                )
+                            }
                         )
 
                         3 -> Step3PrioritiesView(
-                            selectedCourse = selectedCourseOrExam,
+                            selectedCourse = activeExamName,
+                            isCustomExam = isCustomExam,
                             availableSubjects = availableSubjects,
                             selectedSubjects = selectedSubjects,
                             onToggleSubject = { sub ->
@@ -353,6 +571,22 @@ fun OnboardingScreen(
                             subjectPriorityMap = subjectPriorityMap,
                             onPriorityChange = { sub, prio ->
                                 subjectPriorityMap = subjectPriorityMap + (sub to prio)
+                            },
+                            onAddCustomSubject = { newSub ->
+                                if (newSub.isNotBlank() && !customSubjectsList.contains(newSub.trim())) {
+                                    val updated = customSubjectsList + newSub.trim()
+                                    customSubjectsList = updated
+                                    selectedSubjects = selectedSubjects + newSub.trim()
+                                    subjectPriorityMap = subjectPriorityMap + (newSub.trim() to "HIGH")
+                                    sharedPrefs.edit().putStringSet("draft_custom_subjects", updated.toSet()).apply()
+                                }
+                            },
+                            onRemoveCustomSubject = { sub ->
+                                val updated = customSubjectsList - sub
+                                customSubjectsList = updated
+                                selectedSubjects = selectedSubjects - sub
+                                subjectPriorityMap = subjectPriorityMap - sub
+                                sharedPrefs.edit().putStringSet("draft_custom_subjects", updated.toSet()).apply()
                             },
                             dailyHours = dailyStudyHours
                         )
@@ -373,10 +607,10 @@ fun OnboardingScreen(
                             step++
                             sharedPrefs.edit().putInt("draft_step", step).apply()
                         } else {
-                            sharedPrefs.edit().clear().apply()
-                            onComplete(buildFinalProfile())
+                            executeSave()
                         }
                     },
+                    enabled = !isSaving,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(54.dp)
@@ -387,23 +621,36 @@ fun OnboardingScreen(
                         contentColor = Color(0xFF050B14)
                     )
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
+                    if (isSaving) {
+                        CircularProgressIndicator(
+                            color = Color(0xFF050B14),
+                            modifier = Modifier.size(22.dp),
+                            strokeWidth = 2.5.dp
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = if (step < totalSteps) "Next Step" else "Complete Setup & Launch StudyMate",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp
+                            text = "Saving to Database...",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        )
+                    } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = if (step < totalSteps) "Next Step" else "Complete Setup & Launch StudyMate",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                )
                             )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
 
@@ -411,9 +658,9 @@ fun OnboardingScreen(
 
                 TextButton(
                     onClick = {
-                        sharedPrefs.edit().clear().apply()
-                        onComplete(buildFinalProfile())
+                        executeSave()
                     },
+                    enabled = !isSaving,
                     modifier = Modifier.testTag("onboarding_complete_later_btn")
                 ) {
                     Text(
@@ -429,7 +676,7 @@ fun OnboardingScreen(
             }
         }
 
-        // Course / Exam Dialog Picker
+        // Course / Exam Dialog Picker with Custom Exam option
         if (showCoursePicker) {
             AlertDialog(
                 onDismissRequest = { showCoursePicker = false },
@@ -445,17 +692,24 @@ fun OnboardingScreen(
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 350.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                            .heightIn(max = 380.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(popularCoursesAndExams) { course ->
-                            val isSelected = selectedCourseOrExam == course
+                            val isThisCustom = course.startsWith("Custom Exam")
+                            val isSelected = if (isThisCustom) isCustomExam else (selectedCourseOrExam == course && !isCustomExam)
+
                             Surface(
                                 onClick = {
-                                    selectedCourseOrExam = course
+                                    if (isThisCustom) {
+                                        isCustomExam = true
+                                    } else {
+                                        isCustomExam = false
+                                        selectedCourseOrExam = course
+                                    }
                                     showCoursePicker = false
                                 },
-                                shape = RoundedCornerShape(10.dp),
+                                shape = RoundedCornerShape(12.dp),
                                 color = if (isSelected) Color(0xFF163244) else Color(0xFF18233C),
                                 border = androidx.compose.foundation.BorderStroke(
                                     width = 1.dp,
@@ -464,17 +718,29 @@ fun OnboardingScreen(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text(
-                                        text = course,
-                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                            color = if (isSelected) NeonCyan else Color.White,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isThisCustom) Icons.Outlined.EditCalendar else Icons.Outlined.School,
+                                            contentDescription = null,
+                                            tint = if (isSelected) NeonCyan else Color(0xFF94A3B8),
+                                            modifier = Modifier.size(20.dp)
                                         )
-                                    )
+                                        Text(
+                                            text = course,
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                color = if (isSelected) NeonCyan else Color.White,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        )
+                                    }
                                     if (isSelected) {
                                         Icon(
                                             imageVector = Icons.Default.Check,
@@ -499,7 +765,7 @@ fun OnboardingScreen(
 }
 
 /**
- * Step 1 View: Matches Screenshot 2 Reference ("Tell us about your studies")
+ * Step 1 View: Matches Screenshot 2 Reference ("Tell us about your studies") + Custom Exam Option
  */
 @Composable
 private fun Step1StudiesView(
@@ -512,6 +778,12 @@ private fun Step1StudiesView(
     onAcademicLevelSelect: (String) -> Unit,
     selectedCourseOrExam: String,
     onOpenCoursePicker: () -> Unit,
+    isCustomExam: Boolean,
+    onToggleCustomExam: (Boolean) -> Unit,
+    customExamNameInput: String,
+    onCustomExamNameChange: (String) -> Unit,
+    customExamAuthorityInput: String,
+    onCustomExamAuthorityChange: (String) -> Unit,
     studyGoalInput: String,
     onStudyGoalChange: (String) -> Unit
 ) {
@@ -725,7 +997,7 @@ private fun Step1StudiesView(
                 // 4. CLASS / COURSE / EXAM PREP
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "CLASS / COURSE / EXAM PREP",
+                        text = "TARGET EXAM / SYLLABUS",
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp,
@@ -754,13 +1026,13 @@ private fun Step1StudiesView(
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Outlined.School,
+                                    imageVector = if (isCustomExam) Icons.Outlined.EditNote else Icons.Outlined.School,
                                     contentDescription = null,
                                     tint = NeonCyan,
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Text(
-                                    text = selectedCourseOrExam,
+                                    text = if (isCustomExam) "Custom Exam (${customExamNameInput.ifBlank { "Unspecified" }})" else selectedCourseOrExam,
                                     style = MaterialTheme.typography.bodyMedium.copy(
                                         color = Color.White,
                                         fontWeight = FontWeight.Medium,
@@ -776,6 +1048,27 @@ private fun Step1StudiesView(
                                 modifier = Modifier.size(20.dp)
                             )
                         }
+                    }
+
+                    // If Custom Exam is active, render custom fields
+                    if (isCustomExam) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        OutlinedTextField(
+                            value = customExamNameInput,
+                            onValueChange = onCustomExamNameChange,
+                            placeholder = { Text("Enter Exam Name (e.g. GATE CS, UGC NET)", color = Color(0xFF64748B), fontSize = 13.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("onboarding_custom_exam_name_input"),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color(0xFF162238),
+                                unfocusedContainerColor = Color(0xFF162238),
+                                focusedBorderColor = NeonCyan,
+                                unfocusedBorderColor = Color(0xFF1E2D4D),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            )
+                        )
                     }
                 }
 
@@ -816,7 +1109,7 @@ private fun Step1StudiesView(
                         value = studyGoalInput,
                         onValueChange = onStudyGoalChange,
                         placeholder = {
-                            Text("e.g. Score 90% in Finals", color = Color(0xFF64748B), fontSize = 14.sp)
+                            Text("e.g. Score Top 100 Rank in Finals", color = Color(0xFF64748B), fontSize = 14.sp)
                         },
                         leadingIcon = {
                             Icon(
@@ -890,7 +1183,7 @@ private fun AcademicLevelChip(
 }
 
 /**
- * Step 2: Target Exam & Routine
+ * Step 2: Target Routine & Fully Customizable Study Schedule
  */
 @Composable
 private fun Step2TargetRoutineView(
@@ -899,7 +1192,11 @@ private fun Step2TargetRoutineView(
     selectedTimingPreset: String,
     onTimingPresetSelect: (String) -> Unit,
     examDaysAhead: Float,
-    onExamDaysChange: (Float) -> Unit
+    onExamDaysChange: (Float) -> Unit,
+    scheduleSlots: List<OnboardingScheduleSlot>,
+    onToggleSlot: (id: String, enabled: Boolean) -> Unit,
+    onUpdateSlotDuration: (id: String, duration: Int) -> Unit,
+    onAddCustomSlot: (title: String, time: String, duration: Int, breakMins: Int) -> Unit
 ) {
     val timingOptions = listOf(
         "Morning (06:00 AM – 10:00 AM)",
@@ -909,6 +1206,7 @@ private fun Step2TargetRoutineView(
     )
 
     val hourPresets = listOf(2.0f, 3.0f, 4.0f, 6.0f, 8.0f)
+    var showAddSlotDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier.fillMaxWidth()
@@ -925,7 +1223,7 @@ private fun Step2TargetRoutineView(
         Spacer(modifier = Modifier.height(6.dp))
 
         Text(
-            text = "Set your daily focus commitment and preferred study window.",
+            text = "Configure your daily study commitments and active time windows.",
             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
             color = Color(0xFF94A3B8)
         )
@@ -940,13 +1238,14 @@ private fun Step2TargetRoutineView(
         ) {
             Column(
                 modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                // Daily Study Target
+                // Daily Study Target Hours Stepper
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = "DAILY STUDY COMMITMENT",
@@ -987,60 +1286,209 @@ private fun Step2TargetRoutineView(
 
                 HorizontalDivider(color = Color(0xFF1E2D4D))
 
-                // Preferred Study Window
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "PREFERRED STUDY WINDOW",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
-                        color = Color(0xFF94A3B8)
-                    )
+                // Customizable Study Schedule Slots
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "CUSTOMIZABLE STUDY SLOTS",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
+                            color = Color(0xFF94A3B8)
+                        )
 
-                    timingOptions.forEach { timing ->
-                        val isSelected = selectedTimingPreset == timing
+                        TextButton(
+                            onClick = { showAddSlotDialog = true },
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Add Slot", style = MaterialTheme.typography.labelSmall.copy(color = NeonCyan, fontWeight = FontWeight.Bold))
+                        }
+                    }
+
+                    scheduleSlots.forEach { slot ->
                         Surface(
-                            onClick = { onTimingPresetSelect(timing) },
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (isSelected) Color(0xFF0E2A38) else Color(0xFF162238),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) NeonCyan else Color(0xFF1E2D4D)),
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (slot.isEnabled) Color(0xFF162238) else Color(0xFF111827),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (slot.isEnabled) NeonCyan.copy(alpha = 0.4f) else Color(0xFF1E2D4D)
+                            ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text(
-                                    text = timing,
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        color = if (isSelected) Color.White else Color(0xFF94A3B8),
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(
+                                            imageVector = when (slot.iconName) {
+                                                "morning" -> Icons.Outlined.WbSunny
+                                                "afternoon" -> Icons.Outlined.LightMode
+                                                "evening" -> Icons.Outlined.WbTwilight
+                                                "night" -> Icons.Outlined.Bedtime
+                                                else -> Icons.Outlined.AccessTime
+                                            },
+                                            contentDescription = null,
+                                            tint = if (slot.isEnabled) NeonCyan else Color(0xFF64748B),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Column {
+                                            Text(
+                                                text = slot.title,
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (slot.isEnabled) Color.White else Color(0xFF64748B)
+                                                )
+                                            )
+                                            Text(
+                                                text = "${slot.startTime} • ${slot.durationMinutes}m focus (${slot.breakMinutes}m break)",
+                                                style = MaterialTheme.typography.labelSmall.copy(color = Color(0xFF94A3B8), fontSize = 11.sp)
+                                            )
+                                        }
+                                    }
+
+                                    Switch(
+                                        checked = slot.isEnabled,
+                                        onCheckedChange = { onToggleSlot(slot.id, it) },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color(0xFF050B14),
+                                            checkedTrackColor = NeonCyan,
+                                            uncheckedThumbColor = Color(0xFF64748B),
+                                            uncheckedTrackColor = Color(0xFF1E2D4D)
+                                        )
                                     )
-                                )
-                                if (isSelected) {
-                                    Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(16.dp))
                                 }
                             }
                         }
                     }
                 }
+
+                HorizontalDivider(color = Color(0xFF1E2D4D))
+
+                // Target Exam Countdown Days
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "TARGET EXAM TIMELINE",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
+                            color = Color(0xFF94A3B8)
+                        )
+                        Text(
+                            text = "${examDaysAhead.toInt()} Days Ahead",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = NeonCyan
+                        )
+                    }
+
+                    Slider(
+                        value = examDaysAhead,
+                        onValueChange = onExamDaysChange,
+                        valueRange = 15f..365f,
+                        steps = 23,
+                        colors = SliderDefaults.colors(
+                            thumbColor = NeonCyan,
+                            activeTrackColor = NeonCyan,
+                            inactiveTrackColor = Color(0xFF1E2D4D)
+                        )
+                    )
+                }
             }
         }
+    }
+
+    if (showAddSlotDialog) {
+        var customTitle by remember { mutableStateOf("") }
+        var customTime by remember { mutableStateOf("07:00 PM") }
+        var customDuration by remember { mutableFloatStateOf(60f) }
+
+        AlertDialog(
+            onDismissRequest = { showAddSlotDialog = false },
+            containerColor = Color(0xFF111C33),
+            title = { Text("Add Custom Study Slot", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = customTitle,
+                        onValueChange = { customTitle = it },
+                        placeholder = { Text("Slot Title (e.g. Mock Test Revision)", color = Color(0xFF64748B), fontSize = 13.sp) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    OutlinedTextField(
+                        value = customTime,
+                        onValueChange = { customTime = it },
+                        placeholder = { Text("Start Time (e.g. 08:30 PM)", color = Color(0xFF64748B), fontSize = 13.sp) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    Text("Duration: ${customDuration.toInt()} Minutes", style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF94A3B8)))
+                    Slider(
+                        value = customDuration,
+                        onValueChange = { customDuration = it },
+                        valueRange = 20f..180f,
+                        steps = 7,
+                        colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (customTitle.isNotBlank()) {
+                            onAddCustomSlot(customTitle.trim(), customTime.trim(), customDuration.toInt(), 10)
+                            showAddSlotDialog = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color(0xFF050B14))
+                ) {
+                    Text("Add Slot", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddSlotDialog = false }) {
+                    Text("Cancel", color = Color(0xFF94A3B8))
+                }
+            }
+        )
     }
 }
 
 /**
- * Step 3: Priorities & Launch
+ * Step 3: Priorities & Launch (Supports Standard & Custom Exams)
  */
 @Composable
 private fun Step3PrioritiesView(
     selectedCourse: String,
+    isCustomExam: Boolean,
     availableSubjects: List<String>,
     selectedSubjects: Set<String>,
     onToggleSubject: (String) -> Unit,
     subjectPriorityMap: Map<String, String>,
     onPriorityChange: (String, String) -> Unit,
+    onAddCustomSubject: (String) -> Unit,
+    onRemoveCustomSubject: (String) -> Unit,
     dailyHours: Float
 ) {
+    var newSubjectInput by remember { mutableStateOf("") }
+
     Column(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -1056,7 +1504,7 @@ private fun Step3PrioritiesView(
         Spacer(modifier = Modifier.height(6.dp))
 
         Text(
-            text = "Select high-priority subjects for your AI roadmap in $selectedCourse.",
+            text = if (isCustomExam) "Add and customize subjects for $selectedCourse." else "Select focus subjects for your AI roadmap in $selectedCourse.",
             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
             color = Color(0xFF94A3B8)
         )
@@ -1073,6 +1521,45 @@ private fun Step3PrioritiesView(
                 modifier = Modifier.padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                // If custom exam, allow adding custom subjects
+                if (isCustomExam) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = newSubjectInput,
+                            onValueChange = { newSubjectInput = it },
+                            placeholder = { Text("Add New Subject...", color = Color(0xFF64748B), fontSize = 13.sp) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color(0xFF162238),
+                                unfocusedContainerColor = Color(0xFF162238),
+                                focusedBorderColor = NeonCyan,
+                                unfocusedBorderColor = Color(0xFF1E2D4D),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            )
+                        )
+                        Button(
+                            onClick = {
+                                if (newSubjectInput.isNotBlank()) {
+                                    onAddCustomSubject(newSubjectInput.trim())
+                                    newSubjectInput = ""
+                                }
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color(0xFF050B14)),
+                            modifier = Modifier.height(50.dp)
+                        ) {
+                            Text("Add", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
                 availableSubjects.forEach { sub ->
                     val isIncluded = selectedSubjects.contains(sub)
                     val currentPriority = subjectPriorityMap[sub] ?: "HIGH"
@@ -1097,7 +1584,8 @@ private fun Step3PrioritiesView(
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f)
                                 ) {
                                     Checkbox(
                                         checked = isIncluded,
@@ -1114,6 +1602,20 @@ private fun Step3PrioritiesView(
                                             color = Color.White
                                         )
                                     )
+                                }
+
+                                if (isCustomExam && availableSubjects.size > 1) {
+                                    IconButton(
+                                        onClick = { onRemoveCustomSubject(sub) },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.DeleteOutline,
+                                            contentDescription = "Remove",
+                                            tint = CoralRose,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                 }
                             }
 
