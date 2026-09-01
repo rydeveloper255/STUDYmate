@@ -487,3 +487,154 @@ fun StudyMateBrandLogo(
         }
     }
 }
+
+/**
+ * Compact, high-contrast StudyMate App Emblem Card
+ * Matches the glowing rounded card emblem in Screenshot 1.
+ */
+@Composable
+fun StudyMateAppCardEmblem(
+    modifier: Modifier = Modifier,
+    size: Dp = 80.dp
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "emblem_glow")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.5f,
+        targetValue = 0.95f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse_alpha"
+    )
+
+    Box(
+        modifier = modifier
+            .size(size)
+            .shadow(
+                elevation = 16.dp,
+                shape = RoundedCornerShape(22.dp),
+                spotColor = NeonCyan.copy(alpha = 0.45f * pulseAlpha)
+            )
+            .clip(RoundedCornerShape(22.dp))
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFF142448),
+                        Color(0xFF0C1732),
+                        Color(0xFF070E20)
+                    )
+                )
+            )
+            .border(
+                width = 1.5.dp,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        NeonCyan.copy(alpha = 0.8f * pulseAlpha),
+                        ElectricViolet.copy(alpha = 0.5f),
+                        Color(0x30FFFFFF)
+                    )
+                ),
+                shape = RoundedCornerShape(22.dp)
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        // Inner luminous white card badge with real StudyMate vector artwork
+        Surface(
+            modifier = Modifier
+                .size(size * 0.76f)
+                .clip(RoundedCornerShape(14.dp)),
+            color = Color.White,
+            shadowElevation = 4.dp
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Canvas(modifier = Modifier.fillMaxSize(0.88f)) {
+                    val w = this.size.width
+                    val h = this.size.height
+
+                    // 1. Open Book at bottom
+                    val bookY = h * 0.60f
+                    val bookPathLeft = Path().apply {
+                        moveTo(w * 0.50f, bookY + h * 0.10f)
+                        cubicTo(w * 0.38f, bookY - h * 0.05f, w * 0.20f, bookY - h * 0.03f, w * 0.08f, bookY + h * 0.06f)
+                        lineTo(w * 0.08f, bookY + h * 0.14f)
+                        cubicTo(w * 0.20f, bookY + h * 0.05f, w * 0.38f, bookY + h * 0.05f, w * 0.50f, bookY + h * 0.18f)
+                        close()
+                    }
+                    drawPath(
+                        bookPathLeft,
+                        brush = Brush.verticalGradient(listOf(Color(0xFF0284C7), Color(0xFF0369A1)))
+                    )
+
+                    val bookPathRight = Path().apply {
+                        moveTo(w * 0.50f, bookY + h * 0.10f)
+                        cubicTo(w * 0.62f, bookY - h * 0.05f, w * 0.80f, bookY - h * 0.03f, w * 0.92f, bookY + h * 0.06f)
+                        lineTo(w * 0.92f, bookY + h * 0.14f)
+                        cubicTo(w * 0.80f, bookY + h * 0.05f, w * 0.62f, bookY + h * 0.05f, w * 0.50f, bookY + h * 0.18f)
+                        close()
+                    }
+                    drawPath(
+                        bookPathRight,
+                        brush = Brush.verticalGradient(listOf(Color(0xFF00B4D8), Color(0xFF0077B6)))
+                    )
+
+                    // 2. Central 3D stylized "S" knowledge icon
+                    val sPath = Path().apply {
+                        val sx = w * 0.50f
+                        val sy = h * 0.40f
+                        moveTo(sx + w * 0.14f, sy - h * 0.13f)
+                        cubicTo(sx + w * 0.14f, sy - h * 0.24f, sx - w * 0.16f, sy - h * 0.24f, sx - w * 0.16f, sy - h * 0.11f)
+                        cubicTo(sx - w * 0.16f, sy - h * 0.01f, sx + w * 0.16f, sy + h * 0.04f, sx + w * 0.16f, sy + h * 0.15f)
+                        cubicTo(sx + w * 0.16f, sy + h * 0.27f, sx - w * 0.17f, sy + h * 0.27f, sx - w * 0.17f, sy + h * 0.16f)
+                        lineTo(sx - w * 0.08f, sy + h * 0.16f)
+                        cubicTo(sx - w * 0.08f, sy + h * 0.21f, sx + w * 0.08f, sy + h * 0.21f, sx + w * 0.08f, sy + h * 0.15f)
+                        cubicTo(sx + w * 0.08f, sy + h * 0.06f, sx - w * 0.08f, sy + h * 0.01f, sx - w * 0.08f, sy - h * 0.11f)
+                        cubicTo(sx - w * 0.08f, sy - h * 0.17f, sx + w * 0.08f, sy - h * 0.17f, sx + w * 0.08f, sy - h * 0.13f)
+                        close()
+                    }
+                    drawPath(
+                        sPath,
+                        brush = Brush.linearGradient(listOf(Color(0xFF0284C7), Color(0xFF6366F1), Color(0xFF8B5CF6)))
+                    )
+
+                    // 3. Academic Graduation Cap
+                    val capY = h * 0.18f
+                    val capPath = Path().apply {
+                        moveTo(w * 0.50f, capY - h * 0.11f)
+                        lineTo(w * 0.82f, capY - h * 0.02f)
+                        lineTo(w * 0.50f, capY + h * 0.07f)
+                        lineTo(w * 0.18f, capY - h * 0.02f)
+                        close()
+                    }
+                    drawPath(capPath, color = Color(0xFF0F172A))
+                    drawPath(capPath, color = Color(0xFF00B4D8), style = Stroke(width = 1.2.dp.toPx()))
+
+                    // Golden Tassel
+                    val tassel = Path().apply {
+                        moveTo(w * 0.50f, capY - h * 0.04f)
+                        quadraticTo(w * 0.72f, capY - h * 0.01f, w * 0.78f, capY + h * 0.12f)
+                    }
+                    drawPath(tassel, color = Color(0xFFF59E0B), style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round))
+                    drawCircle(color = Color(0xFFF59E0B), radius = 2.dp.toPx(), center = Offset(w * 0.78f, capY + h * 0.12f))
+
+                    // Sparkle on top-right
+                    val sx = w * 0.84f
+                    val sy = h * 0.38f
+                    val sr = w * 0.06f
+                    val spk = Path().apply {
+                        moveTo(sx, sy - sr)
+                        quadraticTo(sx, sy, sx + sr, sy)
+                        quadraticTo(sx, sy, sx, sy + sr)
+                        quadraticTo(sx, sy, sx - sr, sy)
+                        quadraticTo(sx, sy, sx, sy - sr)
+                        close()
+                    }
+                    drawPath(spk, color = Color(0xFF00B4D8))
+                }
+            }
+        }
+    }
+}
