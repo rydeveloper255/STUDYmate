@@ -1,0 +1,19 @@
+{
+  "name": "StudyMate AI - Smart Exam Preparation & Tutor",
+  "short_name": "StudyMate AI",
+  "description": "AI-powered personalized study coach, live PYQs, spaced repetition flashcards, and focus booster for Indian competitive exams.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070B19",
+  "theme_color": "#070B19",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512' fill='%230284c7'><rect width='512' height='512' rx='128' fill='%23070B19'/><path d='M256 120L64 216l192 96 144-72v120h32V216L256 120zM104 278.4V348l152 76 152-76v-69.6L256 354.4l-152-76z' fill='%2338bdf8'/></svg>",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["education", "productivity"]
+}
