@@ -24,6 +24,7 @@ import {
   initialNotifications,
 } from './lib/mockData';
 import { triggerHaptic } from './lib/haptics';
+import { recoverDistractionShieldOnAppLaunch } from './lib/distractionShield';
 
 import { HeaderBar } from './components/HeaderBar';
 import { FloatingGlassNavBar, TabKey } from './components/FloatingGlassNavBar';
@@ -152,6 +153,11 @@ export function App() {
 
   // Nova prompt launcher
   const [novaInitialPrompt, setNovaInitialPrompt] = useState<string>('');
+
+  // Recover lingering Distraction Shield / DND state on app launch if process was killed
+  useEffect(() => {
+    recoverDistractionShieldOnAppLaunch();
+  }, []);
 
   // Handle Android hardware back-button navigation
   useEffect(() => {
@@ -531,6 +537,7 @@ export function App() {
 
               {activeTab === 'updates' && (
                 <UpdatesHubScreen
+                  user={user}
                   vacancies={vacancies}
                   bookmarkedIds={bookmarkedVacancyIds}
                   appliedIds={appliedVacancyIds}
@@ -545,6 +552,16 @@ export function App() {
                     setAppliedVacancyIds((prev) =>
                       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
                     );
+                  }}
+                  onSetTargetExam={(examTitle) => {
+                    setUser((prev) => ({ ...prev, targetExam: examTitle }));
+                  }}
+                  onAddPlanItem={(item) => {
+                    setStudyPlan((prev) => [item, ...prev]);
+                  }}
+                  onStartFocusSprint={(minutes, subject, topic) => {
+                    setActiveTab('focus');
+                    triggerHaptic('medium');
                   }}
                 />
               )}

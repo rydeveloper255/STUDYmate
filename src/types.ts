@@ -22,6 +22,18 @@ export interface ExamInfo {
   subjects: string[];
 }
 
+export interface DistractionShieldSettings {
+  enabled: boolean;
+  permissionGranted?: boolean;
+  autoRestore: boolean;
+  allowPriorityAlarms: boolean;
+  blockApps: boolean;
+  blockedApps: string[];
+  strictMode: boolean;
+  autoFocus: boolean;
+  autoFocusTime: string;
+}
+
 export interface UserProfile {
   id: string;
   name: string;
@@ -38,6 +50,7 @@ export interface UserProfile {
   soundEnabled: boolean;
   strictAppBlocker: boolean;
   theme: 'dark' | 'midnight' | 'amoled';
+  distractionShield?: DistractionShieldSettings;
 }
 
 export interface TopicItem {
@@ -177,11 +190,88 @@ export interface FocusSessionLog {
   topic: string;
   notes?: string;
   distractionAttemptsCount?: number;
+  distractionShieldActive?: boolean;
+  dndRestored?: boolean;
 }
 
 export type FocusSession = FocusSessionLog;
 
 export type UpdateCategory = 'VACANCY' | 'ADMIT_CARD' | 'RESULT' | 'ANSWER_KEY' | 'ADMISSION';
+
+export interface SarkariJob {
+  id: string;
+  title: string;
+  organization_name?: string;
+  department?: string;
+  category: string; // 'SSC' | 'Railway' | 'Police' | 'Banking' | 'UPSC' | etc.
+  total_vacancies: string | number;
+  last_date: string;
+  qualification: string;
+  apply_url: string;
+  notification_pdf_url?: string;
+  salary?: string;
+  salary_pay_scale?: string;
+  age_limit?: string;
+  exam_date?: string;
+  description?: string;
+  created_at?: string;
+}
+
+export interface SarkariAdmitCard {
+  id: string;
+  title: string;
+  exam_name?: string;
+  organization_name?: string;
+  release_date?: string;
+  exam_date?: string;
+  download_url?: string;
+  city_slip_url?: string;
+  status?: string;
+  created_at?: string;
+}
+
+export interface SarkariResult {
+  id: string;
+  title: string;
+  exam_name?: string;
+  organization_name?: string;
+  declared_date?: string;
+  result_url?: string;
+  cutoff_details?: string;
+  status?: string;
+  created_at?: string;
+}
+
+export interface SarkariRadarSyncStatus {
+  connected: boolean;
+  source: 'supabase' | 'render_api' | 'cached_local';
+  sourceLabel: string;
+  lastSyncTime: string;
+  jobsCount: number;
+  admitCardsCount: number;
+  resultsCount: number;
+  error?: string;
+}
+
+export interface TargetExamDailyRoutineItem {
+  dayNumber: number;
+  dayLabel: string;
+  focusSubject: string;
+  highYieldTopics: string[];
+  recommendedHours: number;
+  pomodoroSprints: number;
+  revisionAction: string;
+}
+
+export interface SarkariTargetExamPlan {
+  examTitle: string;
+  organization: string;
+  daysRemaining: number;
+  summaryQuote: string;
+  dailyRoutines: TargetExamDailyRoutineItem[];
+  weeklyMilestones: { week: number; focus: string; targetMockScore: string }[];
+  generalStrategy: string;
+}
 
 export interface VacancyItem {
   id: string;

@@ -480,37 +480,9 @@ object TelegramAdminBotManager {
     // =========================================================================
 
     private fun startAdminCommandPolling() {
-        if (isPollingActive.getAndSet(true)) return
-
-        scope.launch {
-            while (isActive) {
-                try {
-                    val service = telegramService
-                    val botToken = TelegramBotConfig.getBotToken()
-
-                    if (service != null && botToken != null) {
-                        val result = service.getUpdates(offset = lastUpdateOffset + 1, limit = 10)
-                        if (result.isSuccess) {
-                            val updates = result.getOrNull() ?: emptyList()
-                            for (update in updates) {
-                                if (update.updateId >= lastUpdateOffset) {
-                                    lastUpdateOffset = update.updateId
-                                }
-                                val incoming = update.message
-                                if (incoming?.text != null) {
-                                    handleIncomingMessage(incoming)
-                                } else if (update.callbackQuery != null) {
-                                    handleCallbackQuery(update.callbackQuery)
-                                }
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Admin command polling cycle failed: ${e.message}")
-                }
-                delay(12000) // Poll every 12 seconds safely
-            }
-        }
+        // Decommissioned: Centralized administration and scraping now handled by Render & Supabase
+        Log.i(TAG, "Local Telegram admin command polling decommissioned. Centralized on StudyMate Sarkari portal.")
+        return
     }
 
     private suspend fun handleCallbackQuery(cbQuery: TelegramCallbackQuery) {

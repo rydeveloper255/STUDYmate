@@ -363,95 +363,8 @@ export const SAMPLE_PYQ_QUESTIONS: Question[] = [
   }
 ];
 
-export const INITIAL_VACANCIES: VacancyItem[] = [
-  {
-    id: 'vac_upsc_2026',
-    title: 'Civil Services Examination (CSE) 2026',
-    organization: 'Union Public Service Commission (UPSC)',
-    category: 'VACANCY',
-    totalPosts: '1,056 Posts',
-    qualification: 'Graduation Degree in any discipline from a recognized University',
-    ageLimit: '21 to 32 Years (Relaxation as per norms)',
-    salary: 'Level 10 (₹56,100 to ₹1,77,500)',
-    applyStartDate: 'Feb 14, 2026',
-    lastDateToApply: 'March 05, 2026',
-    examDate: 'May 25, 2026',
-    isBookmarked: true,
-    isApplied: true,
-    eligibilitySnippet: 'Indian Citizen, Degree Holder. 6 attempts for General category.',
-    description: 'Premier recruitment for IAS, IPS, IFS, IRS and other Group A/B central services.',
-    importantDates: [
-      { label: 'Notification Released', date: 'Feb 14, 2026' },
-      { label: 'Last Date to Apply', date: 'March 05, 2026 (6:00 PM)' },
-      { label: 'Prelims Exam Date', date: 'May 25, 2026' },
-      { label: 'Mains Examination', date: 'Sept 19, 2026' }
-    ]
-  },
-  {
-    id: 'vac_ssc_cgl_2026',
-    title: 'Combined Graduate Level Examination (CGL) 2026',
-    organization: 'Staff Selection Commission (SSC)',
-    category: 'VACANCY',
-    totalPosts: '14,500+ Posts',
-    qualification: 'Bachelor\'s Degree in any stream',
-    ageLimit: '18 to 30/32 Years',
-    salary: 'Level 4 to Level 8 (₹25,500 to ₹1,51,100)',
-    applyStartDate: 'June 11, 2026',
-    lastDateToApply: 'July 10, 2026',
-    examDate: 'Sept 2026',
-    isBookmarked: true,
-    isApplied: false,
-    eligibilitySnippet: 'Assistant Section Officer, Inspector (Income Tax/GST), Sub-Inspector.',
-    description: 'Recruitment for Group B & C posts across various Central Ministries and Departments.',
-    importantDates: [
-      { label: 'Online Application Opens', date: 'June 11, 2026' },
-      { label: 'Application Deadline', date: 'July 10, 2026' },
-      { label: 'Tier 1 Computer Based Exam', date: 'Sept 2026' }
-    ]
-  },
-  {
-    id: 'vac_sbi_po_2026',
-    title: 'Probationary Officers (PO) Recruitment 2026',
-    organization: 'State Bank of India (SBI)',
-    category: 'VACANCY',
-    totalPosts: '2,000 Posts',
-    qualification: 'Graduate in any discipline',
-    ageLimit: '21 to 30 Years',
-    salary: 'Basic Pay ₹41,960 + 4 Advance Increments (CTC ~₹15-18 LPA)',
-    applyStartDate: 'Sept 01, 2026',
-    lastDateToApply: 'Sept 21, 2026',
-    examDate: 'Nov 2026',
-    isBookmarked: false,
-    isApplied: false,
-    eligibilitySnippet: 'Candidates in final year of graduation are also eligible to apply provisionally.',
-    description: 'Flagship banking officer recruitment with fast-track leadership promotions.',
-    importantDates: [
-      { label: 'Online Registration', date: 'Sept 01, 2026' },
-      { label: 'Prelims Call Letter', date: 'Oct 2026' },
-      { label: 'Phase 1 Online Exam', date: 'Nov 2026' }
-    ]
-  },
-  {
-    id: 'admit_upsc_2026',
-    title: 'UPSC CSE Prelims 2026 e-Admit Card Released',
-    organization: 'Union Public Service Commission',
-    category: 'ADMIT_CARD',
-    totalPosts: 'Direct Download',
-    qualification: 'Registered Candidates',
-    ageLimit: 'N/A',
-    salary: 'N/A',
-    applyStartDate: 'May 05, 2026',
-    lastDateToApply: 'May 25, 2026',
-    isBookmarked: false,
-    isApplied: false,
-    eligibilitySnippet: 'Download hall ticket with Registration ID or Roll Number.',
-    description: 'Verify exam centre coordinates, roll number, session timings (Paper 1: 9:30 AM, CSAT: 2:30 PM).',
-    importantDates: [
-      { label: 'Admit Card Live', date: 'May 05, 2026' },
-      { label: 'Exam Date', date: 'May 25, 2026' }
-    ]
-  }
-];
+// Live government vacancies are dynamically queried from the shared Supabase database & Render backend.
+export const INITIAL_VACANCIES: VacancyItem[] = [];
 
 export const INITIAL_NOTIFICATIONS: AppNotification[] = [
   {
@@ -499,6 +412,17 @@ export const initialUserProfile: UserProfile = {
   soundEnabled: true,
   strictAppBlocker: true,
   theme: 'midnight',
+  distractionShield: {
+    enabled: false,
+    permissionGranted: false,
+    autoRestore: true,
+    allowPriorityAlarms: true,
+    blockApps: true,
+    blockedApps: ['com.instagram.android', 'com.google.android.youtube', 'com.twitter.android', 'com.pubg.imobile'],
+    strictMode: false,
+    autoFocus: false,
+    autoFocusTime: '09:00',
+  },
 };
 
 // Aliases for seamless imports across components

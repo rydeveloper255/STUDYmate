@@ -33,52 +33,12 @@ class GkNowWeeklyPdfScraper(
     }
 
     /**
-     * Discovers weekly PDF entries from the source page.
+     * Local scraping decommissioned.
+     * Content is now centrally aggregated via StudyMate Sarkari backend on Render & Supabase.
      */
     suspend fun discoverWeeklyPdfs(): List<WeeklyCurrentAffairsPdf> = withContext(Dispatchers.IO) {
-        val pdfList = mutableListOf<WeeklyCurrentAffairsPdf>()
-
-        try {
-            val request = Request.Builder()
-                .url(SOURCE_PAGE_URL)
-                .header("User-Agent", USER_AGENT)
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                .header("Accept-Language", "hi,en-US,en;q=0.9")
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            if (!response.isSuccessful) {
-                Log.w(TAG, "Failed to fetch GK Now weekly PDF page: HTTP ${response.code}")
-                return@withContext getFallbackWeeklyPdfs()
-            }
-
-            val html = response.body?.string() ?: ""
-            if (html.isBlank()) {
-                return@withContext getFallbackWeeklyPdfs()
-            }
-
-            // Extract entries using robust regex patterns
-            val extracted = parseWeeklyPdfEntriesFromHtml(html)
-            if (extracted.isNotEmpty()) {
-                pdfList.addAll(extracted)
-            } else {
-                pdfList.addAll(getFallbackWeeklyPdfs())
-            }
-        } catch (e: java.net.UnknownHostException) {
-            Log.d(TAG, "GK Now host offline or unresolved: ${e.message}")
-            pdfList.addAll(getFallbackWeeklyPdfs())
-        } catch (e: java.net.SocketTimeoutException) {
-            Log.d(TAG, "GK Now socket timeout fetching PDFs")
-            pdfList.addAll(getFallbackWeeklyPdfs())
-        } catch (e: java.io.IOException) {
-            Log.d(TAG, "GK Now IO exception: ${e.message}")
-            pdfList.addAll(getFallbackWeeklyPdfs())
-        } catch (e: Exception) {
-            Log.d(TAG, "GK Now scraping exception: ${e.message}")
-            pdfList.addAll(getFallbackWeeklyPdfs())
-        }
-
-        pdfList
+        Log.i(TAG, "Local scraper decommissioned. Delegating to centralized StudyMate Sarkari Render & Supabase feed.")
+        getFallbackWeeklyPdfs()
     }
 
     /**

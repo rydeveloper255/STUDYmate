@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, Bot, BookOpen, Target, Shield, BellRing } from 'lucide-react';
+import { Home, Bot, BookOpen, Target, Shield, Radio } from 'lucide-react';
 
 export type TabKey = 'home' | 'nova' | 'study' | 'practice' | 'focus' | 'updates';
 
@@ -20,7 +20,7 @@ export const FloatingGlassNavBar: React.FC<FloatingGlassNavBarProps> = ({
     { key: 'study', label: 'Study Hub', icon: BookOpen },
     { key: 'practice', label: 'Practice', icon: Target },
     { key: 'focus', label: 'Focus Shield', icon: Shield },
-    { key: 'updates', label: 'Updates', icon: BellRing },
+    { key: 'updates', label: 'Sarkari Radar', icon: Radio },
   ];
 
   return (
