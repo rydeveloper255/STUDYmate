@@ -769,6 +769,97 @@ const SARKARI_FALLBACK_RESULTS = [
   }
 ];
 
+const SARKARI_FALLBACK_ANSWER_KEYS = [
+  {
+    id: 'ak_ssc_cgl_tier1',
+    title: 'SSC CGL 2026 Tier 1 Tentative Answer Key & Response Sheet',
+    exam_name: 'SSC CGL Tier 1',
+    organization_name: 'Staff Selection Commission (SSC)',
+    release_date: 'Available Now',
+    objection_last_date: '2026-09-12',
+    answer_key_url: 'https://ssc.gov.in',
+    status: 'RELEASED',
+    description: 'Candidates can inspect their computer-based answer sheet and submit challenges @ ₹100 per question.',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'ak_rrb_ntpc_cbt1',
+    title: 'RRB NTPC CEN 06/2026 CBT-1 Master Answer Key & Question Paper',
+    exam_name: 'RRB NTPC CBT 1',
+    organization_name: 'Railway Recruitment Boards',
+    release_date: 'Live on Portal',
+    objection_last_date: '2026-09-18',
+    answer_key_url: 'https://www.rrbapply.gov.in',
+    status: 'RELEASED',
+    description: 'Official answer keys released across 21 RRBs with objection filing facility.',
+    created_at: new Date().toISOString(),
+  }
+];
+
+const SARKARI_FALLBACK_NOTIFICATIONS = [
+  {
+    id: 'notif_ssc_calendar_2026',
+    title: 'SSC Annual Exam Calendar 2026-27 (CGL, CHSL, MTS, GD, CPO Revised Dates)',
+    organization_name: 'Staff Selection Commission',
+    scope: 'CENTRAL',
+    notification_type: 'IMPORTANT',
+    notification_date: '2026-09-01',
+    official_url: 'https://ssc.gov.in',
+    description: 'Complete scheduled examination timeline for 2026-2027 recruitments released officially.',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'notif_rrb_corrigendum',
+    title: 'Railway Recruitment Boards CEN Corrigendum on EWS/OBC Age Relaxation',
+    organization_name: 'Ministry of Railways',
+    scope: 'CENTRAL',
+    notification_type: 'CORRECTION',
+    notification_date: '2026-08-28',
+    official_url: 'https://indianrailways.gov.in',
+    description: 'Age relaxation guidelines revised for COVID-affected candidates across technical and non-technical cadres.',
+    created_at: new Date().toISOString(),
+  }
+];
+
+const SARKARI_FALLBACK_LATEST_UPDATES = [
+  {
+    id: 'upd_1',
+    title: 'SSC CGL 2026 Online Application Window Active (14,800+ Vacancies)',
+    category: 'JOB',
+    scope: 'CENTRAL',
+    short_description: 'Last date to apply online is approaching. Register now on ssc.gov.in.',
+    published_at: new Date().toISOString(),
+    source_url: 'https://ssc.gov.in',
+  },
+  {
+    id: 'upd_2',
+    title: 'RRB Assistant Loco Pilot (ALP) CBT-1 Exam City Slips Released',
+    category: 'ADMIT_CARD',
+    scope: 'CENTRAL',
+    short_description: 'Check your exam city, date, and download travel pass if eligible.',
+    published_at: new Date().toISOString(),
+    source_url: 'https://www.rrbapply.gov.in',
+  },
+  {
+    id: 'upd_3',
+    title: 'UPSC Civil Services Prelims 2026 Official Result Declared',
+    category: 'RESULT',
+    scope: 'CENTRAL',
+    short_description: 'Roll number wise qualified list for Civil Services Mains available on upsc.gov.in.',
+    published_at: new Date().toISOString(),
+    source_url: 'https://upsc.gov.in',
+  },
+  {
+    id: 'upd_4',
+    title: 'SSC CHSL 10+2 Tier 1 Provisional Answer Key & Objection Tracker Live',
+    category: 'ANSWER_KEY',
+    scope: 'CENTRAL',
+    short_description: 'Candidates can challenge official answer keys online.',
+    published_at: new Date().toISOString(),
+    source_url: 'https://ssc.gov.in',
+  }
+];
+
 // 1. Live Feed Proxy from Render / Supabase
 app.get('/api/sarkari/live-feed', async (req, res) => {
   try {
@@ -782,7 +873,16 @@ app.get('/api/sarkari/live-feed', async (req, res) => {
 
     if (response && response.ok) {
       const data = await response.json();
-      return res.json(data);
+      return res.json({
+        status: 'success',
+        source: 'render_api',
+        jobs: data.jobs || SARKARI_FALLBACK_JOBS,
+        admitCards: data.admitCards || data.admit_cards || SARKARI_FALLBACK_ADMIT_CARDS,
+        results: data.results || SARKARI_FALLBACK_RESULTS,
+        answerKeys: data.answerKeys || data.answer_keys || SARKARI_FALLBACK_ANSWER_KEYS,
+        notifications: data.notifications || SARKARI_FALLBACK_NOTIFICATIONS,
+        latestUpdates: data.latestUpdates || data.latest_updates || SARKARI_FALLBACK_LATEST_UPDATES,
+      });
     }
 
     res.json({
@@ -791,6 +891,9 @@ app.get('/api/sarkari/live-feed', async (req, res) => {
       jobs: SARKARI_FALLBACK_JOBS,
       admitCards: SARKARI_FALLBACK_ADMIT_CARDS,
       results: SARKARI_FALLBACK_RESULTS,
+      answerKeys: SARKARI_FALLBACK_ANSWER_KEYS,
+      notifications: SARKARI_FALLBACK_NOTIFICATIONS,
+      latestUpdates: SARKARI_FALLBACK_LATEST_UPDATES,
     });
   } catch (err: any) {
     res.json({
@@ -798,6 +901,9 @@ app.get('/api/sarkari/live-feed', async (req, res) => {
       jobs: SARKARI_FALLBACK_JOBS,
       admitCards: SARKARI_FALLBACK_ADMIT_CARDS,
       results: SARKARI_FALLBACK_RESULTS,
+      answerKeys: SARKARI_FALLBACK_ANSWER_KEYS,
+      notifications: SARKARI_FALLBACK_NOTIFICATIONS,
+      latestUpdates: SARKARI_FALLBACK_LATEST_UPDATES,
     });
   }
 });

@@ -201,44 +201,140 @@ export type UpdateCategory = 'VACANCY' | 'ADMIT_CARD' | 'RESULT' | 'ANSWER_KEY' 
 export interface SarkariJob {
   id: string;
   title: string;
+  slug?: string;
   organization_name?: string;
+  organization_short_name?: string;
   department?: string;
+  state_name?: string;
+  state_code?: string;
+  scope?: 'CENTRAL' | 'STATE' | string;
   category: string; // 'SSC' | 'Railway' | 'Police' | 'Banking' | 'UPSC' | etc.
+  advertisement_no?: string;
   total_vacancies: string | number;
-  last_date: string;
   qualification: string;
-  apply_url: string;
-  notification_pdf_url?: string;
+  age_limit?: string;
+  application_fee?: string;
   salary?: string;
   salary_pay_scale?: string;
-  age_limit?: string;
+  selection_process?: string;
+  application_start_date?: string;
+  application_last_date?: string;
+  last_date: string;
   exam_date?: string;
   description?: string;
+  notification_url?: string;
+  notification_pdf_url?: string;
+  syllabus_url?: string;
+  apply_url: string;
+  official_website?: string;
+  source_url?: string;
+  status?: string;
+  is_featured?: boolean;
+  is_trending?: boolean;
+  views_count?: number;
+  is_active?: boolean;
   created_at?: string;
 }
 
 export interface SarkariAdmitCard {
   id: string;
+  job_id?: string | number;
   title: string;
   exam_name?: string;
   organization_name?: string;
+  scope?: string;
+  advertisement_no?: string;
   release_date?: string;
+  admit_card_release_date?: string;
   exam_date?: string;
   download_url?: string;
   city_slip_url?: string;
+  instructions_url?: string;
+  official_website?: string;
+  source_url?: string;
+  description?: string;
   status?: string;
+  is_active?: boolean;
   created_at?: string;
 }
 
 export interface SarkariResult {
   id: string;
+  job_id?: string | number;
   title: string;
   exam_name?: string;
   organization_name?: string;
+  scope?: string;
+  advertisement_no?: string;
+  exam_date?: string;
   declared_date?: string;
+  result_date?: string;
   result_url?: string;
+  merit_list_url?: string;
+  cutoff_url?: string;
   cutoff_details?: string;
+  official_website?: string;
+  source_url?: string;
+  description?: string;
   status?: string;
+  is_active?: boolean;
+  created_at?: string;
+}
+
+export interface SarkariAnswerKey {
+  id: string;
+  job_id?: string | number;
+  title: string;
+  organization_name?: string;
+  scope?: string;
+  advertisement_no?: string;
+  exam_name?: string;
+  exam_date?: string;
+  release_date?: string;
+  objection_start_date?: string;
+  objection_last_date?: string;
+  description?: string;
+  answer_key_url?: string;
+  objection_url?: string;
+  official_website?: string;
+  source_url?: string;
+  status?: string;
+  is_active?: boolean;
+  created_at?: string;
+}
+
+export interface SarkariNotification {
+  id: string;
+  job_id?: string | number;
+  title: string;
+  organization_name?: string;
+  scope?: string;
+  notification_no?: string;
+  notification_type?: 'RECRUITMENT' | 'CORRECTION' | 'EXAM_NOTICE' | 'IMPORTANT' | 'OTHER' | string;
+  description?: string;
+  notification_date?: string;
+  pdf_url?: string;
+  official_url?: string;
+  source_url?: string;
+  status?: string;
+  is_active?: boolean;
+  created_at?: string;
+}
+
+export interface SarkariLatestUpdate {
+  id: string;
+  title: string;
+  category: 'JOB' | 'NOTIFICATION' | 'ADMIT_CARD' | 'RESULT' | 'ANSWER_KEY' | 'EXAM_DATE' | 'OTHER' | string;
+  badge?: string;
+  scope?: string;
+  state_name?: string;
+  state_code?: string;
+  reference_type?: string;
+  reference_id?: number | string;
+  short_description?: string;
+  published_at?: string;
+  source_url?: string;
+  is_active?: boolean;
   created_at?: string;
 }
 
@@ -250,6 +346,9 @@ export interface SarkariRadarSyncStatus {
   jobsCount: number;
   admitCardsCount: number;
   resultsCount: number;
+  answerKeysCount: number;
+  notificationsCount: number;
+  latestUpdatesCount: number;
   error?: string;
 }
 

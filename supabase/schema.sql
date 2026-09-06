@@ -1295,3 +1295,324 @@ CREATE INDEX IF NOT EXISTS idx_latest_updates_type ON public.latest_updates(upda
 CREATE INDEX IF NOT EXISTS idx_latest_updates_dates ON public.latest_updates(last_date, exam_date);
 CREATE INDEX IF NOT EXISTS idx_latest_updates_org_exam ON public.latest_updates(organization, exam_name);
 CREATE INDEX IF NOT EXISTS idx_latest_updates_hash ON public.latest_updates(content_hash);
+
+-- ----------------------------------------------------------------------------
+-- 10. SARKARI RADAR (LIVE VACANCIES, ADMIT CARDS, RESULTS & INTELLIGENCE)
+-- ----------------------------------------------------------------------------
+
+-- 10.1 Live Government Vacancies & Recruitment Jobs
+CREATE TABLE IF NOT EXISTS public.jobs (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    title TEXT NOT NULL,
+    organization_name TEXT,
+    department TEXT,
+    category TEXT DEFAULT 'Other',
+    total_vacancies TEXT,
+    last_date TEXT,
+    qualification TEXT,
+    apply_url TEXT,
+    notification_pdf_url TEXT,
+    salary TEXT,
+    salary_pay_scale TEXT,
+    age_limit TEXT,
+    exam_date TEXT,
+    description TEXT,
+    status TEXT DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.jobs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read jobs"
+    ON public.jobs FOR SELECT
+    USING (true);
+
+CREATE POLICY "Admin manage jobs"
+    ON public.jobs FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+CREATE INDEX IF NOT EXISTS idx_jobs_category ON public.jobs(category);
+CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON public.jobs(created_at DESC);
+
+-- View for active jobs query
+CREATE OR REPLACE VIEW public.active_jobs AS
+SELECT * FROM public.jobs WHERE status = 'active' OR status IS NULL;
+
+-- 10.2 Admit Cards & Exam City Slips
+CREATE TABLE IF NOT EXISTS public.admit_cards (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    title TEXT NOT NULL,
+    exam_name TEXT,
+    organization_name TEXT,
+    release_date TEXT,
+    exam_date TEXT,
+    download_url TEXT,
+    city_slip_url TEXT,
+    status TEXT DEFAULT 'ACTIVE',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.admit_cards ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read admit cards"
+    ON public.admit_cards FOR SELECT
+    USING (true);
+
+CREATE POLICY "Admin manage admit cards"
+    ON public.admit_cards FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+CREATE INDEX IF NOT EXISTS idx_admit_cards_created_at ON public.admit_cards(created_at DESC);
+
+-- 10.3 Declared Exam Results & Cutoffs
+CREATE TABLE IF NOT EXISTS public.results (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    title TEXT NOT NULL,
+    exam_name TEXT,
+    organization_name TEXT,
+    declared_date TEXT,
+    result_url TEXT,
+    cutoff_details TEXT,
+    status TEXT DEFAULT 'DECLARED',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.results ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read results"
+    ON public.results FOR SELECT
+    USING (true);
+
+CREATE POLICY "Admin manage results"
+    ON public.results FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+CREATE INDEX IF NOT EXISTS idx_results_created_at ON public.results(created_at DESC);
+
+-- 10.4 Exam Subjects (Android & Web Intelligence Compatibility)
+CREATE TABLE IF NOT EXISTS public.exam_subjects (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    exam_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    code TEXT,
+    is_official BOOLEAN DEFAULT true,
+    weightage_percent INT DEFAULT 25,
+    color_hex TEXT DEFAULT '#3B82F6',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.exam_subjects ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read exam subjects"
+    ON public.exam_subjects FOR SELECT
+    USING (true);
+
+CREATE POLICY "Admin manage exam subjects"
+    ON public.exam_subjects FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+-- 10.5 AI Generated Questions Intelligence Cache
+CREATE TABLE IF NOT EXISTS public.generated_questions (
+    id TEXT PRIMARY KEY,
+    topic TEXT NOT NULL,
+    exam_id TEXT,
+    language TEXT DEFAULT 'en',
+    difficulty TEXT DEFAULT 'Medium',
+    source_reference TEXT,
+    questions_count INT DEFAULT 0,
+    generated_at BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.generated_questions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read generated questions"
+    ON public.generated_questions FOR SELECT
+    USING (true);
+
+CREATE POLICY "Admin manage generated questions"
+    ON public.generated_questions FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+-- 10.6 Daily Exam Briefings
+CREATE TABLE IF NOT EXISTS public.daily_briefings (
+    id TEXT PRIMARY KEY,
+    exam_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    priority_topic TEXT,
+    generated_at BIGINT,
+    refreshed_at BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.daily_briefings ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read daily briefings"
+    ON public.daily_briefings FOR SELECT
+    USING (true);
+
+CREATE POLICY "Admin manage daily briefings"
+    ON public.daily_briefings FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+-- 10.7 Source Records (Intelligence Scraper History)
+CREATE TABLE IF NOT EXISTS public.source_records (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    source_url TEXT UNIQUE NOT NULL,
+    title TEXT,
+    content TEXT,
+    topic TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.source_records ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read source records"
+    ON public.source_records FOR SELECT
+    USING (true);
+
+CREATE POLICY "Admin manage source records"
+    ON public.source_records FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+-- 10.8 Smart Notes
+CREATE TABLE IF NOT EXISTS public.smart_notes (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    content TEXT,
+    tags JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.smart_notes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users manage own smart notes"
+    ON public.smart_notes FOR ALL
+    USING (auth.uid() = user_id OR user_id IS NULL)
+    WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+
+-- 10.9 Live Exam Updates & User Bookmarks
+CREATE TABLE IF NOT EXISTS public.exam_updates (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    title TEXT NOT NULL,
+    category TEXT,
+    exam_name TEXT,
+    organization TEXT,
+    content TEXT,
+    url TEXT,
+    date TEXT,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+ALTER TABLE public.exam_updates ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public read exam updates"
+    ON public.exam_updates FOR SELECT
+    USING (true);
+
+CREATE POLICY "Admin manage exam updates"
+    ON public.exam_updates FOR ALL
+    USING (public.is_admin())
+    WITH CHECK (public.is_admin());
+
+CREATE TABLE IF NOT EXISTS public.user_saved_updates (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    update_id TEXT NOT NULL,
+    saved_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    UNIQUE(user_id, update_id)
+);
+
+ALTER TABLE public.user_saved_updates ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users manage saved updates"
+    ON public.user_saved_updates FOR ALL
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+-- ----------------------------------------------------------------------------
+-- 11. AUTOMATIC PROFILE CREATION TRIGGER (ON AUTH SIGNUP)
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger AS $$
+BEGIN
+    INSERT INTO public.profiles (id, email, name, photo_url)
+    VALUES (
+        new.id,
+        COALESCE(new.email, 'student@studymate.ai'),
+        COALESCE(new.raw_user_meta_data->>'name', new.raw_user_meta_data->>'full_name', 'Student'),
+        COALESCE(new.raw_user_meta_data->>'avatar_url', new.raw_user_meta_data->>'picture', NULL)
+    )
+    ON CONFLICT (id) DO NOTHING;
+
+    INSERT INTO public.user_roles (user_id, role)
+    VALUES (new.id, 'user')
+    ON CONFLICT (user_id, role) DO NOTHING;
+
+    INSERT INTO public.user_settings (user_id)
+    VALUES (new.id)
+    ON CONFLICT (user_id) DO NOTHING;
+
+    RETURN new;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- ----------------------------------------------------------------------------
+-- 12. INITIAL SEED DATA (EXAMS, LIVE SARKARI VACANCIES & ADMIT CARDS)
+-- ----------------------------------------------------------------------------
+
+-- Seed Top Competitive Exams
+INSERT INTO public.exams (name, category, conducting_body, official_website, exam_pattern, duration_minutes, total_marks, status)
+VALUES 
+    ('SSC CGL', 'Staff Selection', 'Staff Selection Commission (SSC)', 'https://ssc.gov.in', 'Tier 1: 100 MCQs (200 Marks, 60 Mins)', 60, 200, 'active'),
+    ('UPSC Civil Services', 'Civil Services', 'Union Public Service Commission (UPSC)', 'https://upsc.gov.in', 'Prelims: GS-1 (200 Marks) + CSAT (200 Marks)', 120, 400, 'active'),
+    ('RRB NTPC', 'Railways', 'Railway Recruitment Boards (RRB)', 'https://indianrailways.gov.in', 'CBT 1: 100 MCQs (90 Mins)', 90, 100, 'active'),
+    ('UP Police Constable / SI', 'Police & Defence', 'UPPRPB Lucknow', 'https://uppbpb.gov.in', '150 MCQs (300 Marks, 120 Mins)', 120, 300, 'active'),
+    ('IBPS PO', 'Banking', 'Institute of Banking Personnel Selection', 'https://www.ibps.in', 'Prelims: 100 MCQs (100 Marks, 60 Mins)', 60, 100, 'active'),
+    ('JEE Main', 'Engineering', 'National Testing Agency (NTA)', 'https://jeemain.nta.ac.in', '75 MCQs & Numericals (300 Marks, 180 Mins)', 180, 300, 'active'),
+    ('NEET UG', 'Medical', 'National Testing Agency (NTA)', 'https://neet.nta.nic.in', '180 MCQs (720 Marks, 200 Mins)', 200, 720, 'active')
+ON CONFLICT (name) DO NOTHING;
+
+-- Seed Sarkari Radar Jobs
+INSERT INTO public.jobs (id, title, organization_name, department, category, total_vacancies, last_date, qualification, apply_url, notification_pdf_url, salary, age_limit, exam_date, description, status)
+VALUES
+    ('sarkari_ssc_cgl_2026', 'SSC CGL 2026 (Combined Graduate Level)', 'Staff Selection Commission (SSC)', 'DoPT, Govt. of India', 'SSC', '14,800+ Posts', '2026-07-28', 'Bachelor''s Degree in any stream (Graduate)', 'https://ssc.gov.in', 'https://ssc.gov.in/notices', 'Level 4 to Level 8 (₹25,500 - ₹1,51,100)', '18 - 30/32 Years', 'Sept 2026', 'Premier recruitment for Inspector, Assistant Section Officer (ASO), Sub-Inspector & Tax Assistants.', 'active'),
+    ('sarkari_rrb_ntpc_2026', 'RRB NTPC CEN 06/2026 Non-Technical Popular Categories', 'Railway Recruitment Boards (RRB)', 'Ministry of Railways', 'Railway', '11,558 Posts', '2026-08-15', '12th Pass / Graduate depending on level', 'https://www.rrbapply.gov.in', 'https://indianrailways.gov.in', 'Level 2 to Level 6 (₹19,900 - ₹35,400 Basic)', '18 - 33 Years (Relaxation for OBC/SC/ST)', 'Oct - Nov 2026', 'Station Master, Goods Train Manager, Junior Clerk cum Typist across all RRB divisions.', 'active'),
+    ('sarkari_up_police_si_2026', 'UP Police Sub Inspector (SI) & Platoon Commander', 'UPPRPB (Uttar Pradesh Police)', 'Police & Defence Services', 'Police', '3,800 Posts', '2026-08-05', 'Graduate in any discipline', 'https://uppbpb.gov.in', 'https://uppbpb.gov.in', 'Pay Band 9300-34800, Grade Pay 4200', '21 - 28 Years', 'Nov 2026', 'Direct recruitment for Sub-Inspector (Civil Police) and PAC Platoon Commander.', 'active'),
+    ('sarkari_ibps_po_2026', 'IBPS PO / MT XIV Recruitment 2026', 'Institute of Banking Personnel Selection', 'Participating Public Sector Banks', 'Banking', '4,455 Posts', '2026-08-21', 'Graduation Degree from recognized University', 'https://www.ibps.in', 'https://www.ibps.in', 'Basic ₹36,000 + DA + HRA (In-hand ~₹54,000+)', '20 - 30 Years', 'October 2026', 'Probationary Officers / Management Trainees in PNB, Canara Bank, Bank of Baroda, etc.', 'active'),
+    ('sarkari_ssc_gd_2026', 'SSC GD Constable (CAPFs, SSF, Assam Rifles)', 'Staff Selection Commission (SSC)', 'Ministry of Home Affairs', 'Police', '39,481 Posts', '2026-09-02', '10th Class (Matriculation) Pass', 'https://ssc.gov.in', 'https://ssc.gov.in', 'Pay Level 3 (₹21,700 - ₹69,100)', '18 - 23 Years', 'Dec 2026 - Jan 2027', 'Constable GD in BSF, CISF, CRPF, ITBP, SSB, SSF and Rifleman in Assam Rifles.', 'active'),
+    ('sarkari_upsc_nda_cds_2026', 'UPSC Combined Defence Services (CDS II) 2026', 'Union Public Service Commission (UPSC)', 'Defence Services (IMA, INA, AFA, OTA)', 'UPSC', '459 Posts', '2026-07-20', 'Graduate / Degree in Engineering', 'https://upsconline.nic.in', 'https://upsc.gov.in', 'Level 10 (Lieutenant / Sub Lieutenant)', '19 - 24 Years', 'Sept 01, 2026', 'Commissioned Officer entry for Indian Military Academy, Naval Academy, and Officers Training Academy.', 'active')
+ON CONFLICT (id) DO NOTHING;
+
+-- Seed Sarkari Admit Cards
+INSERT INTO public.admit_cards (id, title, exam_name, organization_name, release_date, exam_date, download_url, city_slip_url, status)
+VALUES
+    ('ac_ssc_chsl_tier1', 'SSC CHSL 10+2 Tier 1 Admit Card & City Slip 2026', 'SSC CHSL Tier 1', 'Staff Selection Commission', 'Live Now', 'July 15 - July 26, 2026', 'https://ssc.gov.in', 'https://ssc.gov.in', 'ACTIVE'),
+    ('ac_rrb_alp_cbt1', 'RRB Assistant Loco Pilot (ALP) CBT-1 Exam City Intimation', 'RRB ALP CBT 1', 'Railway Recruitment Boards', 'Live Now', 'August 05 - August 10, 2026', 'https://www.rrbapply.gov.in', 'https://www.rrbapply.gov.in', 'ACTIVE'),
+    ('ac_ibps_clerk_prelims', 'IBPS Clerk XIV Prelims Call Letter & Admit Card', 'IBPS Clerk XIV', 'IBPS', 'Available from July 22', 'August 24 & 25, 2026', 'https://www.ibps.in', NULL, 'SCHEDULED')
+ON CONFLICT (id) DO NOTHING;
+
+-- Seed Sarkari Results
+INSERT INTO public.results (id, title, exam_name, organization_name, declared_date, result_url, cutoff_details, status)
+VALUES
+    ('res_upsc_prelims_2026', 'UPSC Civil Services Prelims 2026 Official Result & Roll Number List', 'UPSC CSE Prelims', 'UPSC', 'Declared Today', 'https://upsc.gov.in', 'Cutoff Marks & Answer Key will be released after Final Marks declaration.', 'DECLARED'),
+    ('res_ssc_cpo_tier2', 'SSC CPO Sub-Inspector in Delhi Police & CAPFs Tier-2 Cutoff', 'SSC CPO Tier 2', 'Staff Selection Commission', 'Declared Recently', 'https://ssc.gov.in', 'Male Cutoff: 278.50 | Female Cutoff: 284.25', 'DECLARED')
+ON CONFLICT (id) DO NOTHING;

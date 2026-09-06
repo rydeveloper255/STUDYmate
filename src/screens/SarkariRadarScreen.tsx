@@ -23,12 +23,20 @@ import {
   Flame,
   Radio,
   Share2,
+  Key,
+  Bell,
+  TrendingUp,
+  MapPin,
+  HelpCircle,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import {
   SarkariJob,
   SarkariAdmitCard,
   SarkariResult,
+  SarkariAnswerKey,
+  SarkariNotification,
+  SarkariLatestUpdate,
   SarkariRadarSyncStatus,
   SarkariTargetExamPlan,
   StudyPlanItem,
@@ -60,10 +68,13 @@ export const SarkariRadarScreen: React.FC<SarkariRadarScreenProps> = ({
   onAddPlanItem,
   onStartFocusSprint,
 }) => {
-  // State for live radar data
+  // State for live radar data across all 6 tables
   const [jobs, setJobs] = useState<SarkariJob[]>([]);
   const [admitCards, setAdmitCards] = useState<SarkariAdmitCard[]>([]);
   const [results, setResults] = useState<SarkariResult[]>([]);
+  const [answerKeys, setAnswerKeys] = useState<SarkariAnswerKey[]>([]);
+  const [notifications, setNotifications] = useState<SarkariNotification[]>([]);
+  const [latestUpdates, setLatestUpdates] = useState<SarkariLatestUpdate[]>([]);
   const [syncStatus, setSyncStatus] = useState<SarkariRadarSyncStatus>({
     connected: true,
     source: 'cached_local',
@@ -72,8 +83,14 @@ export const SarkariRadarScreen: React.FC<SarkariRadarScreenProps> = ({
     jobsCount: 0,
     admitCardsCount: 0,
     resultsCount: 0,
+    answerKeysCount: 0,
+    notificationsCount: 0,
+    latestUpdatesCount: 0,
   });
 
+  const [activeTab, setActiveTab] = useState<
+    'jobs' | 'admit_cards' | 'answer_keys' | 'results' | 'notifications'
+  >('jobs');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [activeFilter, setActiveFilter] = useState<string>('All');
@@ -106,9 +123,11 @@ export const SarkariRadarScreen: React.FC<SarkariRadarScreenProps> = ({
   ]);
   const [isAnsweringEligibility, setIsAnsweringEligibility] = useState<boolean>(false);
 
-  // Show Admit Cards strip toggle
+  // Collapsible toggle for quick preview strips
   const [showAdmitCardsStrip, setShowAdmitCardsStrip] = useState<boolean>(true);
+  const [showAnswerKeysStrip, setShowAnswerKeysStrip] = useState<boolean>(false);
   const [showResultsStrip, setShowResultsStrip] = useState<boolean>(false);
+  const [showNotificationsStrip, setShowNotificationsStrip] = useState<boolean>(false);
 
   // Load live data from Supabase / Render API on mount
   useEffect(() => {
@@ -127,6 +146,9 @@ export const SarkariRadarScreen: React.FC<SarkariRadarScreenProps> = ({
       setJobs(data.jobs);
       setAdmitCards(data.admitCards);
       setResults(data.results);
+      setAnswerKeys(data.answerKeys);
+      setNotifications(data.notifications);
+      setLatestUpdates(data.latestUpdates);
       setSyncStatus(data.syncStatus);
     } catch (err) {
       console.error('Failed to load Sarkari Radar data:', err);
@@ -207,6 +229,51 @@ export const SarkariRadarScreen: React.FC<SarkariRadarScreenProps> = ({
       );
     });
   }, [jobs, activeFilter, searchQuery, bookmarkedIds, appliedIds]);
+
+  const filteredAdmitCards = useMemo(() => {
+    if (!searchQuery.trim()) return admitCards;
+    const q = searchQuery.toLowerCase();
+    return admitCards.filter(
+      (ac) =>
+        ac.title.toLowerCase().includes(q) ||
+        (ac.exam_name && ac.exam_name.toLowerCase().includes(q)) ||
+        (ac.organization_name && ac.organization_name.toLowerCase().includes(q))
+    );
+  }, [admitCards, searchQuery]);
+
+  const filteredAnswerKeys = useMemo(() => {
+    if (!searchQuery.trim()) return answerKeys;
+    const q = searchQuery.toLowerCase();
+    return answerKeys.filter(
+      (ak) =>
+        ak.title.toLowerCase().includes(q) ||
+        (ak.exam_name && ak.exam_name.toLowerCase().includes(q)) ||
+        (ak.organization_name && ak.organization_name.toLowerCase().includes(q))
+    );
+  }, [answerKeys, searchQuery]);
+
+  const filteredResults = useMemo(() => {
+    if (!searchQuery.trim()) return results;
+    const q = searchQuery.toLowerCase();
+    return results.filter(
+      (res) =>
+        res.title.toLowerCase().includes(q) ||
+        (res.exam_name && res.exam_name.toLowerCase().includes(q)) ||
+        (res.organization_name && res.organization_name.toLowerCase().includes(q))
+    );
+  }, [results, searchQuery]);
+
+  const filteredNotifications = useMemo(() => {
+    if (!searchQuery.trim()) return notifications;
+    const q = searchQuery.toLowerCase();
+    return notifications.filter(
+      (notif) =>
+        notif.title.toLowerCase().includes(q) ||
+        (notif.organization_name && notif.organization_name.toLowerCase().includes(q)) ||
+        (notif.notification_type && notif.notification_type.toLowerCase().includes(q)) ||
+        (notif.description && notif.description.toLowerCase().includes(q))
+    );
+  }, [notifications, searchQuery]);
 
   // Handler: Open AI Target Exam Study Planner
   const handleOpenStudyPlanner = async (job: SarkariJob) => {
@@ -330,22 +397,106 @@ export const SarkariRadarScreen: React.FC<SarkariRadarScreenProps> = ({
           </div>
         </div>
 
-        {/* Live Counters */}
-        <div className="grid grid-cols-3 gap-2 sm:gap-4 mt-4 pt-4 border-t border-white/10 text-center">
-          <div className="p-2.5 rounded-2xl bg-white/[0.03] border border-white/5">
+        {/* Live Counters - 5 Dedicated Schema Entities */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3 mt-4 pt-4 border-t border-white/10 text-center">
+          <button
+            onClick={() => setActiveTab('jobs')}
+            className={`p-2.5 rounded-2xl border transition-all text-center cursor-pointer ${
+              activeTab === 'jobs'
+                ? 'bg-sky-500/20 border-sky-400/50 shadow-md shadow-sky-500/20'
+                : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.08]'
+            }`}
+          >
             <div className="text-lg sm:text-xl font-black text-white">{jobs.length}</div>
             <div className="text-[10px] sm:text-xs text-slate-300 font-medium">Active Vacancies</div>
-          </div>
-          <div className="p-2.5 rounded-2xl bg-white/[0.03] border border-white/5">
+          </button>
+
+          <button
+            onClick={() => setActiveTab('admit_cards')}
+            className={`p-2.5 rounded-2xl border transition-all text-center cursor-pointer ${
+              activeTab === 'admit_cards'
+                ? 'bg-amber-500/20 border-amber-400/50 shadow-md shadow-amber-500/20'
+                : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.08]'
+            }`}
+          >
             <div className="text-lg sm:text-xl font-black text-amber-300">{admitCards.length}</div>
             <div className="text-[10px] sm:text-xs text-slate-300 font-medium">Admit Cards & Slips</div>
-          </div>
-          <div className="p-2.5 rounded-2xl bg-white/[0.03] border border-white/5">
+          </button>
+
+          <button
+            onClick={() => setActiveTab('answer_keys')}
+            className={`p-2.5 rounded-2xl border transition-all text-center cursor-pointer ${
+              activeTab === 'answer_keys'
+                ? 'bg-purple-500/20 border-purple-400/50 shadow-md shadow-purple-500/20'
+                : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.08]'
+            }`}
+          >
+            <div className="text-lg sm:text-xl font-black text-purple-300">{answerKeys.length}</div>
+            <div className="text-[10px] sm:text-xs text-slate-300 font-medium">Answer Keys</div>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('results')}
+            className={`p-2.5 rounded-2xl border transition-all text-center cursor-pointer ${
+              activeTab === 'results'
+                ? 'bg-emerald-500/20 border-emerald-400/50 shadow-md shadow-emerald-500/20'
+                : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.08]'
+            }`}
+          >
             <div className="text-lg sm:text-xl font-black text-emerald-300">{results.length}</div>
-            <div className="text-[10px] sm:text-xs text-slate-300 font-medium">Declared Results</div>
-          </div>
+            <div className="text-[10px] sm:text-xs text-slate-300 font-medium">Results Declared</div>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('notifications')}
+            className={`p-2.5 rounded-2xl border transition-all text-center cursor-pointer col-span-2 sm:col-span-1 ${
+              activeTab === 'notifications'
+                ? 'bg-rose-500/20 border-rose-400/50 shadow-md shadow-rose-500/20'
+                : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.08]'
+            }`}
+          >
+            <div className="text-lg sm:text-xl font-black text-rose-300">{notifications.length}</div>
+            <div className="text-[10px] sm:text-xs text-slate-300 font-medium">Official Notices</div>
+          </button>
         </div>
       </div>
+
+      {/* ------------------------------------------------------------- */}
+      {/* 1.5 FLASH UPDATES TICKER (From active_latest_updates)         */}
+      {/* ------------------------------------------------------------- */}
+      {latestUpdates.length > 0 && (
+        <div className="glass-panel p-3 rounded-2xl border border-sky-500/20 bg-sky-950/30 flex items-center gap-3 overflow-hidden shadow-md">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/20 text-amber-300 text-[11px] font-black tracking-wide shrink-0 border border-amber-500/30 animate-pulse">
+            <Flame className="h-3.5 w-3.5 text-amber-400" />
+            <span>FLASH UPDATES</span>
+          </div>
+
+          <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-0.5 text-xs text-slate-200">
+            {latestUpdates.map((update) => (
+              <a
+                key={update.id}
+                href={update.source_url || '#'}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 shrink-0 text-slate-200 hover:text-white transition-all group"
+              >
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300">
+                  {update.category}
+                </span>
+                <span className="font-semibold text-xs truncate max-w-[280px]">
+                  {update.title}
+                </span>
+                {update.badge && (
+                  <span className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    {update.badge}
+                  </span>
+                )}
+                <ExternalLink className="h-3 w-3 text-slate-400 group-hover:text-sky-300 shrink-0" />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ------------------------------------------------------------- */}
       {/* 2. GEMINI AI ACTION ENGINES: STUDY PLANNER & ELIGIBILITY      */}
@@ -411,68 +562,87 @@ export const SarkariRadarScreen: React.FC<SarkariRadarScreenProps> = ({
       </div>
 
       {/* ------------------------------------------------------------- */}
-      {/* 3. ADMIT CARDS & EXAM DATES STRIP                             */}
+      {/* 3. PRIMARY MODULE TABS BAR                                    */}
       {/* ------------------------------------------------------------- */}
-      {admitCards.length > 0 && (
-        <div className="glass-panel p-4 rounded-3xl border border-white/10 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="p-1.5 rounded-lg bg-amber-500/20 text-amber-300">
-                <FileText className="h-4 w-4" />
-              </span>
-              <h2 className="text-sm font-bold text-white">Admit Cards & Exam Dates Strip</h2>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                {admitCards.length} Upcoming
-              </span>
-            </div>
-            <button
-              onClick={() => setShowAdmitCardsStrip((prev) => !prev)}
-              className="text-xs text-slate-400 hover:text-white cursor-pointer"
-            >
-              {showAdmitCardsStrip ? 'Collapse ▲' : 'Expand ▼'}
-            </button>
-          </div>
+      <div className="flex items-center gap-1.5 p-1.5 rounded-2xl bg-white/[0.04] border border-white/10 overflow-x-auto scrollbar-none">
+        <button
+          onClick={() => setActiveTab('jobs')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 ${
+            activeTab === 'jobs'
+              ? 'bg-sky-500 text-slate-950 shadow-md shadow-sky-500/20'
+              : 'text-slate-300 hover:bg-white/[0.06]'
+          }`}
+        >
+          <Briefcase className="h-4 w-4" />
+          <span>Live Vacancies</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/20 font-black">
+            {jobs.length}
+          </span>
+        </button>
 
-          {showAdmitCardsStrip && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {admitCards.map((ac) => (
-                <div
-                  key={ac.id}
-                  className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 hover:border-amber-500/30 transition-all flex flex-col justify-between gap-2"
-                >
-                  <div>
-                    <div className="flex items-center justify-between gap-1 text-[10px] text-amber-300 font-semibold mb-1">
-                      <span className="truncate">{ac.organization_name || 'Staff Selection / Board'}</span>
-                      <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30">
-                        {ac.release_date || 'Active'}
-                      </span>
-                    </div>
-                    <h4 className="text-xs font-bold text-white leading-tight line-clamp-2">
-                      {ac.title}
-                    </h4>
-                    <p className="text-[11px] text-slate-300 mt-1 flex items-center gap-1">
-                      <Calendar className="h-3 w-3 text-sky-400 shrink-0" />
-                      <span>Exam: {ac.exam_date || 'Upcoming'}</span>
-                    </p>
-                  </div>
-                  <a
-                    href={ac.download_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="w-full py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-[11px] font-bold border border-amber-500/30 flex items-center justify-center gap-1 transition-all"
-                  >
-                    <Download className="h-3 w-3" />
-                    <span>Download Hall Ticket / Slip ↗</span>
-                  </a>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+        <button
+          onClick={() => setActiveTab('admit_cards')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 ${
+            activeTab === 'admit_cards'
+              ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+              : 'text-slate-300 hover:bg-white/[0.06]'
+          }`}
+        >
+          <FileText className="h-4 w-4" />
+          <span>Admit Cards & Slips</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/20 font-black">
+            {admitCards.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('answer_keys')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 ${
+            activeTab === 'answer_keys'
+              ? 'bg-purple-500 text-white shadow-md shadow-purple-500/20'
+              : 'text-slate-300 hover:bg-white/[0.06]'
+          }`}
+        >
+          <Key className="h-4 w-4" />
+          <span>Answer Keys</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/20 font-black">
+            {answerKeys.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('results')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 ${
+            activeTab === 'results'
+              ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+              : 'text-slate-300 hover:bg-white/[0.06]'
+          }`}
+        >
+          <Award className="h-4 w-4" />
+          <span>Declared Results</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/20 font-black">
+            {results.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('notifications')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 ${
+            activeTab === 'notifications'
+              ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
+              : 'text-slate-300 hover:bg-white/[0.06]'
+          }`}
+        >
+          <Bell className="h-4 w-4" />
+          <span>Official Notices</span>
+          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/20 font-black">
+            {notifications.length}
+          </span>
+        </button>
+      </div>
 
       {/* ------------------------------------------------------------- */}
-      {/* 4. FILTERS & SEARCH CONTROLS                                  */}
+      {/* 4. SEARCH & FILTER CONTROLS                                   */}
       {/* ------------------------------------------------------------- */}
       <div className="space-y-3">
         {/* Search bar */}
@@ -481,7 +651,17 @@ export const SarkariRadarScreen: React.FC<SarkariRadarScreenProps> = ({
           <input
             id="sarkari-search-input"
             type="text"
-            placeholder="Search by exam name, department, post, or qualification (e.g. SSC, Railway, 12th Pass)..."
+            placeholder={
+              activeTab === 'jobs'
+                ? 'Search by exam name, department, post, or qualification (e.g. SSC, Railway, 12th Pass)...'
+                : activeTab === 'admit_cards'
+                ? 'Search admit cards & hall tickets by exam or organization...'
+                : activeTab === 'answer_keys'
+                ? 'Search answer keys by exam name or organization...'
+                : activeTab === 'results'
+                ? 'Search declared results by exam or department...'
+                : 'Search official notices and circulars...'
+            }
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-white/[0.05] border border-white/10 text-white placeholder-slate-400 text-xs sm:text-sm focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400/50 transition-all"
@@ -489,224 +669,560 @@ export const SarkariRadarScreen: React.FC<SarkariRadarScreenProps> = ({
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
             >
               <X className="h-4 w-4" />
             </button>
           )}
         </div>
 
-        {/* Filter chips */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-          {filterChips.map((chip) => {
-            const isActive = activeFilter === chip.id;
-            return (
-              <button
-                key={chip.id}
-                onClick={() => setActiveFilter(chip.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
-                  isActive
-                    ? 'bg-sky-500 text-slate-950 shadow-md shadow-sky-500/20 font-bold'
-                    : 'bg-white/[0.05] text-slate-300 hover:bg-white/[0.1] border border-white/5'
-                }`}
-              >
-                {chip.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ------------------------------------------------------------- */}
-      {/* 5. LIVE VACANCIES FEED                                        */}
-      {/* ------------------------------------------------------------- */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between text-xs text-slate-300 px-1">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-white text-sm">Live Vacancies</span>
-            <span className="px-2 py-0.5 rounded-full bg-white/10 text-slate-300 font-semibold text-[11px]">
-              {filteredJobs.length} Available
-            </span>
-          </div>
-          {syncStatus.lastSyncTime && (
-            <span className="text-[11px] text-slate-400">
-              Last Synced: {syncStatus.lastSyncTime}
-            </span>
-          )}
-        </div>
-
-        {isLoading ? (
-          <div className="glass-panel p-12 rounded-3xl border border-white/10 text-center space-y-3">
-            <RefreshCw className="h-8 w-8 text-sky-400 animate-spin mx-auto" />
-            <div className="text-sm font-bold text-white">Fetching Verified Sarkari Vacancies...</div>
-            <p className="text-xs text-slate-400 max-w-sm mx-auto">
-              Connecting directly to StudyMate Sarkari database on Supabase & Render live scraper feed...
-            </p>
-          </div>
-        ) : filteredJobs.length === 0 ? (
-          <div className="glass-panel p-10 rounded-3xl border border-white/10 text-center space-y-3">
-            <AlertCircle className="h-8 w-8 text-amber-400 mx-auto" />
-            <div className="text-sm font-bold text-white">No Vacancies Matched Your Filter</div>
-            <p className="text-xs text-slate-400">
-              Try switching the category filter or clearing your search term.
-            </p>
-            <button
-              onClick={() => {
-                setActiveFilter('All');
-                setSearchQuery('');
-              }}
-              className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-white cursor-pointer"
-            >
-              Reset Filters
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filteredJobs.map((job) => {
-              const daysInfo = calculateDaysRemaining(job.last_date);
-              const isBookmarked = bookmarkedIds.includes(job.id);
-              const isApplied = appliedIds.includes(job.id);
-
+        {/* Category filter chips (Only for Live Vacancies tab) */}
+        {activeTab === 'jobs' && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+            {filterChips.map((chip) => {
+              const isActive = activeFilter === chip.id;
               return (
-                <div
-                  key={job.id}
-                  className="glass-panel p-5 rounded-3xl border border-white/10 flex flex-col justify-between gap-4 hover:border-sky-500/35 transition-all relative overflow-hidden group shadow-lg"
+                <button
+                  key={chip.id}
+                  onClick={() => setActiveFilter(chip.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-sky-500 text-slate-950 shadow-md shadow-sky-500/20 font-bold'
+                      : 'bg-white/[0.05] text-slate-300 hover:bg-white/[0.1] border border-white/5'
+                  }`}
                 >
-                  <div>
-                    {/* Top Row: Category tag, Last Date badge, Bookmark */}
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
-                          {job.category}
-                        </span>
-                        <span
-                          className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${daysInfo.badgeClass}`}
-                        >
-                          {daysInfo.label}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-1">
-                        {onToggleBookmark && (
-                          <button
-                            onClick={() => onToggleBookmark(job.id)}
-                            className={`p-1.5 rounded-xl border transition-colors cursor-pointer ${
-                              isBookmarked
-                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                                : 'bg-white/[0.05] text-slate-400 border-white/5 hover:text-white'
-                            }`}
-                            title={isBookmarked ? 'Bookmarked' : 'Save to bookmarks'}
-                          >
-                            <Bookmark className={`h-3.5 w-3.5 ${isBookmarked ? 'fill-amber-400 text-amber-400' : ''}`} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Job Title & Organization */}
-                    <h3 className="text-sm sm:text-base font-bold text-white leading-snug line-clamp-2">
-                      {job.title}
-                    </h3>
-                    <p className="text-xs text-sky-300 font-medium mt-1">
-                      {job.organization_name || job.department || 'Govt Department'}
-                    </p>
-
-                    {/* Snapshot Metadata Grid */}
-                    <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 pt-3 mt-3 border-t border-white/5">
-                      <div className="flex items-center gap-1.5">
-                        <Briefcase className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-                        <span className="font-semibold text-white truncate">
-                          {job.total_vacancies}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <Calendar className="h-3.5 w-3.5 text-sky-400 shrink-0" />
-                        <span className="truncate">Last: {job.last_date || 'Check Notice'}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 col-span-2">
-                        <GraduationCap className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                        <span className="truncate text-slate-300">{job.qualification}</span>
-                      </div>
-                      {job.salary && (
-                        <div className="flex items-center gap-1.5 col-span-2 text-[11px] text-slate-400">
-                          <Award className="h-3 w-3 text-amber-400 shrink-0" />
-                          <span className="truncate">{job.salary}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Action Bar */}
-                  <div className="pt-2 border-t border-white/5 space-y-2">
-                    <div className="flex items-center gap-2">
-                      {/* 1-Tap Direct Apply */}
-                      <a
-                        href={job.apply_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/20 transition-all cursor-pointer"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        <span>Direct Apply ↗</span>
-                      </a>
-
-                      {/* AI Target Exam Planner */}
-                      <button
-                        onClick={() => handleOpenStudyPlanner(job)}
-                        className="py-2 px-3 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 font-bold text-xs border border-sky-400/30 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                        title="Generate instant 30-day AI study routine"
-                      >
-                        <Target className="h-3.5 w-3.5 text-sky-400" />
-                        <span>AI Plan</span>
-                      </button>
-
-                      {/* Details button */}
-                      <button
-                        onClick={() => setSelectedJob(job)}
-                        className="py-2 px-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-200 text-xs font-semibold border border-white/10 cursor-pointer"
-                        title="View complete eligibility and details"
-                      >
-                        Details
-                      </button>
-                    </div>
-
-                    {/* Mark Applied & Official PDF row */}
-                    <div className="flex items-center justify-between gap-2 text-xs">
-                      {job.notification_pdf_url ? (
-                        <a
-                          href={job.notification_pdf_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[11px] text-slate-400 hover:text-sky-300 flex items-center gap-1 underline underline-offset-2"
-                        >
-                          <FileText className="h-3 w-3" />
-                          <span>Official Notice PDF ↗</span>
-                        </a>
-                      ) : (
-                        <span className="text-[11px] text-slate-400">Verified Notification</span>
-                      )}
-
-                      {onToggleApplied && (
-                        <button
-                          onClick={() => onToggleApplied(job.id)}
-                          className={`text-[11px] font-bold flex items-center gap-1 px-2 py-0.5 rounded-lg transition-all cursor-pointer ${
-                            isApplied
-                              ? 'text-emerald-300 bg-emerald-500/15 border border-emerald-500/30'
-                              : 'text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          <CheckCircle2 className="h-3 w-3" />
-                          <span>{isApplied ? 'Applied' : 'Mark as Applied'}</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                  {chip.label}
+                </button>
               );
             })}
           </div>
         )}
       </div>
+
+      {/* ------------------------------------------------------------- */}
+      {/* 5. TAB 1: LIVE VACANCIES FEED                                 */}
+      {/* ------------------------------------------------------------- */}
+      {activeTab === 'jobs' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between text-xs text-slate-300 px-1">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-white text-sm">Live Vacancies</span>
+              <span className="px-2 py-0.5 rounded-full bg-white/10 text-slate-300 font-semibold text-[11px]">
+                {filteredJobs.length} Available
+              </span>
+            </div>
+            {syncStatus.lastSyncTime && (
+              <span className="text-[11px] text-slate-400">
+                Last Synced: {syncStatus.lastSyncTime}
+              </span>
+            )}
+          </div>
+
+          {isLoading ? (
+            <div className="glass-panel p-12 rounded-3xl border border-white/10 text-center space-y-3">
+              <RefreshCw className="h-8 w-8 text-sky-400 animate-spin mx-auto" />
+              <div className="text-sm font-bold text-white">Fetching Verified Sarkari Vacancies...</div>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                Connecting directly to StudyMate Sarkari database on Supabase & Render live scraper feed...
+              </p>
+            </div>
+          ) : filteredJobs.length === 0 ? (
+            <div className="glass-panel p-10 rounded-3xl border border-white/10 text-center space-y-3">
+              <AlertCircle className="h-8 w-8 text-amber-400 mx-auto" />
+              <div className="text-sm font-bold text-white">No Vacancies Matched Your Filter</div>
+              <p className="text-xs text-slate-400">
+                Try switching the category filter or clearing your search term.
+              </p>
+              <button
+                onClick={() => {
+                  setActiveFilter('All');
+                  setSearchQuery('');
+                }}
+                className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-white cursor-pointer"
+              >
+                Reset Filters
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {filteredJobs.map((job) => {
+                const daysInfo = calculateDaysRemaining(job.last_date);
+                const isBookmarked = bookmarkedIds.includes(job.id);
+                const isApplied = appliedIds.includes(job.id);
+
+                return (
+                  <div
+                    key={job.id}
+                    className="glass-panel p-5 rounded-3xl border border-white/10 flex flex-col justify-between gap-4 hover:border-sky-500/35 transition-all relative overflow-hidden group shadow-lg"
+                  >
+                    <div>
+                      {/* Top Row: Category tag, Scope tag, Last Date badge, Bookmark */}
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                            {job.category}
+                          </span>
+                          {job.scope && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                              {job.scope === 'STATE' && job.state_name ? `STATE: ${job.state_name}` : job.scope}
+                            </span>
+                          )}
+                          <span
+                            className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${daysInfo.badgeClass}`}
+                          >
+                            {daysInfo.label}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          {onToggleBookmark && (
+                            <button
+                              onClick={() => onToggleBookmark(job.id)}
+                              className={`p-1.5 rounded-xl border transition-colors cursor-pointer ${
+                                isBookmarked
+                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                                  : 'bg-white/[0.05] text-slate-400 border-white/5 hover:text-white'
+                              }`}
+                              title={isBookmarked ? 'Bookmarked' : 'Save to bookmarks'}
+                            >
+                              <Bookmark className={`h-3.5 w-3.5 ${isBookmarked ? 'fill-amber-400 text-amber-400' : ''}`} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Job Title & Organization */}
+                      <h3 className="text-sm sm:text-base font-bold text-white leading-snug line-clamp-2">
+                        {job.title}
+                      </h3>
+                      <div className="flex items-center justify-between mt-1 text-xs">
+                        <p className="text-sky-300 font-medium">
+                          {job.organization_name || job.department || 'Govt Department'}
+                        </p>
+                        {job.advertisement_no && (
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            Advt: {job.advertisement_no}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Snapshot Metadata Grid */}
+                      <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 pt-3 mt-3 border-t border-white/5">
+                        <div className="flex items-center gap-1.5">
+                          <Briefcase className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                          <span className="font-semibold text-white truncate">
+                            {job.total_vacancies}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="h-3.5 w-3.5 text-sky-400 shrink-0" />
+                          <span className="truncate">Last: {job.last_date || 'Check Notice'}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 col-span-2">
+                          <GraduationCap className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                          <span className="truncate text-slate-300">{job.qualification}</span>
+                        </div>
+                        {job.salary && (
+                          <div className="flex items-center gap-1.5 col-span-2 text-[11px] text-slate-400">
+                            <Award className="h-3 w-3 text-amber-400 shrink-0" />
+                            <span className="truncate">{job.salary}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Action Bar */}
+                    <div className="pt-2 border-t border-white/5 space-y-2">
+                      <div className="flex items-center gap-2">
+                        {/* 1-Tap Direct Apply */}
+                        <a
+                          href={job.apply_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/20 transition-all cursor-pointer"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          <span>Direct Apply ↗</span>
+                        </a>
+
+                        {/* AI Target Exam Planner */}
+                        <button
+                          onClick={() => handleOpenStudyPlanner(job)}
+                          className="py-2 px-3 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 font-bold text-xs border border-sky-400/30 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                          title="Generate instant 30-day AI study routine"
+                        >
+                          <Target className="h-3.5 w-3.5 text-sky-400" />
+                          <span>AI Plan</span>
+                        </button>
+
+                        {/* Details button */}
+                        <button
+                          onClick={() => setSelectedJob(job)}
+                          className="py-2 px-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-200 text-xs font-semibold border border-white/10 cursor-pointer"
+                          title="View complete eligibility and details"
+                        >
+                          Details
+                        </button>
+                      </div>
+
+                      {/* Mark Applied & Official PDF row */}
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        {job.notification_pdf_url ? (
+                          <a
+                            href={job.notification_pdf_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[11px] text-slate-400 hover:text-sky-300 flex items-center gap-1 underline underline-offset-2"
+                          >
+                            <FileText className="h-3 w-3" />
+                            <span>Official Notice PDF ↗</span>
+                          </a>
+                        ) : (
+                          <span className="text-[11px] text-slate-400">Verified Notification</span>
+                        )}
+
+                        {onToggleApplied && (
+                          <button
+                            onClick={() => onToggleApplied(job.id)}
+                            className={`text-[11px] font-bold flex items-center gap-1 px-2 py-0.5 rounded-lg transition-all cursor-pointer ${
+                              isApplied
+                                ? 'text-emerald-300 bg-emerald-500/15 border border-emerald-500/30'
+                                : 'text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            <CheckCircle2 className="h-3 w-3" />
+                            <span>{isApplied ? 'Applied' : 'Mark as Applied'}</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* 5. TAB 2: ADMIT CARDS & EXAM DATES                            */}
+      {/* ------------------------------------------------------------- */}
+      {activeTab === 'admit_cards' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between text-xs text-slate-300 px-1">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-white text-sm">Admit Cards & Hall Tickets</span>
+              <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold text-[11px] border border-amber-500/30">
+                {filteredAdmitCards.length} Active
+              </span>
+            </div>
+          </div>
+
+          {filteredAdmitCards.length === 0 ? (
+            <div className="glass-panel p-10 rounded-3xl border border-white/10 text-center space-y-3">
+              <AlertCircle className="h-8 w-8 text-amber-400 mx-auto" />
+              <div className="text-sm font-bold text-white">No Admit Cards Match Your Search</div>
+              <p className="text-xs text-slate-400">Check back shortly or clear search terms.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {filteredAdmitCards.map((ac) => (
+                <div
+                  key={ac.id}
+                  className="glass-panel p-4 rounded-3xl border border-white/10 hover:border-amber-500/35 transition-all flex flex-col justify-between gap-3 shadow-lg"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-1 text-[11px] text-amber-300 font-semibold">
+                      <span className="truncate">{ac.organization_name || 'Staff Selection / Board'}</span>
+                      <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/30 text-[10px]">
+                        {ac.release_date || 'Active'}
+                      </span>
+                    </div>
+
+                    <h4 className="text-sm font-bold text-white leading-snug line-clamp-2">
+                      {ac.title}
+                    </h4>
+
+                    {ac.advertisement_no && (
+                      <div className="text-[10px] text-slate-400 font-mono">
+                        Advt: {ac.advertisement_no}
+                      </div>
+                    )}
+
+                    <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5 space-y-1 text-xs">
+                      <div className="flex items-center gap-1.5 text-slate-300">
+                        <Calendar className="h-3.5 w-3.5 text-sky-400 shrink-0" />
+                        <span>Exam Date: <strong className="text-white">{ac.exam_date || 'Upcoming'}</strong></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-white/5">
+                    <a
+                      href={ac.download_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="w-full py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold border border-amber-500/40 flex items-center justify-center gap-1.5 transition-all shadow-md"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      <span>Download Admit Card / Hall Ticket ↗</span>
+                    </a>
+
+                    {ac.city_slip_url && (
+                      <a
+                        href={ac.city_slip_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="w-full py-1.5 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 text-xs font-semibold flex items-center justify-center gap-1 transition-all"
+                      >
+                        <MapPin className="h-3 w-3 text-sky-400" />
+                        <span>Check Exam City Intimation Slip ↗</span>
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* 5. TAB 3: ANSWER KEYS & OBJECTION TRACKER                     */}
+      {/* ------------------------------------------------------------- */}
+      {activeTab === 'answer_keys' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between text-xs text-slate-300 px-1">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-white text-sm">Official Answer Keys & Objections</span>
+              <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-semibold text-[11px] border border-purple-500/30">
+                {filteredAnswerKeys.length} Available
+              </span>
+            </div>
+          </div>
+
+          {filteredAnswerKeys.length === 0 ? (
+            <div className="glass-panel p-10 rounded-3xl border border-white/10 text-center space-y-3">
+              <AlertCircle className="h-8 w-8 text-purple-400 mx-auto" />
+              <div className="text-sm font-bold text-white">No Answer Keys Found</div>
+              <p className="text-xs text-slate-400">All live answer keys from database will appear here.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {filteredAnswerKeys.map((ak) => (
+                <div
+                  key={ak.id}
+                  className="glass-panel p-4 rounded-3xl border border-white/10 hover:border-purple-500/35 transition-all flex flex-col justify-between gap-3 shadow-lg"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-1 text-[11px] text-purple-300 font-semibold">
+                      <span className="truncate">{ak.organization_name || 'Staff Selection / Board'}</span>
+                      <span className="px-2 py-0.5 rounded-full bg-purple-500/20 border border-purple-500/30 text-[10px]">
+                        {ak.release_date || 'Released'}
+                      </span>
+                    </div>
+
+                    <h4 className="text-sm font-bold text-white leading-snug line-clamp-2">
+                      {ak.title}
+                    </h4>
+
+                    {ak.advertisement_no && (
+                      <div className="text-[10px] text-slate-400 font-mono">
+                        Advt: {ak.advertisement_no}
+                      </div>
+                    )}
+
+                    <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5 space-y-1 text-xs">
+                      <div className="flex items-center gap-1.5 text-slate-300">
+                        <Clock className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                        <span>Objection Last Date: <strong className="text-amber-300">{ak.objection_last_date || 'Check Notice'}</strong></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-white/5">
+                    <a
+                      href={ak.answer_key_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="w-full py-2 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 text-xs font-bold border border-purple-500/40 flex items-center justify-center gap-1.5 transition-all shadow-md"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      <span>Download Official Answer Key PDF ↗</span>
+                    </a>
+
+                    {ak.objection_url && (
+                      <a
+                        href={ak.objection_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="w-full py-1.5 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 text-xs font-semibold flex items-center justify-center gap-1 transition-all"
+                      >
+                        <HelpCircle className="h-3 w-3 text-amber-400" />
+                        <span>Submit Answer Key Objection ↗</span>
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* 5. TAB 4: DECLARED RESULTS & CUTOFFS                          */}
+      {/* ------------------------------------------------------------- */}
+      {activeTab === 'results' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between text-xs text-slate-300 px-1">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-white text-sm">Official Declared Results & Merit Lists</span>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold text-[11px] border border-emerald-500/30">
+                {filteredResults.length} Available
+              </span>
+            </div>
+          </div>
+
+          {filteredResults.length === 0 ? (
+            <div className="glass-panel p-10 rounded-3xl border border-white/10 text-center space-y-3">
+              <AlertCircle className="h-8 w-8 text-emerald-400 mx-auto" />
+              <div className="text-sm font-bold text-white">No Results Found</div>
+              <p className="text-xs text-slate-400">Newly declared results will synchronize here automatically.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {filteredResults.map((res) => (
+                <div
+                  key={res.id}
+                  className="glass-panel p-4 rounded-3xl border border-white/10 hover:border-emerald-500/35 transition-all flex flex-col justify-between gap-3 shadow-lg"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-1 text-[11px] text-emerald-300 font-semibold">
+                      <span className="truncate">{res.organization_name || 'Examination Board'}</span>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-[10px]">
+                        {res.declared_date || 'Declared'}
+                      </span>
+                    </div>
+
+                    <h4 className="text-sm font-bold text-white leading-snug line-clamp-2">
+                      {res.title}
+                    </h4>
+
+                    {res.cutoff_details && (
+                      <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-200">
+                        <strong className="block text-[10px] text-emerald-400 font-bold uppercase tracking-wider mb-0.5">
+                          Cutoff Details:
+                        </strong>
+                        {res.cutoff_details}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-white/5">
+                    <a
+                      href={res.result_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="w-full py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-bold border border-emerald-500/40 flex items-center justify-center gap-1.5 transition-all shadow-md"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      <span>Check Official Result / Scorecard ↗</span>
+                    </a>
+
+                    {res.merit_list_url && (
+                      <a
+                        href={res.merit_list_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="w-full py-1.5 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 text-xs font-semibold flex items-center justify-center gap-1 transition-all"
+                      >
+                        <FileText className="h-3 w-3 text-emerald-400" />
+                        <span>Download Merit List PDF ↗</span>
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* 5. TAB 5: OFFICIAL NOTIFICATIONS & CIRCULARS                  */}
+      {/* ------------------------------------------------------------- */}
+      {activeTab === 'notifications' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between text-xs text-slate-300 px-1">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-white text-sm">Official Notifications & Notices</span>
+              <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-semibold text-[11px] border border-rose-500/30">
+                {filteredNotifications.length} Published
+              </span>
+            </div>
+          </div>
+
+          {filteredNotifications.length === 0 ? (
+            <div className="glass-panel p-10 rounded-3xl border border-white/10 text-center space-y-3">
+              <AlertCircle className="h-8 w-8 text-rose-400 mx-auto" />
+              <div className="text-sm font-bold text-white">No Notices Match Your Search</div>
+              <p className="text-xs text-slate-400">Government gazettes and public circulars will show here.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {filteredNotifications.map((notif) => (
+                <div
+                  key={notif.id}
+                  className="glass-panel p-4 rounded-3xl border border-white/10 hover:border-rose-500/35 transition-all flex flex-col justify-between gap-3 shadow-lg"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-1 text-[11px] text-rose-300 font-semibold">
+                      <span className="truncate">{notif.organization_name || 'Govt Department'}</span>
+                      <span className="px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/30 text-[10px]">
+                        {notif.notification_type || 'NOTICE'}
+                      </span>
+                    </div>
+
+                    <h4 className="text-sm font-bold text-white leading-snug line-clamp-2">
+                      {notif.title}
+                    </h4>
+
+                    {notif.notification_no && (
+                      <div className="text-[10px] text-slate-400 font-mono">
+                        Ref No: {notif.notification_no}
+                      </div>
+                    )}
+
+                    {notif.description && (
+                      <p className="text-xs text-slate-300 line-clamp-2">
+                        {notif.description}
+                      </p>
+                    )}
+
+                    <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                      <Calendar className="h-3 w-3 text-sky-400" />
+                      <span>Date: {notif.notification_date || 'Recent'}</span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-white/5">
+                    <a
+                      href={notif.pdf_url || notif.official_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="w-full py-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-xs font-bold border border-rose-500/40 flex items-center justify-center gap-1.5 transition-all shadow-md"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      <span>Download Official Notice PDF ↗</span>
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ------------------------------------------------------------- */}
       {/* 6. MODAL: AI TARGET EXAM 30-DAY STUDY PLANNER                 */}

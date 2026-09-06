@@ -3,6 +3,9 @@ import {
   SarkariJob,
   SarkariAdmitCard,
   SarkariResult,
+  SarkariAnswerKey,
+  SarkariNotification,
+  SarkariLatestUpdate,
   SarkariRadarSyncStatus,
   SarkariTargetExamPlan,
 } from '../types';
@@ -11,6 +14,9 @@ const RENDER_BASE_URL = 'https://studymate-sarkari.onrender.com';
 const CACHE_KEY_JOBS = 'studymate_sarkari_radar_jobs';
 const CACHE_KEY_ADMIT_CARDS = 'studymate_sarkari_radar_admit_cards';
 const CACHE_KEY_RESULTS = 'studymate_sarkari_radar_results';
+const CACHE_KEY_ANSWER_KEYS = 'studymate_sarkari_radar_answer_keys';
+const CACHE_KEY_NOTIFICATIONS = 'studymate_sarkari_radar_notifications';
+const CACHE_KEY_LATEST_UPDATES = 'studymate_sarkari_radar_latest_updates';
 const CACHE_KEY_SYNC = 'studymate_sarkari_radar_sync';
 
 // Normalized fallback data ensuring instant zero-flicker preview if network is waking up
@@ -21,11 +27,15 @@ const VERIFIED_FALLBACK_JOBS: SarkariJob[] = [
     organization_name: 'Staff Selection Commission (SSC)',
     department: 'DoPT, Govt. of India',
     category: 'SSC',
+    scope: 'CENTRAL',
     total_vacancies: '14,800+ Posts',
     last_date: '2026-07-28',
+    application_last_date: '2026-07-28',
     qualification: 'Bachelor\'s Degree in any stream (Graduate)',
     apply_url: 'https://ssc.gov.in',
+    notification_url: 'https://ssc.gov.in/notices',
     notification_pdf_url: 'https://ssc.gov.in/notices',
+    official_website: 'https://ssc.gov.in',
     salary: 'Level 4 to Level 8 (₹25,500 - ₹1,51,100)',
     age_limit: '18 - 30/32 Years',
     exam_date: 'Sept 2026',
@@ -38,11 +48,15 @@ const VERIFIED_FALLBACK_JOBS: SarkariJob[] = [
     organization_name: 'Railway Recruitment Boards (RRB)',
     department: 'Ministry of Railways',
     category: 'Railway',
+    scope: 'CENTRAL',
     total_vacancies: '11,558 Posts',
     last_date: '2026-08-15',
+    application_last_date: '2026-08-15',
     qualification: '12th Pass / Graduate depending on level',
     apply_url: 'https://www.rrbapply.gov.in',
+    notification_url: 'https://indianrailways.gov.in',
     notification_pdf_url: 'https://indianrailways.gov.in',
+    official_website: 'https://www.rrbapply.gov.in',
     salary: 'Level 2 to Level 6 (₹19,900 - ₹35,400 Basic)',
     age_limit: '18 - 33 Years (Relaxation for OBC/SC/ST)',
     exam_date: 'Oct - Nov 2026',
@@ -55,11 +69,16 @@ const VERIFIED_FALLBACK_JOBS: SarkariJob[] = [
     organization_name: 'UPPRPB (Uttar Pradesh Police)',
     department: 'Police & Defence Services',
     category: 'Police',
+    scope: 'STATE',
+    state_name: 'Uttar Pradesh',
     total_vacancies: '3,800 Posts',
     last_date: '2026-08-05',
+    application_last_date: '2026-08-05',
     qualification: 'Graduate in any discipline',
     apply_url: 'https://uppbpb.gov.in',
+    notification_url: 'https://uppbpb.gov.in',
     notification_pdf_url: 'https://uppbpb.gov.in',
+    official_website: 'https://uppbpb.gov.in',
     salary: 'Pay Band 9300-34800, Grade Pay 4200',
     age_limit: '21 - 28 Years',
     exam_date: 'Nov 2026',
@@ -72,11 +91,15 @@ const VERIFIED_FALLBACK_JOBS: SarkariJob[] = [
     organization_name: 'Institute of Banking Personnel Selection',
     department: 'Participating Public Sector Banks',
     category: 'Banking',
+    scope: 'CENTRAL',
     total_vacancies: '4,455 Posts',
     last_date: '2026-08-21',
+    application_last_date: '2026-08-21',
     qualification: 'Graduation Degree from recognized University',
     apply_url: 'https://www.ibps.in',
+    notification_url: 'https://www.ibps.in',
     notification_pdf_url: 'https://www.ibps.in',
+    official_website: 'https://www.ibps.in',
     salary: 'Basic ₹36,000 + DA + HRA (In-hand ~₹54,000+)',
     age_limit: '20 - 30 Years',
     exam_date: 'October 2026',
@@ -89,11 +112,15 @@ const VERIFIED_FALLBACK_JOBS: SarkariJob[] = [
     organization_name: 'Staff Selection Commission (SSC)',
     department: 'Ministry of Home Affairs',
     category: 'Police',
+    scope: 'CENTRAL',
     total_vacancies: '39,481 Posts',
     last_date: '2026-09-02',
+    application_last_date: '2026-09-02',
     qualification: '10th Class (Matriculation) Pass',
     apply_url: 'https://ssc.gov.in',
+    notification_url: 'https://ssc.gov.in',
     notification_pdf_url: 'https://ssc.gov.in',
+    official_website: 'https://ssc.gov.in',
     salary: 'Pay Level 3 (₹21,700 - ₹69,100)',
     age_limit: '18 - 23 Years',
     exam_date: 'Dec 2026 - Jan 2027',
@@ -106,11 +133,15 @@ const VERIFIED_FALLBACK_JOBS: SarkariJob[] = [
     organization_name: 'Union Public Service Commission (UPSC)',
     department: 'Defence Services (IMA, INA, AFA, OTA)',
     category: 'UPSC',
+    scope: 'CENTRAL',
     total_vacancies: '459 Posts',
     last_date: '2026-07-20',
+    application_last_date: '2026-07-20',
     qualification: 'Graduate / Degree in Engineering',
     apply_url: 'https://upsconline.nic.in',
+    notification_url: 'https://upsc.gov.in',
     notification_pdf_url: 'https://upsc.gov.in',
+    official_website: 'https://upsc.gov.in',
     salary: 'Level 10 (Lieutenant / Sub Lieutenant)',
     age_limit: '19 - 24 Years',
     exam_date: 'Sept 01, 2026',
@@ -125,11 +156,14 @@ const VERIFIED_FALLBACK_ADMIT_CARDS: SarkariAdmitCard[] = [
     title: 'SSC CHSL 10+2 Tier 1 Admit Card & City Slip 2026',
     exam_name: 'SSC CHSL Tier 1',
     organization_name: 'Staff Selection Commission',
+    scope: 'CENTRAL',
     release_date: 'Live Now',
+    admit_card_release_date: '2026-07-10',
     exam_date: 'July 15 - July 26, 2026',
     download_url: 'https://ssc.gov.in',
     city_slip_url: 'https://ssc.gov.in',
-    status: 'ACTIVE',
+    official_website: 'https://ssc.gov.in',
+    status: 'RELEASED',
     created_at: new Date().toISOString(),
   },
   {
@@ -137,11 +171,14 @@ const VERIFIED_FALLBACK_ADMIT_CARDS: SarkariAdmitCard[] = [
     title: 'RRB Assistant Loco Pilot (ALP) CBT-1 Exam City Intimation',
     exam_name: 'RRB ALP CBT 1',
     organization_name: 'Railway Recruitment Boards',
+    scope: 'CENTRAL',
     release_date: 'Live Now',
+    admit_card_release_date: '2026-07-28',
     exam_date: 'August 05 - August 10, 2026',
     download_url: 'https://www.rrbapply.gov.in',
     city_slip_url: 'https://www.rrbapply.gov.in',
-    status: 'ACTIVE',
+    official_website: 'https://www.rrbapply.gov.in',
+    status: 'RELEASED',
     created_at: new Date().toISOString(),
   },
   {
@@ -149,10 +186,12 @@ const VERIFIED_FALLBACK_ADMIT_CARDS: SarkariAdmitCard[] = [
     title: 'IBPS Clerk XIV Prelims Call Letter & Admit Card',
     exam_name: 'IBPS Clerk XIV',
     organization_name: 'IBPS',
-    release_date: 'Available from July 22',
+    scope: 'CENTRAL',
+    release_date: 'Available Soon',
     exam_date: 'August 24 & 25, 2026',
     download_url: 'https://www.ibps.in',
-    status: 'SCHEDULED',
+    official_website: 'https://www.ibps.in',
+    status: 'UPCOMING',
     created_at: new Date().toISOString(),
   }
 ];
@@ -163,8 +202,11 @@ const VERIFIED_FALLBACK_RESULTS: SarkariResult[] = [
     title: 'UPSC Civil Services Prelims 2026 Official Result & Roll Number List',
     exam_name: 'UPSC CSE Prelims',
     organization_name: 'UPSC',
+    scope: 'CENTRAL',
     declared_date: 'Declared Today',
+    result_date: '2026-07-02',
     result_url: 'https://upsc.gov.in',
+    official_website: 'https://upsc.gov.in',
     cutoff_details: 'Cutoff Marks & Answer Key will be released after Final Marks declaration.',
     status: 'DECLARED',
     created_at: new Date().toISOString(),
@@ -174,11 +216,109 @@ const VERIFIED_FALLBACK_RESULTS: SarkariResult[] = [
     title: 'SSC CPO Sub-Inspector in Delhi Police & CAPFs Tier-2 Cutoff',
     exam_name: 'SSC CPO Tier 2',
     organization_name: 'Staff Selection Commission',
+    scope: 'CENTRAL',
     declared_date: 'Declared Recently',
+    result_date: '2026-06-28',
     result_url: 'https://ssc.gov.in',
+    official_website: 'https://ssc.gov.in',
     cutoff_details: 'Male Cutoff: 278.50 | Female Cutoff: 284.25',
     status: 'DECLARED',
     created_at: new Date().toISOString(),
+  }
+];
+
+const VERIFIED_FALLBACK_ANSWER_KEYS: SarkariAnswerKey[] = [
+  {
+    id: 'ak_ssc_cgl_tier1',
+    title: 'SSC CGL 2026 Tier 1 Tentative Answer Key & Response Sheet',
+    exam_name: 'SSC CGL Tier 1',
+    organization_name: 'Staff Selection Commission (SSC)',
+    scope: 'CENTRAL',
+    release_date: 'Available Now',
+    objection_last_date: '2026-09-12',
+    answer_key_url: 'https://ssc.gov.in',
+    official_website: 'https://ssc.gov.in',
+    status: 'RELEASED',
+    description: 'Candidates can inspect their computer-based answer sheet and submit challenges @ ₹100 per question.',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'ak_rrb_ntpc_cbt1',
+    title: 'RRB NTPC CEN 06/2026 CBT-1 Master Answer Key & Question Paper',
+    exam_name: 'RRB NTPC CBT 1',
+    organization_name: 'Railway Recruitment Boards',
+    scope: 'CENTRAL',
+    release_date: 'Live on Portal',
+    objection_last_date: '2026-09-18',
+    answer_key_url: 'https://www.rrbapply.gov.in',
+    official_website: 'https://www.rrbapply.gov.in',
+    status: 'RELEASED',
+    description: 'Official answer keys released across 21 RRBs with objection filing facility.',
+    created_at: new Date().toISOString(),
+  }
+];
+
+const VERIFIED_FALLBACK_NOTIFICATIONS: SarkariNotification[] = [
+  {
+    id: 'notif_ssc_calendar_2026',
+    title: 'SSC Annual Exam Calendar 2026-27 (CGL, CHSL, MTS, GD, CPO Revised Dates)',
+    organization_name: 'Staff Selection Commission',
+    scope: 'CENTRAL',
+    notification_type: 'IMPORTANT',
+    notification_date: '2026-09-01',
+    official_url: 'https://ssc.gov.in',
+    description: 'Complete scheduled examination timeline for 2026-2027 recruitments released officially.',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'notif_rrb_corrigendum',
+    title: 'Railway Recruitment Boards CEN Corrigendum on EWS/OBC Age Relaxation',
+    organization_name: 'Ministry of Railways',
+    scope: 'CENTRAL',
+    notification_type: 'CORRECTION',
+    notification_date: '2026-08-28',
+    official_url: 'https://indianrailways.gov.in',
+    description: 'Age relaxation guidelines revised for COVID-affected candidates across technical and non-technical cadres.',
+    created_at: new Date().toISOString(),
+  }
+];
+
+const VERIFIED_FALLBACK_LATEST_UPDATES: SarkariLatestUpdate[] = [
+  {
+    id: 'upd_1',
+    title: 'SSC CGL 2026 Online Application Window Active (14,800+ Vacancies)',
+    category: 'JOB',
+    scope: 'CENTRAL',
+    short_description: 'Last date to apply online is approaching. Register now on ssc.gov.in.',
+    published_at: new Date().toISOString(),
+    source_url: 'https://ssc.gov.in',
+  },
+  {
+    id: 'upd_2',
+    title: 'RRB Assistant Loco Pilot (ALP) CBT-1 Exam City Slips Released',
+    category: 'ADMIT_CARD',
+    scope: 'CENTRAL',
+    short_description: 'Check your exam city, date, and download travel pass if eligible.',
+    published_at: new Date().toISOString(),
+    source_url: 'https://www.rrbapply.gov.in',
+  },
+  {
+    id: 'upd_3',
+    title: 'UPSC Civil Services Prelims 2026 Official Result Declared',
+    category: 'RESULT',
+    scope: 'CENTRAL',
+    short_description: 'Roll number wise qualified list for Civil Services Mains available on upsc.gov.in.',
+    published_at: new Date().toISOString(),
+    source_url: 'https://upsc.gov.in',
+  },
+  {
+    id: 'upd_4',
+    title: 'SSC CHSL 10+2 Tier 1 Provisional Answer Key & Objection Tracker Live',
+    category: 'ANSWER_KEY',
+    scope: 'CENTRAL',
+    short_description: 'Candidates can challenge official answer keys online.',
+    published_at: new Date().toISOString(),
+    source_url: 'https://ssc.gov.in',
   }
 ];
 
@@ -275,28 +415,46 @@ export function calculateDaysRemaining(lastDateStr: string): {
 
 // Normalize raw job record from database or REST API
 function normalizeJob(raw: any, index: number): SarkariJob {
+  const lastDate = raw.application_last_date || raw.last_date || raw.application_deadline || raw.end_date || '';
+  const startDate = raw.application_start_date || raw.start_date || '';
+  const vacancies = raw.total_vacancies != null ? String(raw.total_vacancies) : (raw.vacancies || raw.total_posts || raw.posts_count || 'Check Notification');
+  const orgName = raw.organization_name || raw.department || raw.org || raw.agency || 'Govt Department';
+  const applyUrl = raw.apply_url || raw.apply_online_url || raw.official_website || raw.official_url || 'https://www.google.com';
+  const notifUrl = raw.notification_url || raw.notification_pdf_url || raw.pdf_url || raw.notice_url;
+
   return {
     id: String(raw.id || raw.job_id || `job_${index}_${Date.now()}`),
     title: raw.title || raw.job_title || raw.post_name || 'Government Vacancy',
-    organization_name:
-      raw.organization_name || raw.department || raw.org || raw.agency || 'Govt Department',
-    department: raw.department || raw.ministry || raw.organization_name || '',
+    slug: raw.slug,
+    advertisement_no: raw.advertisement_no || raw.notification_no,
+    organization_name: orgName,
+    department: raw.department || raw.ministry || orgName,
     category: raw.category || raw.exam_category || 'Other',
-    total_vacancies:
-      raw.total_vacancies || raw.vacancies || raw.total_posts || raw.posts_count || 'Check Notification',
-    last_date: raw.last_date || raw.application_deadline || raw.end_date || '',
+    scope: raw.scope || (raw.state_name || raw.state_id ? 'STATE' : 'CENTRAL'),
+    state_name: raw.state_name,
+    total_vacancies: isNaN(Number(vacancies)) ? vacancies : `${Number(vacancies).toLocaleString('en-IN')} Posts`,
+    last_date: lastDate,
+    application_last_date: lastDate,
+    application_start_date: startDate,
     qualification:
       raw.qualification ||
       raw.eligibility ||
       raw.education ||
-      'Refer to official notice for eligibility',
-    apply_url: raw.apply_url || raw.apply_online_url || raw.official_url || 'https://www.google.com',
-    notification_pdf_url: raw.notification_pdf_url || raw.pdf_url || raw.notice_url,
-    salary: raw.salary || raw.pay_scale || raw.salary_pay_scale || 'As per 7th CPC',
+      'Refer to official notification for detailed eligibility',
+    apply_url: applyUrl,
+    notification_url: notifUrl,
+    notification_pdf_url: notifUrl,
+    official_website: raw.official_website || raw.official_url,
+    syllabus_url: raw.syllabus_url,
+    salary: raw.salary || raw.pay_scale || raw.salary_pay_scale || 'As per 7th CPC / State Pay Scales',
     salary_pay_scale: raw.salary_pay_scale || raw.salary || '',
-    age_limit: raw.age_limit || raw.age || '18 - 30 Years (Standard Relaxation)',
+    age_limit: raw.age_limit || raw.age || '18 - 30 Years (Age relaxation applicable)',
     exam_date: raw.exam_date || raw.tentative_exam_date || '',
     description: raw.description || raw.summary || '',
+    status: raw.status || 'ACTIVE',
+    is_featured: raw.is_featured || false,
+    is_trending: raw.is_trending || false,
+    views_count: raw.views_count,
     created_at: raw.created_at || raw.posted_at || new Date().toISOString(),
   };
 }
@@ -305,14 +463,20 @@ function normalizeJob(raw: any, index: number): SarkariJob {
 function normalizeAdmitCard(raw: any, index: number): SarkariAdmitCard {
   return {
     id: String(raw.id || `ac_${index}_${Date.now()}`),
+    job_id: raw.job_id != null ? String(raw.job_id) : undefined,
     title: raw.title || raw.exam_name || 'Admit Card Alert',
     exam_name: raw.exam_name || raw.title || '',
+    advertisement_no: raw.advertisement_no,
     organization_name: raw.organization_name || raw.department || '',
-    release_date: raw.release_date || raw.date || 'Available Now',
+    scope: raw.scope,
+    release_date: raw.release_date || raw.admit_card_release_date || raw.date || 'Available Now',
+    admit_card_release_date: raw.admit_card_release_date || raw.release_date,
     exam_date: raw.exam_date || 'Upcoming',
     download_url: raw.download_url || raw.link || raw.apply_url || 'https://www.google.com',
     city_slip_url: raw.city_slip_url,
-    status: raw.status || 'ACTIVE',
+    instructions_url: raw.instructions_url,
+    official_website: raw.official_website,
+    status: raw.status || 'RELEASED',
     created_at: raw.created_at || new Date().toISOString(),
   };
 }
@@ -321,33 +485,98 @@ function normalizeAdmitCard(raw: any, index: number): SarkariAdmitCard {
 function normalizeResult(raw: any, index: number): SarkariResult {
   return {
     id: String(raw.id || `res_${index}_${Date.now()}`),
+    job_id: raw.job_id != null ? String(raw.job_id) : undefined,
     title: raw.title || raw.exam_name || 'Result Declared',
     exam_name: raw.exam_name || raw.title || '',
+    advertisement_no: raw.advertisement_no,
     organization_name: raw.organization_name || raw.department || '',
-    declared_date: raw.declared_date || raw.date || 'Recently Declared',
+    scope: raw.scope,
+    declared_date: raw.declared_date || raw.result_date || raw.date || 'Recently Declared',
+    result_date: raw.result_date || raw.declared_date,
     result_url: raw.result_url || raw.link || 'https://www.google.com',
+    merit_list_url: raw.merit_list_url,
+    cutoff_url: raw.cutoff_url,
     cutoff_details: raw.cutoff_details || raw.cutoff || '',
+    official_website: raw.official_website,
     status: raw.status || 'DECLARED',
     created_at: raw.created_at || new Date().toISOString(),
+  };
+}
+
+// Normalize raw answer key
+function normalizeAnswerKey(raw: any, index: number): SarkariAnswerKey {
+  return {
+    id: String(raw.id || `ak_${index}_${Date.now()}`),
+    job_id: raw.job_id != null ? String(raw.job_id) : undefined,
+    title: raw.title || raw.exam_name || 'Answer Key Released',
+    exam_name: raw.exam_name || raw.title || '',
+    advertisement_no: raw.advertisement_no,
+    organization_name: raw.organization_name || raw.department || '',
+    scope: raw.scope,
+    release_date: raw.release_date || raw.date || 'Available Now',
+    objection_start_date: raw.objection_start_date,
+    objection_last_date: raw.objection_last_date,
+    answer_key_url: raw.answer_key_url || raw.download_url || raw.link || 'https://www.google.com',
+    objection_url: raw.objection_url,
+    official_website: raw.official_website,
+    status: raw.status || 'RELEASED',
+    description: raw.description,
+    created_at: raw.created_at || new Date().toISOString(),
+  };
+}
+
+// Normalize raw notification
+function normalizeNotification(raw: any, index: number): SarkariNotification {
+  return {
+    id: String(raw.id || `notif_${index}_${Date.now()}`),
+    job_id: raw.job_id != null ? String(raw.job_id) : undefined,
+    title: raw.title || 'Official Notification',
+    notification_no: raw.notification_no || raw.advertisement_no,
+    organization_name: raw.organization_name || raw.department,
+    scope: raw.scope,
+    notification_type: raw.notification_type || 'IMPORTANT',
+    notification_date: raw.notification_date || raw.date || raw.created_at?.slice(0, 10),
+    official_url: raw.official_url || raw.link || 'https://www.google.com',
+    pdf_url: raw.pdf_url,
+    description: raw.description,
+    status: raw.status || 'ACTIVE',
+    created_at: raw.created_at || new Date().toISOString(),
+  };
+}
+
+// Normalize raw latest update
+function normalizeLatestUpdate(raw: any, index: number): SarkariLatestUpdate {
+  return {
+    id: String(raw.id || `upd_${index}_${Date.now()}`),
+    title: raw.title || 'Latest Update',
+    category: raw.update_type || raw.category || 'JOB',
+    scope: raw.scope,
+    short_description: raw.short_description || raw.description,
+    published_at: raw.published_at || raw.created_at || new Date().toISOString(),
+    source_url: raw.target_url || raw.source_url || raw.link,
+    badge: raw.badge,
   };
 }
 
 /**
  * SarkariRadarService
  * Multi-layer architecture:
- * 1. Direct Supabase Query (jobs / active_jobs, admit_cards, results)
+ * 1. Direct Supabase Query (jobs / active_jobs, admit_cards, results, answer_keys, notifications, latest_updates)
  * 2. Render Live Feed REST API (https://studymate-sarkari.onrender.com/api/live-feed)
- * 3. Express Server Proxy fallback (/api/sarkari/*)
+ * 3. Express Server Proxy fallback (/api/sarkari/live-feed)
  * 4. LocalStorage Cache with instant optimistic render
  */
 export class SarkariRadarService {
   /**
-   * Fetch all live vacancies, admit cards, and results
+   * Fetch all live vacancies, admit cards, results, answer keys, notifications, and latest updates
    */
   static async fetchAllRadarData(): Promise<{
     jobs: SarkariJob[];
     admitCards: SarkariAdmitCard[];
     results: SarkariResult[];
+    answerKeys: SarkariAnswerKey[];
+    notifications: SarkariNotification[];
+    latestUpdates: SarkariLatestUpdate[];
     syncStatus: SarkariRadarSyncStatus;
   }> {
     let source: 'supabase' | 'render_api' | 'cached_local' = 'cached_local';
@@ -356,62 +585,128 @@ export class SarkariRadarService {
     let fetchedJobs: SarkariJob[] = [];
     let fetchedAdmitCards: SarkariAdmitCard[] = [];
     let fetchedResults: SarkariResult[] = [];
+    let fetchedAnswerKeys: SarkariAnswerKey[] = [];
+    let fetchedNotifications: SarkariNotification[] = [];
+    let fetchedLatestUpdates: SarkariLatestUpdate[] = [];
     let errorMsg: string | undefined;
 
     // 1. Try Direct Supabase Connection
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        // Query 'jobs' or 'active_jobs' view
-        const { data: jobsData, error: jobsError } = await supabase
-          .from('jobs')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(50);
+        // Query 1: jobs (try active_jobs view first, fallback to jobs table)
+        let jobsData: any[] | null = null;
+        try {
+          const res = await supabase
+            .from('active_jobs')
+            .select('*')
+            .order('published_at', { ascending: false })
+            .limit(50);
+          if (!res.error && res.data && res.data.length > 0) {
+            jobsData = res.data;
+          }
+        } catch {
+          // fallback to table
+        }
 
-        if (!jobsError && jobsData && jobsData.length > 0) {
+        if (!jobsData) {
+          const res = await supabase
+            .from('jobs')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(50);
+          if (!res.error && res.data && res.data.length > 0) {
+            jobsData = res.data;
+          }
+        }
+
+        if (jobsData && jobsData.length > 0) {
           fetchedJobs = jobsData.map((item: any, i: number) => normalizeJob(item, i));
           isConnected = true;
           source = 'supabase';
           sourceLabel = '🟢 Live Connected to StudyMate Sarkari Database (Supabase)';
 
-          // Also fetch admit_cards
+          // Query 2: admit_cards
           try {
             const { data: acData } = await supabase
               .from('admit_cards')
               .select('*')
               .order('created_at', { ascending: false })
-              .limit(20);
+              .limit(25);
             if (acData && acData.length > 0) {
               fetchedAdmitCards = acData.map((item: any, i: number) => normalizeAdmitCard(item, i));
             }
-          } catch {
-            // non-blocking
-          }
+          } catch {}
 
-          // Also fetch results
+          // Query 3: results
           try {
             const { data: resData } = await supabase
               .from('results')
               .select('*')
               .order('created_at', { ascending: false })
-              .limit(20);
+              .limit(25);
             if (resData && resData.length > 0) {
               fetchedResults = resData.map((item: any, i: number) => normalizeResult(item, i));
             }
-          } catch {
-            // non-blocking
-          }
+          } catch {}
+
+          // Query 4: answer_keys
+          try {
+            const { data: akData } = await supabase
+              .from('answer_keys')
+              .select('*')
+              .order('created_at', { ascending: false })
+              .limit(25);
+            if (akData && akData.length > 0) {
+              fetchedAnswerKeys = akData.map((item: any, i: number) => normalizeAnswerKey(item, i));
+            }
+          } catch {}
+
+          // Query 5: notifications
+          try {
+            const { data: notifData } = await supabase
+              .from('notifications')
+              .select('*')
+              .order('created_at', { ascending: false })
+              .limit(25);
+            if (notifData && notifData.length > 0) {
+              fetchedNotifications = notifData.map((item: any, i: number) => normalizeNotification(item, i));
+            }
+          } catch {}
+
+          // Query 6: latest_updates (try active_latest_updates first)
+          try {
+            let luData: any[] | null = null;
+            const res = await supabase
+              .from('active_latest_updates')
+              .select('*')
+              .order('published_at', { ascending: false })
+              .limit(30);
+            if (!res.error && res.data && res.data.length > 0) {
+              luData = res.data;
+            } else {
+              const res2 = await supabase
+                .from('latest_updates')
+                .select('*')
+                .order('published_at', { ascending: false })
+                .limit(30);
+              if (!res2.error && res2.data && res2.data.length > 0) {
+                luData = res2.data;
+              }
+            }
+            if (luData && luData.length > 0) {
+              fetchedLatestUpdates = luData.map((item: any, i: number) => normalizeLatestUpdate(item, i));
+            }
+          } catch {}
         }
       } catch (sbErr: any) {
-        console.warn('Supabase query failed, falling back to Render API:', sbErr?.message);
+        console.warn('Supabase query failed, falling back to live-feed API:', sbErr?.message);
       }
     }
 
-    // 2. If Supabase didn't return jobs, try Render Live Feed API
+    // 2. If Supabase didn't return jobs, try server proxy (/api/sarkari/live-feed)
     if (fetchedJobs.length === 0) {
       try {
-        // First try server proxy to prevent CORS issues
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 8000);
 
@@ -431,6 +726,15 @@ export class SarkariRadarService {
             fetchedResults = Array.isArray(payload.results)
               ? payload.results.map((r: any, i: number) => normalizeResult(r, i))
               : [];
+            fetchedAnswerKeys = Array.isArray(payload.answerKeys)
+              ? payload.answerKeys.map((ak: any, i: number) => normalizeAnswerKey(ak, i))
+              : [];
+            fetchedNotifications = Array.isArray(payload.notifications)
+              ? payload.notifications.map((n: any, i: number) => normalizeNotification(n, i))
+              : [];
+            fetchedLatestUpdates = Array.isArray(payload.latestUpdates)
+              ? payload.latestUpdates.map((lu: any, i: number) => normalizeLatestUpdate(lu, i))
+              : [];
             isConnected = true;
             source = 'render_api';
             sourceLabel = '🟢 Live Connected to StudyMate Sarkari Database';
@@ -441,7 +745,7 @@ export class SarkariRadarService {
       }
     }
 
-    // 3. If still empty, try direct fetch from Render public endpoint
+    // 3. Direct Render public endpoint fallback if server proxy was unreached
     if (fetchedJobs.length === 0) {
       try {
         const controller = new AbortController();
@@ -470,6 +774,21 @@ export class SarkariRadarService {
           if (payload.results) {
             fetchedResults = payload.results.map((r: any, i: number) => normalizeResult(r, i));
           }
+          if (payload.answer_keys || payload.answerKeys) {
+            fetchedAnswerKeys = (payload.answer_keys || payload.answerKeys).map(
+              (ak: any, i: number) => normalizeAnswerKey(ak, i)
+            );
+          }
+          if (payload.notifications) {
+            fetchedNotifications = payload.notifications.map(
+              (n: any, i: number) => normalizeNotification(n, i)
+            );
+          }
+          if (payload.latest_updates || payload.latestUpdates) {
+            fetchedLatestUpdates = (payload.latest_updates || payload.latestUpdates).map(
+              (lu: any, i: number) => normalizeLatestUpdate(lu, i)
+            );
+          }
         }
       } catch (directErr: any) {
         console.warn('Direct render endpoint attempt:', directErr?.message);
@@ -487,6 +806,15 @@ export class SarkariRadarService {
         if (fetchedResults.length > 0) {
           localStorage.setItem(CACHE_KEY_RESULTS, JSON.stringify(fetchedResults));
         }
+        if (fetchedAnswerKeys.length > 0) {
+          localStorage.setItem(CACHE_KEY_ANSWER_KEYS, JSON.stringify(fetchedAnswerKeys));
+        }
+        if (fetchedNotifications.length > 0) {
+          localStorage.setItem(CACHE_KEY_NOTIFICATIONS, JSON.stringify(fetchedNotifications));
+        }
+        if (fetchedLatestUpdates.length > 0) {
+          localStorage.setItem(CACHE_KEY_LATEST_UPDATES, JSON.stringify(fetchedLatestUpdates));
+        }
       } catch {
         // non-blocking
       }
@@ -496,16 +824,16 @@ export class SarkariRadarService {
         const cachedJobs = localStorage.getItem(CACHE_KEY_JOBS);
         const cachedAc = localStorage.getItem(CACHE_KEY_ADMIT_CARDS);
         const cachedRes = localStorage.getItem(CACHE_KEY_RESULTS);
+        const cachedAk = localStorage.getItem(CACHE_KEY_ANSWER_KEYS);
+        const cachedNotif = localStorage.getItem(CACHE_KEY_NOTIFICATIONS);
+        const cachedLu = localStorage.getItem(CACHE_KEY_LATEST_UPDATES);
 
-        if (cachedJobs) {
-          fetchedJobs = JSON.parse(cachedJobs);
-        }
-        if (cachedAc) {
-          fetchedAdmitCards = JSON.parse(cachedAc);
-        }
-        if (cachedRes) {
-          fetchedResults = JSON.parse(cachedRes);
-        }
+        if (cachedJobs) fetchedJobs = JSON.parse(cachedJobs);
+        if (cachedAc) fetchedAdmitCards = JSON.parse(cachedAc);
+        if (cachedRes) fetchedResults = JSON.parse(cachedRes);
+        if (cachedAk) fetchedAnswerKeys = JSON.parse(cachedAk);
+        if (cachedNotif) fetchedNotifications = JSON.parse(cachedNotif);
+        if (cachedLu) fetchedLatestUpdates = JSON.parse(cachedLu);
       } catch {
         // non-blocking
       }
@@ -522,6 +850,15 @@ export class SarkariRadarService {
       if (fetchedResults.length === 0) {
         fetchedResults = VERIFIED_FALLBACK_RESULTS;
       }
+      if (fetchedAnswerKeys.length === 0) {
+        fetchedAnswerKeys = VERIFIED_FALLBACK_ANSWER_KEYS;
+      }
+      if (fetchedNotifications.length === 0) {
+        fetchedNotifications = VERIFIED_FALLBACK_NOTIFICATIONS;
+      }
+      if (fetchedLatestUpdates.length === 0) {
+        fetchedLatestUpdates = VERIFIED_FALLBACK_LATEST_UPDATES;
+      }
     }
 
     const syncStatus: SarkariRadarSyncStatus = {
@@ -532,6 +869,9 @@ export class SarkariRadarService {
       jobsCount: fetchedJobs.length,
       admitCardsCount: fetchedAdmitCards.length,
       resultsCount: fetchedResults.length,
+      answerKeysCount: fetchedAnswerKeys.length,
+      notificationsCount: fetchedNotifications.length,
+      latestUpdatesCount: fetchedLatestUpdates.length,
       error: errorMsg,
     };
 
@@ -545,6 +885,9 @@ export class SarkariRadarService {
       jobs: fetchedJobs,
       admitCards: fetchedAdmitCards,
       results: fetchedResults,
+      answerKeys: fetchedAnswerKeys,
+      notifications: fetchedNotifications,
+      latestUpdates: fetchedLatestUpdates,
       syncStatus,
     };
   }
